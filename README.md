@@ -40,10 +40,13 @@ Se conectar direto ao repositório Git, use:
 O workflow já está no repositório em `.github/workflows/deploy.yml`: a cada push na `main`
 ele roda `npm ci`, `npm run build` e publica a pasta `dist`.
 
-> **Importante:** o GitHub Pages deve estar em *Settings → Pages → Source: **GitHub Actions***.
-> Publicar a raiz do repositório ("Deploy from a branch") **não funciona**, porque a raiz contém
-> o código-fonte do Vite (`index.html` apontando para `/src/main.tsx`), e não o site já compilado.
-> O navegador não executa `.tsx` nem resolve os pacotes do `node_modules` — a página abre em branco.
+Ele também **configura a origem do Pages sozinho** para "GitHub Actions" — a origem antiga
+("Deploy from a branch") publica a raiz do repositório, que contém o código-fonte do Vite
+(`index.html` apontando para `/src/main.tsx`) em vez do site compilado. O navegador não executa
+`.tsx` nem resolve os pacotes do `node_modules` — a página abre em branco.
+
+> Se o log do workflow mostrar o aviso *"Não foi possível trocar a origem do Pages
+> automaticamente"*, faça uma vez em **Settings → Pages → Source: GitHub Actions**.
 
 ---
 

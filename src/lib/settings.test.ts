@@ -96,3 +96,34 @@ describe("maxZoomFor", () => {
     }
   });
 });
+
+describe("campos da cartela", () => {
+  it("nasce vazia: nada entra sozinho no vídeo", () => {
+    expect(DEFAULT_SETTINGS.cardDistance).toBe("");
+    expect(DEFAULT_SETTINGS.cardElevation).toBe("");
+    expect(DEFAULT_SETTINGS.cardTime).toBe("");
+    expect(DEFAULT_SETTINGS.cardNote).toBe("");
+  });
+
+  it("aceita texto nos quatro campos", () => {
+    const s = sanitizeSettings({
+      cardDistance: "49 km",
+      cardElevation: "+1.676 m",
+      cardTime: "3 h 19 min",
+      cardNote: "com os amigos",
+    });
+    expect(s.cardDistance).toBe("49 km");
+    expect(s.cardElevation).toBe("+1.676 m");
+    expect(s.cardTime).toBe("3 h 19 min");
+    expect(s.cardNote).toBe("com os amigos");
+  });
+
+  it("descarta o que não for texto", () => {
+    const s = sanitizeSettings({
+      cardDistance: 42 as unknown as string,
+      cardElevation: null as unknown as string,
+    });
+    expect(s.cardDistance).toBeUndefined();
+    expect(s.cardElevation).toBeUndefined();
+  });
+});

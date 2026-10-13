@@ -8,7 +8,12 @@ import type { Place } from "../lib/geocode";
 import type { Poi } from "../lib/pois";
 import { Button, Label, Section, Segmented, Slider, TextInput, Toggle } from "./ui";
 import { ASPECTS, MAX_WAYPOINTS, type AspectId, type Settings } from "../lib/settings";
-import { summaryDate, summaryTiles, type RideSummary } from "../lib/stats";
+import {
+  cardSuggestions,
+  type CardFields,
+  type EndCard,
+  type RideSummary,
+} from "../lib/stats";
 import { PROFILES, PRESETS, type Profile, type Preset } from "../lib/routing";
 import { BASEMAPS, BASEMAP_ORDER } from "../lib/tiles";
 import { findCharacter } from "../lib/characters";
@@ -60,8 +65,10 @@ type Props = {
   onExportGpx: () => void;
   /** retorno da importação, para mostrar erro ou resumo */
   gpxMsg: { tipo: "erro" | "info"; texto: string } | null;
-  /** números que vão para a cartela do fim do vídeo */
+  /** o que o arquivo mediu (sugestões e contagem) */
   resumo: RideSummary;
+  /** a cartela montada com o que foi digitado — null quando não há nada */
+  cartela: EndCard | null;
 };
 
 function Sidebar(props: Props) {
@@ -92,6 +99,7 @@ function Sidebar(props: Props) {
     onEndpoints,
     loading,
     resumo,
+    cartela,
     formats,
     hasRoute,
     maxZoom,
@@ -475,7 +483,12 @@ function Sidebar(props: Props) {
               onChange={(v) => update("endCard", v)}
             />
           </div>
-          <ResumoFinal resumo={resumo} />
+          <CartelaFinal
+            resumo={resumo}
+            cartela={cartela}
+            settings={s}
+            update={update}
+          />
           <Button variant="soft" onClick={onReplay} disabled={!hasRoute} className="w-full">
             ▶︎ Pré-visualizar animação
           </Button>
@@ -629,42 +642,122 @@ function Sidebar(props: Props) {
 }
 
 /**
- * Prévia da cartela final.
+ * Cartela final: campos digitáveis + prévia do que o vídeo vai mostrar.
  *
- * Mostra exatamente os mesmos números que o vídeo vai mostrar — inclusive
- * escondendo elevação e tempo quando o arquivo não os tem —, para não haver
- * surpresa no vídeo exportado.
+ * Os números **não** entram sozinhos: quem escreve é você, e o valor que o
+ * arquivo mediu aparece como dica ao lado (o botão abaixo copia tudo de uma
+ * vez, para não ter que digitar olhando o Strava). É o que permite uma cartela
+ * numa rota desenhada à mão, que não tem arquivo nenhum para medir.
  */
-function ResumoFinal({ resumo }: { resumo: RideSummary }) {
-  const tiras = summaryTiles(resumo);
-  const data = summaryDate(resumo);
-  if (resumo.distanceM <= 0) return null;
+function CartelaFinal({
+  resumo,
+  cartela,
+  settings: s,
+  update,
+}: {
+  resumo: RideSummary;
+  cartela: EndCard | null;
+  settings: Settings;
+  update: <K extends keyof Settings>(key: K, value: Settings[K]) => void;
+}) {
+  const sugestao = cardSuggestions(resumo);
+  const camposPreenchidos =
+    s.cardDistance.trim() || s.cardElevation.trim() || s.cardTime.trim() || s.cardNote.trim();
+
+  /** Uma linha: campo + o valor que o arquivo mediu (quando há). */
+  const Campo = ({
+    chave,
+    rotulo,
+    dica,
+    placeholder,
+  }: {
+    chave: keyof CardFields;
+    rotulo: string;
+    dica: string | null;
+    placeholder: string;
+  }) => (
+    <div className="flex items-center gap-2">
+      <span className="w-[74px] shrink-0 text-[11px] text-zinc-400">{rotulo}</span>
+      <TextInput
+        value={s[chave]}
+        onChange={(v) => update(chave, v)}
+        placeholder={placeholder}
+        maxLength={40}
+      />
+      {dica && <span className="w-[68px] shrink-0 text-right text-[10.5px] text-zinc-500">{dica}</span>}
+    </div>
+  );
 
   return (
     <div className="rounded-xl border border-white/10 bg-black/30 p-3">
       <div className="flex items-center justify-between text-[12px]">
         <span className="text-zinc-400">🏁 Cartela final</span>
         <span className="text-[11px] text-zinc-500">
-          {resumo.time ? "com data e tempo" : "só o que o arquivo traz"}
+          {camposPreenchidos ? "aparece no fim do vídeo" : "não aparece"}
         </span>
       </div>
-      <div className="mt-2 flex items-baseline justify-between gap-2">
-        {tiras.map((t) => (
-          <div key={t.label} className="text-center">
-            <div className="text-[15px] font-extrabold leading-tight text-white">
-              {t.value}
-            </div>
-            <div className="text-[9.5px] font-semibold uppercase tracking-wide text-zinc-500">
-              {t.label}
-            </div>
-          </div>
-        ))}
+
+      <div className="mt-2 flex flex-col gap-1.5">
+        <Campo
+          chave="cardDistance"
+          rotulo="Distância"
+          dica={sugestao.distance}
+          placeholder="ex.: 49 km"
+        />
+        <Campo
+          chave="cardElevation"
+          rotulo="Elevação"
+          dica={sugestao.elevation}
+          placeholder="ex.: +1.676 m"
+        />
+        <Campo chave="cardTime" rotulo="Tempo" dica={sugestao.time} placeholder="ex.: 3 h 19 min" />
+        <Campo
+          chave="cardNote"
+          rotulo="Embaixo"
+          dica={null}
+          placeholder={sugestao.date ? `vazio = ${sugestao.date}` : "ex.: com os amigos do pedal"}
+        />
       </div>
-      {data && <p className="mt-1.5 text-center text-[10.5px] text-zinc-500">{data}</p>}
-      {!resumo.elevation && (
+
+      {(sugestao.distance || sugestao.elevation || sugestao.time || sugestao.date) && (
+        <button
+          type="button"
+          onClick={() => {
+            if (sugestao.distance) update("cardDistance", sugestao.distance);
+            if (sugestao.elevation) update("cardElevation", sugestao.elevation);
+            if (sugestao.time) update("cardTime", sugestao.time);
+            if (sugestao.date) update("cardNote", sugestao.date);
+          }}
+          className="mt-2 w-full rounded-lg border border-white/15 bg-white/5 px-2 py-1.5 text-[11px] text-zinc-300 transition hover:bg-white/10"
+        >
+          ↓ usar os números do arquivo
+        </button>
+      )}
+
+      {cartela && cartela.tiles.length > 0 && (
+        <div className="mt-2.5 rounded-lg border border-white/10 bg-black/40 px-3 py-2">
+          <div className="flex flex-wrap items-baseline justify-center gap-x-4 gap-y-1">
+            {cartela.tiles.map((t) => (
+              <div key={t.label} className="text-center">
+                <div className="text-[15px] font-extrabold leading-tight text-white">
+                  {t.value}
+                </div>
+                <div className="text-[9.5px] font-semibold uppercase tracking-wide text-zinc-500">
+                  {t.label}
+                </div>
+              </div>
+            ))}
+          </div>
+          {cartela.note && (
+            <p className="mt-1 text-center text-[10.5px] text-zinc-400">{cartela.note}</p>
+          )}
+        </div>
+      )}
+
+      {!resumo.elevation && !resumo.time && (
         <p className="mt-2 text-[10.5px] leading-snug text-zinc-500">
-          📂 Importe um GPX de GPS (Strava, Garmin…) para incluir <b>elevação</b> e{" "}
-          <b>tempo</b> na cartela — o arquivo traz a altitude de cada ponto.
+          Sem arquivo de GPS, os campos ficam por sua conta. Importe um GPX (📂) e as
+          dicas ao lado aparecem com distância, elevação e tempo para copiar.
         </p>
       )}
     </div>

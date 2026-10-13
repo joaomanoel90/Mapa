@@ -14,7 +14,7 @@ import {
   type Settings,
 } from "./lib/settings";
 import { pinsAsDots } from "./lib/pins";
-import { rideSummary, summaryTiles } from "./lib/stats";
+import { endCard, rideSummary } from "./lib/stats";
 import {
   buildTrack,
   formatDistance,
@@ -282,7 +282,25 @@ function App() {
     () => rideSummary(rawTrack ?? track.pts, track.total),
     [rawTrack, track],
   );
-  const cartela = useMemo(() => summaryTiles(resumo), [resumo]);
+  const cartela = useMemo(
+    () =>
+      endCard(
+        {
+          cardDistance: settings.cardDistance,
+          cardElevation: settings.cardElevation,
+          cardTime: settings.cardTime,
+          cardNote: settings.cardNote,
+        },
+        resumo,
+      ),
+    [
+      settings.cardDistance,
+      settings.cardElevation,
+      settings.cardTime,
+      settings.cardNote,
+      resumo,
+    ],
+  );
 
   /* reinicia a animação quando a rota muda */
   /**
@@ -963,6 +981,7 @@ function App() {
             onEndpoints={setEndpoints}
             loading={loading}
             resumo={resumo}
+            cartela={cartela}
             formats={formats}
             hasRoute={hasRoute}
             maxZoom={maxZoom}

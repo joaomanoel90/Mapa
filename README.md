@@ -131,7 +131,7 @@ remover um ponto, o roteador volta a mandar.
 
 ### Cartela final
 
-Nos últimos segundos do vídeo aparece um resumo do percurso:
+Nos últimos segundos do vídeo pode aparecer um resumo do percurso:
 
 ```
       49 km          +1.676 m        3 h 19 min
@@ -139,29 +139,41 @@ Nos últimos segundos do vídeo aparece um resumo do percurso:
               13 de outubro de 2026
 ```
 
-Cada número vem do **próprio arquivo** — distância do traçado, elevação do `<ele>`,
-tempo e data do `<time>`, os dois últimos campos que o Strava e o Garmin gravam em
-todo ponto e que antes eram ignorados. Se o arquivo não tiver altitude, a coluna
-some; numa rota desenhada à mão sobra só a distância, em vez de aparecer um zero
-sem significado. O botão 🏁 no painel liga e desliga, e o painel mostra os mesmos
-números antes de exportar.
+**Os números são escritos por você**, no painel — o arquivo importado só
+*serve de dica*. Cada campo mostra ao lado o que o arquivo mediu, e o botão
+**"↓ usar os números do arquivo"** copia tudo de uma vez, para não ter que
+digitar olhando o Strava.
 
-**A subida acumulada passa por um corte de ruído.** O altímetro oscila a cada
-leitura, e somar tudo cru inventa elevação que não existe — numa pedalada de teste
-com ruído de ±1,5 m:
+| | |
+|---|---|
+| **Distância, elevação, tempo** | digitados. Campo vazio = a linha não aparece |
+| **Linha de baixo** | o que você escrever; vazia, mostra a data do percurso |
+| **Sem nada escrito** | não há cartela: o vídeo termina no traçado |
+| **Texto grande** | o corpo da letra encolhe antes de o excesso virar "…" — nunca vaza da tela |
+
+Por que digitável e não automático: uma rota desenhada à mão não tem altitude
+nem hora para medir, e às vezes o número que interessa é o do relógio de quem
+pedalou, não o do arquivo. Escrevendo, a cartela serve para os dois casos — e
+nada aparece no vídeo sem alguém ter pedido.
+
+A **elevação** vem do `<ele>` e o **tempo** do `<time>`, campos que o Strava e o
+Garmin gravam em todo ponto e que o app passou a ler (antes eram ignorados).
+Ela passa por um corte de ruído, porque o altímetro oscila a cada leitura e somar
+tudo cru inventa subida — numa pedalada de teste com ruído de ±1,5 m:
 
 | | elevação |
 |---|---|
 | somando tudo cru | 3.538 m ❌ |
-| com o corte (o que o app mostra) | **1.676 m** |
+| com o corte (o que o app sugere) | **1.676 m** |
 | valor real da simulação | 1.684 m |
 
-O corte é pelo **balanço** do erro: uma oscilação de ±1,5 m anda 3 m entre leituras,
-então o limiar de 4 m fica acima disso e o vaivém não conta. A referência só anda
-quando a variação passa do limiar, o que mantém o erro do total abaixo do próprio
-limiar — em vez de acumular o erro das pontas, como faria um suavizado.
+O corte é pelo **balanço** do erro: uma oscilação de ±1,5 m anda 3 m entre
+leituras, então o limiar de 4 m fica acima disso e o vaivém não conta. A
+referência só anda quando a variação passa do limiar, o que mantém o erro do
+total abaixo do próprio limiar — em vez de acumular o erro das pontas, como
+faria um suavizado.
 
-### Quantos pontos sobrevivem
+### Quantos pontos sobrevivem### Quantos pontos sobrevivem
 
 São três números diferentes, e vale não confundir:
 
@@ -266,7 +278,7 @@ ou cortados.
 
 ```bash
 npm run typecheck  # tsc --noEmit
-npm test           # Vitest (268 casos)
+npm test           # Vitest (288 casos)
 npm run check:dist # o build saiu autocontido e sem /src/?
 ```
 
@@ -315,7 +327,7 @@ src/
    ├─ geo.ts                matemática geográfica e projeção
    ├─ pins.ts               quando o pino vira ponto no mapa
    ├─ pois.ts               paradas do percurso
-   ├─ stats.ts              distância, elevação (com corte de ruído) e tempo
+   ├─ stats.ts              distância, elevação (com corte de ruído), tempo e cartela
    ├─ gpx.ts                importar/exportar GPX, simplificação de traçado
    ├─ share.ts              permalink da rota (codifica/valida o #r=…)
    └─ geocode.ts            busca de cidades

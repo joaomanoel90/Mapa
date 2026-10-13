@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { buildTrack } from "./geo";
 import { findCharacter } from "./characters";
 import { SceneRenderer, type FrameState, type SceneStyle } from "./renderer";
-import { rideSummary, summaryTiles } from "./stats";
+import { endCard, rideSummary, type EndCard } from "./stats";
 
 /**
  * Canvas de mentira que anota o que foi desenhado.
@@ -64,7 +64,7 @@ const TRACK_PTS = [
 ];
 const track = buildTrack(TRACK_PTS);
 
-const estado = (t: number, duration: number, summary: ReturnType<typeof summaryTiles> | null): FrameState => ({
+const estado = (t: number, duration: number, summary: EndCard | null): FrameState => ({
   track,
   t,
   character: findCharacter("car"),
@@ -78,23 +78,32 @@ const estado = (t: number, duration: number, summary: ReturnType<typeof summaryT
   summary,
 });
 
-const cartela = summaryTiles(rideSummary(TRACK_PTS, 71_030));
+/** A cartela como o usuário digita no painel. */
+const digitada = {
+  cardDistance: "49 km",
+  cardElevation: "+1.676 m",
+  cardTime: "3 h 19 min",
+  cardNote: "",
+};
+const cartela = endCard(digitada, rideSummary(TRACK_PTS, 71_030));
 
 describe("cartela final do vídeo", () => {
   it("desenha os números do percurso no fim do vídeo", () => {
     const { ctx, textos } = fakeCtx();
     new SceneRenderer("dark").render(ctx, 1280, 720, estado(1, 14, cartela));
 
-    expect(textos).toContain("71,03 km");
-    expect(textos).toContain("+142 m");
+    // o que foi digitado, e não o que o arquivo mediu
+    expect(textos).toContain("49 km");
+    expect(textos).toContain("+1.676 m");
     expect(textos).toContain("DISTÂNCIA");
     expect(textos).toContain("ELEVAÇÃO");
+    expect(textos).not.toContain("71,03 km");
   });
 
   it("não aparece no meio do vídeo", () => {
     const { ctx, textos } = fakeCtx();
     new SceneRenderer("dark").render(ctx, 1280, 720, estado(0.5, 14, cartela));
-    expect(textos).not.toContain("71,03 km");
+    expect(textos).not.toContain("49 km");
   });
 
   it("entra suavemente: no primeiro instante da cartela ainda está apagada", () => {
@@ -116,7 +125,7 @@ describe("cartela final do vídeo", () => {
       ...estado(1, 14, cartela),
       style: semCartela,
     });
-    expect(textos).not.toContain("71,03 km");
+    expect(textos).not.toContain("49 km");
   });
 
   it("não desenha a cartela quando não há resumo", () => {
@@ -127,11 +136,15 @@ describe("cartela final do vídeo", () => {
     expect(textos).not.toContain("71,03 km");
   });
 
-  it("sem elevação, mostra só a distância", () => {
+  it("mostra só as linhas que foram preenchidas", () => {
     const plana = [{ lat: -23.5, lng: -48.4 }, { lat: -23.6, lng: -48.5 }];
+    const soDistancia = endCard(
+      { cardDistance: "12,4 km", cardElevation: "", cardTime: "", cardNote: "" },
+      rideSummary(plana, 12_400),
+    );
     const { ctx, textos } = fakeCtx();
     new SceneRenderer("dark").render(ctx, 1280, 720, {
-      ...estado(1, 14, summaryTiles(rideSummary(plana, 12_400))),
+      ...estado(1, 14, soDistancia),
       track: buildTrack(plana),
     });
     expect(textos).toContain("12,4 km");
@@ -139,9 +152,52 @@ describe("cartela final do vídeo", () => {
     expect(textos).not.toContain("TEMPO");
   });
 
+  it("desenha a linha de baixo: a data do arquivo quando nada foi escrito", () => {
+    const { ctx, textos } = fakeCtx();
+    new SceneRenderer("dark").render(ctx, 1280, 720, estado(1, 14, cartela));
+    expect(textos.some((t) => t.includes("2026"))).toBe(true);
+  });
+
+  it("a linha de baixo escrita à mão substitui a data", () => {
+    const r = new SceneRenderer("dark");
+    const comNota = endCard(
+      { ...digitada, cardNote: "com os amigos do pedal" },
+      rideSummary(TRACK_PTS, 71_030),
+    );
+    const { ctx, textos } = fakeCtx();
+    r.render(ctx, 1280, 720, estado(1, 14, comNota));
+    expect(textos).toContain("com os amigos do pedal");
+  });
+
+  it("sem nada escrito e sem data no arquivo, não há cartela", () => {
+    const semNada = endCard(
+      { cardDistance: "", cardElevation: "", cardTime: "", cardNote: "" },
+      rideSummary([{ lat: -23.5, lng: -48.4 }, { lat: -23.6, lng: -48.5 }], 12_400),
+    );
+    expect(semNada).toBeNull();
+    const { ctx, textos } = fakeCtx();
+    new SceneRenderer("dark").render(ctx, 1280, 720, estado(1, 14, semNada));
+    expect(textos).not.toContain("DISTÂNCIA");
+  });
+
+  it("texto longo é cortado em vez de vazar da tela", () => {
+    const longo = "Subida acumulada de mil e seiscentos e setenta e seis metros";
+    const grande = endCard(
+      { ...digitada, cardDistance: longo, cardNote: longo },
+      rideSummary(TRACK_PTS, 71_030),
+    );
+    const { ctx, textos } = fakeCtx();
+    // retrato: a tela é estreita, então o corte acontece de verdade
+    new SceneRenderer("dark").render(ctx, 720, 1280, estado(1, 14, grande));
+    const desenhado = textos.find((t) => t.startsWith("Subida"));
+    expect(desenhado).toBeDefined();
+    expect(desenhado!.length).toBeLessThan(longo.length);
+    expect(desenhado!.endsWith("…")).toBe(true);
+  });
+
   it("cabe na tela em retrato também", () => {
     const { ctx, textos } = fakeCtx();
     new SceneRenderer("dark").render(ctx, 720, 1280, estado(1, 14, cartela));
-    expect(textos).toContain("71,03 km");
+    expect(textos).toContain("49 km");
   });
 });

@@ -247,6 +247,17 @@ function Sidebar(props: Props) {
                 <span className="font-normal text-zinc-500"> / {MAX_WAYPOINTS}</span>
               </span>
             </div>
+            {hasRoute && (
+              <div
+                className="mt-1 flex items-center justify-between text-[12px]"
+                title="Pontos do traçado desenhado no mapa e no vídeo. As paradas acima são só os pontos de controle que dá para arrastar."
+              >
+                <span className="text-zinc-400">Pontos do traçado</span>
+                <span className="font-semibold text-white">
+                  {track.pts.length.toLocaleString("pt-BR")}
+                </span>
+              </div>
+            )}
             <div className="mt-1 flex items-center justify-between text-[12px]">
               <span className="text-zinc-400">Distância</span>
               <span className="font-semibold text-white">{formatDistance(distance)}</span>

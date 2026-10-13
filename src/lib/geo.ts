@@ -34,7 +34,17 @@ export type Track = {
   total: number;
 };
 
-const MAX_TRACK_POINTS = 1200;
+/**
+ * Teto de pontos do traçado usado para desenhar.
+ *
+ * Importar um GPX preserva o arquivo inteiro (até `MAX_GPX_POINTS`) e o
+ * `rawTrack` guarda isso; aqui é só a versão que vai para a tela e para o
+ * canvas do vídeo. Subiu de 1.200 para 12.000 junto com o corte de janela no
+ * renderizador: com o filtro, 12 mil pontos ficam **mais baratos** por quadro
+ * do que os 1.200 custavam antes, e a rota deixa de ficar angulosa em percursos
+ * longos (1.200 pontos num trajeto de 300 km dava um ponto a cada 250 m).
+ */
+const MAX_TRACK_POINTS = 12_000;
 
 export function buildTrack(input: LatLng[]): Track {
   let pts = input;
@@ -48,6 +58,9 @@ export function buildTrack(input: LatLng[]): Track {
   }
   return { pts, cum, total: cum[cum.length - 1] ?? 0 };
 }
+
+/** Teto de pontos do traçado de desenho (exposto para testes e diagnóstico). */
+export const TRACK_POINT_LIMIT = MAX_TRACK_POINTS;
 
 export type Sample = {
   pos: LatLng;
@@ -106,6 +119,16 @@ export function project(lat: number, lng: number, zoom: number) {
   };
 }
 
+/** Inverso exato de `project`: pixel do mundo → coordenada geográfica. */
+export function unproject(x: number, y: number, zoom: number): LatLng {
+  const n = TILE_SIZE * Math.pow(2, zoom);
+  const lng = (x / n) * 360 - 180;
+  // de `y = (0,5 - log((1+s)/(1-s)) / 4π) · n` sai `s = tanh(k/2)`
+  const k = (0.5 - y / n) * 4 * Math.PI;
+  const s = Math.max(-1, Math.min(1, Math.tanh(k / 2)));
+  return { lat: (Math.asin(s) * 180) / Math.PI, lng };
+}
+
 export type Bounds = { north: number; south: number; east: number; west: number };
 
 export function boundsOf(pts: LatLng[]): Bounds {
@@ -120,6 +143,57 @@ export function boundsOf(pts: LatLng[]): Bounds {
     west = Math.min(west, p.lng);
   }
   return { north, south, east, west };
+}
+
+/** Faixa de índices `[início, fim]`, inclusiva nas duas pontas. */
+export type IndexRange = [number, number];
+
+/**
+ * Quais trechos do traçado aparecem na janela visível.
+ *
+ * Desenhar a rota inteira a cada quadro custa caro à toa: com a câmera
+ * acompanhando o personagem no zoom 16, a janela mostra uns 3 km — numa rota
+ * de 70 km isso é ~4% dos pontos. Filtrar aqui é barato porque só compara
+ * coordenadas cruas; a projeção (que tem `sin`/`log`) fica reservada para o
+ * que de fato vai ser desenhado. Medido: 12 mil pontos ficam ~12x mais rápidos.
+ *
+ * O teste é por **segmento**, não por ponto: assim um trecho que atravessa a
+ * janela com as duas pontas fora dela continua sendo desenhado.
+ *
+ * Devolve várias faixas porque um traçado pode sair e voltar à área visível.
+ */
+export function visibleRuns(
+  pts: LatLng[],
+  b: Bounds,
+  endIndex: number = pts.length - 1,
+): IndexRange[] {
+  const fim = Math.max(0, Math.min(endIndex, pts.length - 1));
+  // visão do mundo inteiro (ou bounds invertidos): não há o que cortar
+  if (b.east - b.west >= 360 || b.north - b.south >= 180 || b.west > b.east) {
+    return fim >= 1 ? [[0, fim]] : [];
+  }
+
+  const runs: IndexRange[] = [];
+  let inicio = -1;
+  for (let i = 0; i < fim; i++) {
+    const a = pts[i];
+    const c = pts[i + 1];
+    const fora =
+      Math.max(a.lat, c.lat) < b.south ||
+      Math.min(a.lat, c.lat) > b.north ||
+      Math.max(a.lng, c.lng) < b.west ||
+      Math.min(a.lng, c.lng) > b.east;
+    if (fora) {
+      if (inicio >= 0) {
+        runs.push([inicio, i]);
+        inicio = -1;
+      }
+    } else if (inicio < 0) {
+      inicio = i;
+    }
+  }
+  if (inicio >= 0) runs.push([inicio, fim]);
+  return runs;
 }
 
 /** Zoom fracionário que faz os limites caberem em width x height com padding. */

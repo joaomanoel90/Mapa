@@ -646,8 +646,11 @@ function App() {
   /** Baixa a rota atual como GPX. */
   const exportarGpx = useCallback(() => {
     if (!hasRoute) return;
+    // O traçado importado sai inteiro: o `track` que desenha na tela passa pelo
+    // teto de pontos, então exportá-lo devolveria menos pontos do que entraram.
+    const pontos = rawTrack ?? track.pts;
     const xml = toGpx({
-      points: track.pts,
+      points: pontos,
       waypoints: sortPois(pois).map((p) => {
         const pos = poiLatLng(p, track);
         return { lat: pos.lat, lng: pos.lng, name: p.label, sym: p.emoji };
@@ -659,7 +662,7 @@ function App() {
       new Blob([xml], { type: "application/gpx+xml" }),
       gpxFileName(settings.title || "rota"),
     );
-  }, [hasRoute, track, pois, settings.title, settings.subtitle]);
+  }, [hasRoute, rawTrack, track, pois, settings.title, settings.subtitle]);
 
   /** Copia o permalink da rota atual. */
   const copiarLink = useCallback(async () => {

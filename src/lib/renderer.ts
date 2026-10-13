@@ -18,6 +18,9 @@ import {
   haversine,
   project,
   sampleTrack,
+  unproject,
+  visibleRuns,
+  type Bounds,
   type LatLng,
   type Track,
 } from "./geo";
@@ -360,6 +363,26 @@ export class SceneRenderer {
     const scale = Math.min(width, height) / 720;
     const sf = Math.max(0.55, Math.min(1.6, scale));
 
+    /**
+     * Janela visível em coordenadas geográficas.
+     *
+     * Os cantos do canvas viram lat/lng pelo inverso da projeção (4 chamadas por
+     * quadro) e daí sai a caixa usada para descartar o traçado fora de tela, com
+     * folga para o traço grosso e o brilho não cortarem na borda.
+     */
+    const margemPx = 20 * sf;
+    const cantoA = unproject(ox, oy, z);
+    const cantoB = unproject(ox + width / s, oy + height / s, z);
+    const dLat = cantoA.lat - cantoB.lat;
+    const dLng = cantoB.lng - cantoA.lng;
+    const janela: Bounds = {
+      north: cantoA.lat + (margemPx * dLat) / height,
+      south: cantoB.lat - (margemPx * dLat) / height,
+      west: cantoA.lng - (margemPx * dLng) / width,
+      east: cantoB.lng + (margemPx * dLng) / width,
+    };
+
+
     // --- fundo + tiles ---
     ctx.save();
     ctx.fillStyle = bm.bg;
@@ -384,11 +407,15 @@ export class SceneRenderer {
       ctx.lineJoin = "round";
       ctx.lineCap = "round";
       ctx.beginPath();
-      track.pts.forEach((p, i) => {
-        const { x, y } = toXY(p);
-        if (i === 0) ctx.moveTo(x, y);
-        else ctx.lineTo(x, y);
-      });
+      // só os trechos dentro da janela: o traçado inteiro seria projetado à toa
+      for (const [ini, fim] of visibleRuns(track.pts, janela)) {
+        const a = toXY(track.pts[ini]);
+        ctx.moveTo(a.x, a.y);
+        for (let i = ini + 1; i <= fim; i++) {
+          const { x, y } = toXY(track.pts[i]);
+          ctx.lineTo(x, y);
+        }
+      }
       ctx.strokeStyle = onDark ? "rgba(255,255,255,0.10)" : "rgba(15,23,42,0.10)";
       ctx.lineWidth = 13 * sf;
       ctx.setLineDash([]);
@@ -406,14 +433,20 @@ export class SceneRenderer {
       ctx.lineJoin = "round";
       ctx.lineCap = "round";
       ctx.beginPath();
-      const upto = sample.index + 1;
-      ctx.moveTo(toXY(track.pts[0]).x, toXY(track.pts[0]).y);
-      for (let i = 1; i <= Math.min(upto, track.pts.length - 1); i++) {
-        const { x, y } = toXY(track.pts[i]);
-        ctx.lineTo(x, y);
+      const upto = Math.min(sample.index + 1, track.pts.length - 1);
+      // o trecho percorrido também cresce com a animação, então leva o mesmo corte
+      const percorridos = visibleRuns(track.pts, janela, upto);
+      for (const [ini, fim] of percorridos) {
+        const a = toXY(track.pts[ini]);
+        ctx.moveTo(a.x, a.y);
+        for (let i = ini + 1; i <= fim; i++) {
+          const { x, y } = toXY(track.pts[i]);
+          ctx.lineTo(x, y);
+        }
       }
       const cur = toXY(sample.pos);
-      ctx.lineTo(cur.x, cur.y);
+      if (percorridos.length > 0) ctx.lineTo(cur.x, cur.y);
+      else ctx.moveTo(cur.x, cur.y);
       ctx.strokeStyle = "rgba(0,0,0,0.28)";
       ctx.lineWidth = 11 * sf;
       ctx.stroke();

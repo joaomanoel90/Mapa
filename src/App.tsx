@@ -16,6 +16,7 @@ import {
 import { pinsAsDots } from "./lib/pins";
 import { endCard, rideSummary } from "./lib/stats";
 import { timesOf } from "./lib/hud";
+import { parseDuration } from "./lib/duration";
 import {
   buildTrack,
   formatDistance,
@@ -291,6 +292,15 @@ function App() {
    * pontos por quadro.
    */
   const horas = useMemo(() => timesOf(rawTrack ?? track.pts), [rawTrack, track]);
+
+  /**
+   * Tempo escrito na cartela, em segundos.
+   *
+   * É o relógio do HUD quando o arquivo não traz hora: o usuário já escreveu o
+   * tempo no painel, então o vídeo conta até esse número em vez de mostrar a
+   * duração do clipe (que é o que a barra de progresso representa).
+   */
+  const tempoCartela = useMemo(() => parseDuration(settings.cardTime), [settings.cardTime]);
 
   const cartela = useMemo(
     () =>
@@ -788,6 +798,7 @@ function App() {
           duration: settings.duration,
           summary: cartela,
           times: horas,
+          cardSeconds: tempoCartela,
         });
 
       // os servidores gratuitos pedem uso moderado

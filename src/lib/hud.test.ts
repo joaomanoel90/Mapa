@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { buildTrack, type LatLng } from "./geo";
-import { MAX_SPEED_KMH, elapsedAt, speedAt, timesOf } from "./hud";
+import { MAX_SPEED_KMH, elapsedAt, formatClock, speedAt, timesOf } from "./hud";
 
 /**
  * Percurso reto para leste, medido em graus, com as horas dadas.
@@ -147,5 +147,24 @@ describe("speedAt", () => {
     const tempos = timesOf(pts)!;
     expect(speedAt(pts, track.cum, 0, tempos)).toBeGreaterThan(0);
     expect(speedAt(pts, track.cum, 1, tempos)).toBeGreaterThan(0);
+  });
+});
+
+describe("formatClock", () => {
+  it("usa mm:ss abaixo de uma hora", () => {
+    expect(formatClock(0)).toBe("00:00");
+    expect(formatClock(45)).toBe("00:45");
+    expect(formatClock(3599)).toBe("59:59");
+  });
+
+  it("acima de uma hora vira h:mm:ss", () => {
+    // a pedalada da cartela (3 h 19 min) não pode virar "199:00"
+    expect(formatClock(3 * 3600 + 19 * 60)).toBe("3:19:00");
+    expect(formatClock(3600)).toBe("1:00:00");
+    expect(formatClock(5970)).toBe("1:39:30");
+  });
+
+  it("não deixa passar tempo negativo", () => {
+    expect(formatClock(-10)).toBe("00:00");
   });
 });

@@ -15,6 +15,8 @@ import { endCard, rideSummary, type EndCard } from "./stats";
  */
 function fakeCtx() {
   const textos: string[] = [];
+  /** arcos desenhados: [x, y, raio, início, fim] */
+  const arcos: number[][] = [];
   const make = (): unknown =>
     new Proxy(function () {} as unknown as object, {
       get(_alvo, prop) {
@@ -30,6 +32,7 @@ function fakeCtx() {
         if (typeof prop === "symbol") return undefined;
         return (...args: unknown[]) => {
           if (prop === "fillText" && typeof args[0] === "string") textos.push(args[0]);
+          if (prop === "arc") arcos.push(args as number[]);
           return make();
         };
       },
@@ -37,7 +40,24 @@ function fakeCtx() {
         return true;
       },
     });
-  return { ctx: make() as CanvasRenderingContext2D, textos };
+  return { ctx: make() as CanvasRenderingContext2D, textos, arcos };
+}
+
+/** Desenha um quadro num renderizador novo (câmera limpa a cada caso). */
+const desenhar = (
+  ctx: CanvasRenderingContext2D,
+  st: FrameState,
+  trk = track,
+  w = 1280,
+  h = 720,
+) => new SceneRenderer("dark").render(ctx, w, h, { ...st, track: trk });
+
+/** Arco de andamento do anel: o último arco que não é o círculo inteiro. */
+function arcoDoAndamento(arcos: number[][]) {
+  const parcial = arcos.filter((a) => Math.abs(a[4] - a[3]) < Math.PI * 2 - 1e-6);
+  if (parcial.length === 0) return null;
+  const [x, y, r, ini, fim] = parcial[parcial.length - 1];
+  return { x, y, r, fracao: (fim - ini) / (Math.PI * 2) };
 }
 
 const style: SceneStyle = {
@@ -70,6 +90,7 @@ const estado = (
   duration: number,
   summary: EndCard | null,
   times: number[] | null = null,
+  cardSeconds: number | null = null,
 ): FrameState => ({
   track,
   t,
@@ -83,6 +104,7 @@ const estado = (
   duration,
   summary,
   times,
+  cardSeconds,
 });
 
 /** A cartela como o usuário digita no painel. */
@@ -229,8 +251,9 @@ describe("HUD no vídeo", () => {
     });
     expect(textos).toContain("36");        // km/h medida, sem decimais acima de 10
     expect(textos).toContain("km/h");
-    expect(textos).toContain("00:45");     // metade de 90 s de percurso
-    // sem hora não existe rótulo de média
+    // distância percorrida e relógio vêm juntos na faixa abaixo do anel
+    expect(textos.some((t) => t.includes("00:45"))).toBe(true); // metade de 90 s
+    // com hora do arquivo não há rótulo de média
     expect(textos).not.toContain("média");
   });
 
@@ -286,5 +309,45 @@ describe("HUD no vídeo", () => {
       track: gpsTrack,
     });
     expect(textos).toContain("km/h");
+  });
+
+  it("sem hora no arquivo e sem tempo na cartela: nenhum relógio", () => {
+    const { ctx, textos } = fakeCtx();
+    desenhar(ctx, estado(0.5, 14, null, null, null), gpsTrack);
+    // o tempo do clipe (00:07) não pode tomar o lugar do tempo do percurso
+    expect(textos.some((t) => /\d\d:\d\d/.test(t))).toBe(false);
+    expect(textos).toContain("—");
+  });
+
+  it("sem hora no arquivo, o relógio vem do tempo escrito na cartela", () => {
+    const { ctx, textos } = fakeCtx();
+    desenhar(ctx, estado(0.5, 14, null, null, 3 * 3600 + 19 * 60), gpsTrack);
+    // metade de 3 h 19 min = 1 h 39 min, no relógio de atividade
+    expect(textos.some((t) => t.includes("1:39"))).toBe(true);
+    // e a velocidade passa a ser a média, com o rótulo dizendo isso
+    expect(textos).toContain("média");
+  });
+
+  it("o anel acompanha o andamento do percurso", () => {
+    for (const progresso of [0.25, 0.5, 0.9]) {
+      const { ctx, arcos } = fakeCtx();
+      desenhar(ctx, estado(progresso, 14, null, horas), gpsTrack);
+      const andamento = arcoDoAndamento(arcos);
+      expect(andamento).not.toBeNull();
+      expect(andamento!.fracao).toBeCloseTo(progresso, 3);
+    }
+  });
+
+  it("o anel fica abaixo do título, sem sobrepor a faixa do topo", () => {
+    const comTitulo = { ...style, showTitle: true, title: "Pedal da manhã" };
+    const { ctx, arcos } = fakeCtx();
+    new SceneRenderer("dark").render(ctx, 1280, 720, {
+      ...estado(0.5, 14, null, horas),
+      track: gpsTrack,
+      style: comTitulo,
+    });
+    const andamento = arcoDoAndamento(arcos)!;
+    // o topo do anel (y - r) tem que ficar abaixo da faixa pintada pelo título
+    expect(andamento.y - andamento.r).toBeGreaterThan(60);
   });
 });

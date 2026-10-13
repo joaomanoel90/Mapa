@@ -97,13 +97,17 @@ describe("parseGpx — traçado", () => {
     ]);
   });
 
-  it("ignora <ele> e <time> sem reclamar", () => {
-    const xml = gpx(
-      trk(
-        `<trkpt lat="-23.49" lon="-48.41"><ele>750.5</ele><time>2026-10-13T10:00:00Z</time></trkpt>`,
+  it("traz altitude e hora junto com o ponto", () => {
+    const r = parseGpx(
+      gpx(
+        trk(
+          `<trkpt lat="-23.49" lon="-48.41"><ele>800</ele><time>2026-10-13T09:00:00Z</time></trkpt>`,
+        ),
       ),
     );
-    expect(parseGpx(xml).points).toEqual([{ lat: -23.49, lng: -48.41 }]);
+    expect(r.points[0].lat).toBeCloseTo(-23.49, 6);
+    expect(r.points[0].ele).toBe(800);
+    expect(r.points[0].t).toBe(Date.parse("2026-10-13T09:00:00Z"));
   });
 
   it("lê o nome do metadata e, sem ele, do traçado", () => {
@@ -447,5 +451,101 @@ describe("gpxFileName", () => {
   it("nunca devolve nome vazio", () => {
     expect(gpxFileName("")).toMatch(/^rota-/);
     expect(gpxFileName("///")).toMatch(/^rota-/);
+  });
+});
+
+describe("parseGpx — altitude e hora", () => {
+  const pt = (lat: number, lng: number, ele?: number, hora?: string) =>
+    `<trkpt lat="${lat}" lon="${lng}">` +
+    (ele === undefined ? "" : `<ele>${ele}</ele>`) +
+    (hora === undefined ? "" : `<time>${hora}</time>`) +
+    "</trkpt>";
+
+  it("lê a altitude de cada ponto", () => {
+    const r = parseGpx(gpx(trk(pt(-23.5, -48.4, 812.4) + pt(-23.51, -48.41, 845.9))));
+    expect(r.points.map((p) => p.ele)).toEqual([812.4, 845.9]);
+  });
+
+  it("lê a hora de cada ponto em epoch", () => {
+    const r = parseGpx(
+      gpx(
+        trk(
+          pt(-23.5, -48.4, 800, "2026-10-13T09:00:00Z") +
+            pt(-23.51, -48.41, 820, "2026-10-13T09:00:10Z"),
+        ),
+      ),
+    );
+    expect(r.points[0].t).toBe(Date.parse("2026-10-13T09:00:00Z"));
+    expect(r.points[1].t! - r.points[0].t!).toBe(10_000);
+  });
+
+  it("não inventa altitude quando o campo está vazio ou é lixo", () => {
+    const r = parseGpx(
+      gpx(
+        trk(
+          pt(-23.5, -48.4) +
+            `<trkpt lat="-23.51" lon="-48.41"><ele></ele></trkpt>` +
+            `<trkpt lat="-23.52" lon="-48.42"><ele>morros</ele></trkpt>`,
+        ),
+      ),
+    );
+    expect(r.points.every((p) => p.ele === undefined)).toBe(true);
+  });
+
+  it("recusa altitude fora da faixa da Terra", () => {
+    // barômetro de aparelho descalibrado grava valores absurdos
+    const r = parseGpx(
+      gpx(
+        trk(
+          pt(-23.5, -48.4, -998) + pt(-23.51, -48.41, 12000) + pt(-23.52, -48.42, 750),
+        ),
+      ),
+    );
+    expect(r.points.map((p) => p.ele)).toEqual([undefined, undefined, 750]);
+  });
+
+  it("ignora hora inválida sem perder o ponto", () => {
+    const r = parseGpx(
+      gpx(trk(pt(-23.5, -48.4, 700, "ontem de manhã") + pt(-23.51, -48.41, 710))),
+    );
+    expect(r.points).toHaveLength(2);
+    expect(r.points[0].t).toBeUndefined();
+    expect(r.points[0].ele).toBe(700);
+  });
+
+  it("os pontos soltos do arquivo também trazem altitude", () => {
+    const r = parseGpx(
+      gpx(`<wpt lat="-23.5" lon="-48.4"><name>Cachoeira</name><ele>903</ele></wpt>`),
+    );
+    expect(r.waypoints[0].ele).toBe(903);
+  });
+});
+
+describe("toGpx — altitude e hora na exportação", () => {
+  it("escreve ele e time quando o ponto tem", () => {
+    const xml = toGpx({
+      points: [{ lat: -23.5, lng: -48.4, ele: 812.44, t: Date.parse("2026-10-13T09:00:00Z") }],
+      name: "Pedal",
+    });
+    expect(xml).toContain("<ele>812.4</ele>");
+    expect(xml).toContain("<time>2026-10-13T09:00:00.000Z</time>");
+    expect(xml).toContain('lat="-23.500000" lon="-48.400000"');
+  });
+
+  it("mantém o ponto compacto quando não há nada além da coordenada", () => {
+    const xml = toGpx({ points: [{ lat: -23.5, lng: -48.4 }], name: "Rota" });
+    expect(xml).toContain('<trkpt lat="-23.500000" lon="-48.400000" />');
+    expect(xml).not.toContain("<ele>");
+  });
+
+  it("ida e volta preserva altitude e hora", () => {
+    const original = [
+      { lat: -23.5, lng: -48.4, ele: 812.4, t: Date.parse("2026-10-13T09:00:00Z") },
+      { lat: -23.5005, lng: -48.4005, ele: 823.1, t: Date.parse("2026-10-13T09:00:30Z") },
+      { lat: -23.501, lng: -48.401, ele: 807.8, t: Date.parse("2026-10-13T09:01:00Z") },
+    ];
+    const volta = parseGpx(toGpx({ points: original, name: "Pedal" }));
+    expect(volta.points.map((p) => p.ele)).toEqual([812.4, 823.1, 807.8]);
+    expect(volta.points.map((p) => p.t)).toEqual(original.map((p) => p.t));
   });
 });

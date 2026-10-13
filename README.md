@@ -117,7 +117,10 @@ Fica na seção **Traçar a rota**, no painel.
 símbolo (`<sym>`, padrão Garmin) ou do próprio nome — "Church" e "Igreja Matriz"
 viram ⛪ Igreja, "Fuel" e "Posto Ipiranga" viram ⛽ Posto.
 
-**Exportar (⬇️):** baixa a rota atual com o traçado e as paradas.
+**Exportar (⬇️):** baixa a rota atual com o traçado e as paradas. Altitude
+(`<ele>`) e hora (`<time>`) são lidas na importação e devolvidas na exportação,
+então o ciclo importar → exportar não perde nada — e o arquivo exportado continua
+servindo para quem treina.
 
 ### Dois detalhes que valem saber
 
@@ -125,6 +128,38 @@ viram ⛪ Igreja, "Fuel" e "Posto Ipiranga" viram ⛽ Posto.
 repassá-lo pelo roteador mudaria a rota e gastaria chamadas ao servidor comunitário
 à toa. O arquivo é usado exatamente como veio. Assim que você mover, adicionar ou
 remover um ponto, o roteador volta a mandar.
+
+### Cartela final
+
+Nos últimos segundos do vídeo aparece um resumo do percurso:
+
+```
+      49 km          +1.676 m        3 h 19 min
+     DISTÂNCIA        ELEVAÇÃO          TEMPO
+              13 de outubro de 2026
+```
+
+Cada número vem do **próprio arquivo** — distância do traçado, elevação do `<ele>`,
+tempo e data do `<time>`, os dois últimos campos que o Strava e o Garmin gravam em
+todo ponto e que antes eram ignorados. Se o arquivo não tiver altitude, a coluna
+some; numa rota desenhada à mão sobra só a distância, em vez de aparecer um zero
+sem significado. O botão 🏁 no painel liga e desliga, e o painel mostra os mesmos
+números antes de exportar.
+
+**A subida acumulada passa por um corte de ruído.** O altímetro oscila a cada
+leitura, e somar tudo cru inventa elevação que não existe — numa pedalada de teste
+com ruído de ±1,5 m:
+
+| | elevação |
+|---|---|
+| somando tudo cru | 3.538 m ❌ |
+| com o corte (o que o app mostra) | **1.676 m** |
+| valor real da simulação | 1.684 m |
+
+O corte é pelo **balanço** do erro: uma oscilação de ±1,5 m anda 3 m entre leituras,
+então o limiar de 4 m fica acima disso e o vaivém não conta. A referência só anda
+quando a variação passa do limiar, o que mantém o erro do total abaixo do próprio
+limiar — em vez de acumular o erro das pontas, como faria um suavizado.
 
 ### Quantos pontos sobrevivem
 
@@ -231,7 +266,7 @@ ou cortados.
 
 ```bash
 npm run typecheck  # tsc --noEmit
-npm test           # Vitest (233 casos)
+npm test           # Vitest (268 casos)
 npm run check:dist # o build saiu autocontido e sem /src/?
 ```
 
@@ -280,6 +315,7 @@ src/
    ├─ geo.ts                matemática geográfica e projeção
    ├─ pins.ts               quando o pino vira ponto no mapa
    ├─ pois.ts               paradas do percurso
+   ├─ stats.ts              distância, elevação (com corte de ruído) e tempo
    ├─ gpx.ts                importar/exportar GPX, simplificação de traçado
    ├─ share.ts              permalink da rota (codifica/valida o #r=…)
    └─ geocode.ts            busca de cidades

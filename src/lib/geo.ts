@@ -1,4 +1,20 @@
-export type LatLng = { lat: number; lng: number };
+/**
+ * Um ponto no mapa.
+ *
+ * `ele` (metros) e `t` (epoch em ms) só existem quando o ponto veio de um
+ * arquivo de GPS — o Strava e o Garmin gravam os dois em cada `<trkpt>`. São
+ * opcionais de propósito: tudo que desenha, mede ou compartilha a rota continua
+ * funcionando só com lat/lng, e quem precisa de altitude (o resumo do vídeo,
+ * a exportação) checa se o dado está lá antes de usar.
+ */
+export type LatLng = {
+  lat: number;
+  lng: number;
+  /** altitude em metros */
+  ele?: number;
+  /** instante da gravação (epoch em ms) */
+  t?: number;
+};
 
 export const TILE_SIZE = 256;
 const EARTH_R = 6371008.8;

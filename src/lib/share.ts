@@ -52,6 +52,7 @@ const SHARED_KEYS = [
   "showEndpoints",
   "showTitle",
   "showProgress",
+  "endCard",
   "title",
   "subtitle",
   "aspect",

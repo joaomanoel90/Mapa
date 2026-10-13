@@ -134,15 +134,15 @@ São três números diferentes, e vale não confundir:
 |---|---|---|
 | Leitura do arquivo | 100.000 pontos | um GPX maior que isso é amostrado uniformemente |
 | Traçado desenhado | 12.000 pontos | teto de desempenho da tela e do vídeo |
-| Paradas (pinos) | 60 | são pontos de **controle**, arrastáveis — e cada uma vira uma requisição ao roteador |
+| Paradas (pinos) | 3.000 | são pontos de **controle**; acima de 150 viram pontos no mapa, e o roteador recebe até 99 trechos por requisição |
 | Arquivo exportado | **o mesmo que entrou** | exportar devolve o traçado importado inteiro |
 
 Um track de GPS comum — uma pedalada de 1 h gravando a cada segundo, ~3.600 pontos —
 aparece inteiro, sem simplificação. E o ciclo importar → exportar **não perde nada**:
 o que sai é fiel ao que entrou, mesmo quando o arquivo é grande demais para desenhar.
 
-> Os 60 pinos não são um corte do traçado: são só as alças que dá para arrastar.
-> O painel mostra "Pontos do traçado" separado de "Paradas" justamente por isso.
+> Os pinos não são um corte do traçado: são só os pontos de controle que dá para
+> arrastar. O painel mostra "Pontos do traçado" separado de "Paradas" por isso.
 
 Quando o traçado importado é maior do que 12.000 pontos, ele passa por
 simplificação Douglas–Peucker: a tolerância é ajustada por busca binária até caber,
@@ -176,6 +176,35 @@ rota de 70 km isso é ~4% dos pontos. Medido, por quadro:
 
 Ou seja: 10× mais pontos no traçado **e** mais rápido do que antes.
 
+### Muitos pinos
+
+Um pino comum é um marcador do Leaflet com alça de arrasto — um elemento no DOM.
+Alguns milhares deles travam o arrasto e a rolagem, então acima de **150 pinos** o
+mapa desenha os pontos no canvas (milhares cabem de uma vez) e só seguem marcadores
+de verdade a **partida**, a **chegada** e o **pino escolhido**: clicar num pino o
+promove a marcador arrastável, que é como se edita um ponto específico numa rota
+longa.
+
+O outro lado são as requisições ao servidor de rotas. Uma por trecho seria
+impraticável: 60 pinos eram 59 requisições, e 3.000 pinos seriam **2.999**. Como o
+OSRM aceita até 100 coordenadas por requisição, o app manda as paradas em
+**punhados de 99 trechos** e depois corta a geometria devolvida nas paradas, para
+guardar cada trecho no cache com o seu próprio traçado:
+
+| Pinos | Requisições (antes) | Requisições (agora) |
+|---|---|---|
+| 60 | 59 | **1** |
+| 300 | 299 | **4** |
+| 3.000 | 2.999 | **31** |
+
+Arrastar um pino continua custando quase nada: só os dois trechos que encostam nele
+saem do cache — e, sendo vizinhos, vão numa requisição só.
+
+Quando o servidor recusa o punhado inteiro (e não é limite de uso), ele é dividido
+ao meio e cada metade é tentada de novo, para uma parada problemática não jogar o
+traçado todo para a linha reta. Quando é limite de uso (429), dividir só
+multiplicaria requisições — o punhado vira linha reta e o aviso aparece na tela.
+
 ---
 
 ## 🔗 Compartilhar a rota
@@ -202,7 +231,7 @@ ou cortados.
 
 ```bash
 npm run typecheck  # tsc --noEmit
-npm test           # Vitest (214 casos)
+npm test           # Vitest (233 casos)
 npm run check:dist # o build saiu autocontido e sem /src/?
 ```
 
@@ -249,6 +278,7 @@ src/
    ├─ routing.ts            rotas OSRM por trecho, com cache
    ├─ tiles.ts              mapas gratuitos e filtros de estilo
    ├─ geo.ts                matemática geográfica e projeção
+   ├─ pins.ts               quando o pino vira ponto no mapa
    ├─ pois.ts               paradas do percurso
    ├─ gpx.ts                importar/exportar GPX, simplificação de traçado
    ├─ share.ts              permalink da rota (codifica/valida o #r=…)

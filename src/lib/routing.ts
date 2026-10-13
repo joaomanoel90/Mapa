@@ -54,8 +54,6 @@ export type RouteResult = {
 type Leg = { points: LatLng[]; distance: number; direct: boolean };
 
 const legCache = new Map<string, Leg>();
-/** trechos em andamento, para não disparar a mesma requisição duas vezes */
-const inflight = new Map<string, Promise<Leg>>();
 
 const r5 = (n: number) => n.toFixed(5);
 
@@ -113,20 +111,164 @@ function retryAfterMs(res: Response): number {
   return 400;
 }
 
-async function requestLeg(
-  a: LatLng,
-  b: LatLng,
+/* ------------------------------------------------------------------ */
+/* Roteamento em punhado                                               */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Máximo de coordenadas por requisição (limite do próprio OSRM).
+ *
+ * Uma requisição por trecho era simples, mas cada trecho é uma ida ao
+ * servidor: com 60 paradas eram 59 requisições, e com 3.000 seriam 2.999.
+ * Mandando as coordenadas juntas, 100 paradas (99 trechos) cabem em uma
+ * requisição só — o servidor devolve a geometria inteira e a distância de
+ * cada trecho em `legs`.
+ */
+export const MAX_COORDS_PER_CALL = 100;
+
+/** Quantos punhados podem estar no ar ao mesmo tempo. */
+const RUN_CONCURRENCY = 3;
+
+/** Abaixo disto não vale dividir um punhado que falhou: gera mais requisição do que salva traçado. */
+const SPLIT_FLOOR = 4;
+
+type Run = {
+  /** geometria da rota inteira do punhado */
+  points: LatLng[];
+  /** onde o servidor encaixou cada parada (para cortar a geometria) */
+  cuts: LatLng[];
+  /** distância de cada trecho, na ordem */
+  distances: number[];
+};
+
+type RunAttempt = { run: Run } | { failure: "rate-limit" | "server" };
+
+/**
+ * Quais trechos faltam calcular e como agrupá-los.
+ *
+ * Só trechos **seguidos** entram no mesmo punhado: a resposta é um caminho
+ * único, então agrupar buracos do meio não daria para cortar depois.
+ */
+export function planRuns(
+  missing: boolean[],
+  maxCoords = MAX_COORDS_PER_CALL,
+): { from: number; to: number }[] {
+  const perRun = Math.max(1, maxCoords - 1);
+  const runs: { from: number; to: number }[] = [];
+  for (let i = 0; i < missing.length; i++) {
+    if (!missing[i]) continue;
+    let j = i;
+    while (j + 1 < missing.length && missing[j + 1] && j - i + 1 < perRun) j++;
+    runs.push({ from: i, to: j });
+    i = j;
+  }
+  return runs;
+}
+
+/**
+ * Em que ponto da geometria cada parada caiu.
+ *
+ * A rota passa exatamente pelas paradas (o servidor encaixa cada uma na rua),
+ * então basta procurar o ponto mais próximo — avançando sempre, porque a
+ * ordem das paradas é a ordem do caminho. É isso que permite guardar cada
+ * trecho no cache com a sua própria geometria.
+ */
+export function splitIndices(pts: LatLng[], cuts: LatLng[]): number[] {
+  const out: number[] = [0];
+  let cursor = 0;
+  for (let j = 1; j < cuts.length - 1; j++) {
+    const alvo = cuts[j];
+    let best = cursor;
+    let bestD = Infinity;
+    for (let k = cursor; k < pts.length; k++) {
+      const d = (pts[k].lat - alvo.lat) ** 2 + (pts[k].lng - alvo.lng) ** 2;
+      if (d < bestD) {
+        bestD = d;
+        best = k;
+      }
+    }
+    cursor = best;
+    out.push(best);
+  }
+  out.push(Math.max(0, pts.length - 1));
+  return out;
+}
+
+/**
+ * Distância de cada trecho.
+ *
+ * O OSRM devolve `legs[]`, uma por trecho. Quando ele não vem, a distância
+ * total é repartida na proporção das linhas retas — a soma continua sendo a
+ * distância real do caminho.
+ */
+function legDistances(
+  route: { distance?: number; legs?: { distance?: number }[] } | undefined,
+  wps: LatLng[],
+): number[] {
+  const n = wps.length - 1;
+  const retas = wps.slice(1).map((w, i) => haversine(wps[i], w));
+  const legs = route?.legs;
+  if (Array.isArray(legs) && legs.length === n) {
+    return legs.map((l, i) => Number(l?.distance) || retas[i]);
+  }
+  const total = Number(route?.distance) || 0;
+  const soma = retas.reduce((a, b) => a + b, 0);
+  if (total <= 0 || soma <= 0) return retas;
+  return retas.map((r) => (r / soma) * total);
+}
+
+/** Lê a resposta do servidor para um punhado de paradas. */
+export function parseRun(data: unknown, wps: LatLng[]): Run | null {
+  const d = data as {
+    code?: string;
+    routes?: {
+      geometry?: { coordinates?: [number, number][] };
+      distance?: number;
+      legs?: { distance?: number }[];
+    }[];
+    waypoints?: { location?: [number, number] }[];
+  } | null;
+  const route = d?.routes?.[0];
+  const coords = route?.geometry?.coordinates;
+  if (d?.code !== "Ok" || !coords?.length) return null;
+
+  const points = coords.map(([lng, lat]) => ({ lat, lng }));
+  const cuts = wps.map((w, i) => {
+    const loc = d.waypoints?.[i]?.location;
+    return loc && loc.length === 2 ? { lat: loc[1], lng: loc[0] } : w;
+  });
+  return { points, cuts, distances: legDistances(route, wps) };
+}
+
+/** Um punhado vira um trecho por par de paradas, cada um com a sua geometria. */
+export function legsFromRun(run: Run): Leg[] {
+  const idx = splitIndices(run.points, run.cuts);
+  const out: Leg[] = [];
+  for (let i = 0; i + 1 < idx.length; i++) {
+    out.push({
+      points: run.points.slice(idx[i], idx[i + 1] + 1),
+      distance: run.distances[i] ?? 0,
+      direct: false,
+    });
+  }
+  return out;
+}
+
+async function requestRun(
+  wps: LatLng[],
   o: RouteOptions,
   signal?: AbortSignal,
-): Promise<Leg> {
+): Promise<RunAttempt> {
   const engine = engineFor(o);
-  if (!engine) return directLeg(a, b);
+  if (!engine) return { failure: "server" };
 
-  const coord = `${a.lng.toFixed(6)},${a.lat.toFixed(6)};${b.lng.toFixed(6)},${b.lat.toFixed(6)}`;
+  const coord = wps.map((w) => `${w.lng.toFixed(6)},${w.lat.toFixed(6)}`).join(";");
   // continue_straight=false evita voltas no quarteirão ao passar pelos pontos
   const qs = "overview=full&geometries=geojson&alternatives=false&steps=false&continue_straight=false";
 
+  let failure: "rate-limit" | "server" = "server";
   for (const base of ENDPOINTS[engine]) {
+    let rate = false;
     // duas tentativas por servidor: a segunda só acontece depois de um 429
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
@@ -138,53 +280,52 @@ async function requestLeg(
         if (res.status === 429) {
           // limite de uso do servidor comunitário: espera o tempo pedido
           // e tenta uma vez mais antes de passar para o próximo
+          rate = true;
           if (attempt === 0) {
             await sleep(retryAfterMs(res));
             continue;
           }
           break;
         }
+        rate = false;
         if (!res.ok) break;
 
-        const data = await res.json();
-        const coords: [number, number][] | undefined = data?.routes?.[0]?.geometry?.coordinates;
-        if (data?.code !== "Ok" || !coords?.length) break;
-        return {
-          points: coords.map(([lng, lat]) => ({ lat, lng })),
-          distance: Number(data.routes[0].distance) || 0,
-          direct: false,
-        };
+        const run = parseRun(await res.json(), wps);
+        if (run) return { run };
+        break;
       } catch (err) {
         // cancelamento não é falha do servidor: propaga para o chamador
         if (isAbortError(err)) throw err;
+        rate = false;
         break; // erro de rede: tenta o próximo servidor
       }
     }
+    failure = rate ? "rate-limit" : "server";
   }
-  return directLeg(a, b);
+  return { failure };
 }
 
-function getLeg(a: LatLng, b: LatLng, o: RouteOptions, signal?: AbortSignal): Promise<Leg> {
-  const key = legKey(a, b, o);
-  const cached = legCache.get(key);
-  if (cached) return Promise.resolve(cached);
-  const running = inflight.get(key);
-  if (running) return running;
+/**
+ * Calcula um punhado de trechos.
+ *
+ * Se o servidor recusar o punhado inteiro — e não for limite de uso —, ele é
+ * dividido ao meio e cada metade é tentada de novo: assim uma parada
+ * problemática não joga o traçado todo para a linha reta. Quando é limite de
+ * uso, dividir só multiplicaria requisições, então o punhado inteiro vira
+ * linha reta e o aviso aparece na tela.
+ */
+async function fetchRun(wps: LatLng[], o: RouteOptions, signal?: AbortSignal): Promise<Leg[]> {
+  const attempt = await requestRun(wps, o, signal);
+  if ("run" in attempt) return legsFromRun(attempt.run);
 
-  const p = requestLeg(a, b, o, signal)
-    .then((leg) => {
-      legCache.set(key, leg);
-      inflight.delete(key);
-      return leg;
-    })
-    .catch((err) => {
-      inflight.delete(key);
-      // cancelamento não vira cache: a próxima tentativa deve bater no servidor
-      if (isAbortError(err)) throw err;
-      return directLeg(a, b);
-    });
-  inflight.set(key, p);
-  return p;
+  const trechos = wps.length - 1;
+  if (attempt.failure === "rate-limit" || trechos <= SPLIT_FLOOR) {
+    return wps.slice(1).map((w, i) => directLeg(wps[i], w));
+  }
+  const meio = Math.ceil(trechos / 2);
+  const primeira = await fetchRun(wps.slice(0, meio + 1), o, signal);
+  const segunda = await fetchRun(wps.slice(meio), o, signal);
+  return [...primeira, ...segunda];
 }
 
 /** Já temos este trecho pronto? (usado para saber se a rota muda) */
@@ -194,7 +335,6 @@ export function hasLeg(a: LatLng, b: LatLng, o: RouteOptions): boolean {
 
 export function clearRouteCache() {
   legCache.clear();
-  inflight.clear();
   snapCache.clear();
 }
 
@@ -308,22 +448,36 @@ export async function fetchRoute(
     return { points: [...waypoints], distance: 0, source: "direct", reused: 0 };
   }
 
+  const legs: (Leg | undefined)[] = new Array(waypoints.length - 1).fill(undefined);
   let reused = 0;
-  const jobs: { i: number; a: LatLng; b: LatLng }[] = [];
-  for (let i = 1; i < waypoints.length; i++) {
-    if (hasLeg(waypoints[i - 1], waypoints[i], options)) reused++;
-    jobs.push({ i: i - 1, a: waypoints[i - 1], b: waypoints[i] });
+  for (let i = 0; i < legs.length; i++) {
+    const cached = legCache.get(legKey(waypoints[i], waypoints[i + 1], options));
+    if (cached) {
+      legs[i] = cached;
+      reused++;
+    }
   }
 
-  // concorrência limitada: os servidores de rota gratuitos pedem uso moderado
-  const legs: Leg[] = new Array(jobs.length);
-  const CONCURRENCY = 4;
+  // só o que falta vai ao servidor, agrupado em punhados de até 99 trechos
+  const runs = planRuns(legs.map((l) => !l));
+
   let cursor = 0;
   await Promise.all(
-    new Array(Math.min(CONCURRENCY, Math.max(1, jobs.length))).fill(0).map(async () => {
-      while (cursor < jobs.length) {
-        const job = jobs[cursor++];
-        legs[job.i] = await getLeg(job.a, job.b, options, signal);
+    new Array(Math.min(RUN_CONCURRENCY, Math.max(1, runs.length))).fill(0).map(async () => {
+      while (cursor < runs.length) {
+        const run = runs[cursor++];
+        const calculados = await fetchRun(
+          waypoints.slice(run.from, run.to + 2),
+          options,
+          signal,
+        );
+        for (let i = run.from; i <= run.to; i++) {
+          const a = waypoints[i];
+          const b = waypoints[i + 1];
+          const leg = calculados[i - run.from] ?? directLeg(a, b);
+          legs[i] = leg;
+          legCache.set(legKey(a, b, options), leg);
+        }
       }
     }),
   );
@@ -333,9 +487,10 @@ export async function fetchRoute(
   let directCount = 0;
 
   legs.forEach((leg, i) => {
-    distance += leg.distance;
-    if (leg.direct) directCount++;
-    const pts = leg.points;
+    const l = leg ?? directLeg(waypoints[i], waypoints[i + 1]);
+    distance += l.distance;
+    if (l.direct) directCount++;
+    const pts = l.points;
     // evita duplicar o ponto de junção entre trechos
     const start = i === 0 ? 0 : 1;
     for (let k = start; k < pts.length; k++) points.push(pts[k]);

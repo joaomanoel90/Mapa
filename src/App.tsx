@@ -13,6 +13,7 @@ import {
   sanitizeSettings,
   type Settings,
 } from "./lib/settings";
+import { pinsAsDots } from "./lib/pins";
 import {
   buildTrack,
   formatDistance,
@@ -103,6 +104,8 @@ function App() {
   /** paradas do percurso (ponte, cachoeira, igreja…) */
   const [pois, setPois] = useState<Poi[]>(() => shared?.pois ?? []);
   const [selectedPoi, setSelectedPoi] = useState<string | null>(null);
+  /** pino escolhido no mapa: com muitos pinos, é ele que vira marcador arrastável */
+  const [selectedWp, setSelectedWp] = useState<number | null>(null);
   /** modo "mira": clicar no mapa posiciona parada (pode ser fora da rota) */
   const [poiMode, setPoiMode] = useState(false);
   const lastKindRef = useRef("destino");
@@ -358,6 +361,7 @@ function App() {
   const addPoint = useCallback(
     (p: LatLng) => {
       clearImported();
+      setSelectedWp(null);
       let added = false;
       setWaypoints((prev) => {
         if (prev.length >= MAX_WAYPOINTS) return prev;
@@ -385,6 +389,7 @@ function App() {
   const removePoint = useCallback(
     (index: number) => {
       clearImported();
+      setSelectedWp(null);
       setWaypoints((prev) => prev.filter((_, i) => i !== index));
       setSnapStreet(null);
     },
@@ -531,6 +536,7 @@ function App() {
     setSettings((prev) => ({ ...prev, profile: p.profile }));
     setPois((p.stops ?? []).map((s) => makePoi(s.kindId, s.t, s.label)));
     setSelectedPoi(null);
+    setSelectedWp(null);
     setFitRequest((n) => n + 1); // exemplos: enquadra automaticamente
     setCity({
       id: `preset-${p.id}`,
@@ -562,6 +568,7 @@ function App() {
 
   const undoPoint = useCallback(() => {
     clearImported();
+    setSelectedWp(null);
     setWaypoints((p) => p.slice(0, -1));
     setSnapStreet(null);
   }, [clearImported]);
@@ -573,6 +580,7 @@ function App() {
     setSnapStreet(null);
     setPois([]);
     setSelectedPoi(null);
+    setSelectedWp(null);
   }, [clearImported]);
 
   /* ---------- exportação ---------- */
@@ -606,6 +614,7 @@ function App() {
         }),
       );
       setSelectedPoi(null);
+      setSelectedWp(null);
       setPlaying(false);
       setProgress(0);
       progressRef.current = 0;
@@ -974,6 +983,8 @@ function App() {
             onAddPoint={addPoint}
             onMovePoint={movePoint}
             onRemovePoint={removePoint}
+            selectedWp={selectedWp}
+            onSelectPoint={setSelectedWp}
             endpoints={endpoints}
             pois={pois}
             showStops={settings.showStops}
@@ -985,6 +996,17 @@ function App() {
             onPlacePoi={placePoiAt}
             onDropPoi={dropPoi}
           />
+
+          {waypoints.length > 0 && !playing && pinsAsDots(waypoints.length) && (
+            <div className="pointer-events-none absolute left-1/2 top-4 z-20 -translate-x-1/2 rounded-2xl border border-white/15 bg-zinc-950/85 px-4 py-2.5 text-center shadow-2xl backdrop-blur-md">
+              <p className="text-[12.5px] font-semibold text-white">
+                📍 {waypoints.length.toLocaleString("pt-BR")} pinos no mapa
+              </p>
+              <p className="text-[11px] text-zinc-400">
+                Clique num pino para escolher · arraste para mover · clique de novo para remover
+              </p>
+            </div>
+          )}
 
           {waypoints.length === 0 && !poiMode && (
             <div className="pointer-events-none absolute left-1/2 top-4 z-20 -translate-x-1/2 rounded-2xl border border-white/15 bg-zinc-950/85 px-4 py-2.5 text-center shadow-2xl backdrop-blur-md">
@@ -1032,7 +1054,7 @@ function App() {
 
           {waypoints.length >= MAX_WAYPOINTS && (
             <div className="pointer-events-none absolute left-1/2 top-4 z-20 -translate-x-1/2 rounded-2xl border border-amber-400/30 bg-amber-950/90 px-4 py-2 text-center text-[12px] font-semibold text-amber-200 shadow-2xl backdrop-blur-md">
-              Limite de {MAX_WAYPOINTS} paradas atingido
+              Limite de {MAX_WAYPOINTS.toLocaleString("pt-BR")} paradas atingido
             </div>
           )}
 

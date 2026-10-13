@@ -4,10 +4,14 @@ import type { Profile } from "./routing";
 
 /**
  * Limite de paradas por rota.
- * Cada trecho é uma requisição ao servidor de rotas gratuito, então mantemos
- * um teto generoso, mas finito.
+ *
+ * Cada trecho era uma requisição ao servidor de rotas gratuito — com 60
+ * paradas, 59 requisições. Desde que as coordenadas passaram a ir em punhado
+ * (até 99 trechos por requisição), 3.000 paradas custam 31 requisições.
+ * O teto agora existe para a tela continuar respondendo, e não para o
+ * servidor: acima de `PIN_DOT_LIMIT` os pinos viram pontos no mapa.
  */
-export const MAX_WAYPOINTS = 60;
+export const MAX_WAYPOINTS = 3000;
 
 export type AspectId = "16:9" | "9:16" | "1:1" | "4:5";
 

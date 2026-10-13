@@ -6,6 +6,7 @@ import { HOME_CITY } from "../lib/geocode";
 import type { Character } from "../lib/characters";
 import { poiAnchor, poiLatLng, poiOffset, type Poi } from "../lib/pois";
 import { hasMark, type Endpoints } from "../lib/endpoints";
+import { keepsMarker, pinsAsDots } from "../lib/pins";
 
 export type FlyTarget = {
   /** muda sempre que o usuário escolhe um destino novo */
@@ -33,6 +34,9 @@ type Props = {
   onAddPoint: (p: LatLng) => void;
   onMovePoint: (index: number, p: LatLng) => void;
   onRemovePoint: (index: number) => void;
+  /** pino escolhido no mapa (vira marcador arrastável quando há muitos pinos) */
+  selectedWp: number | null;
+  onSelectPoint: (index: number) => void;
   /** locais marcados de partida/chegada */
   endpoints: Endpoints;
   /* paradas do percurso */
@@ -78,6 +82,8 @@ export default function MapView(props: Props) {
     onAddPoint,
     onMovePoint,
     onRemovePoint,
+    selectedWp,
+    onSelectPoint,
     endpoints,
     pois,
     showStops,
@@ -104,6 +110,7 @@ export default function MapView(props: Props) {
     onAddPoint,
     onMovePoint,
     onRemovePoint,
+    onSelectPoint,
     onSelectPoi,
     onAddPoiAt,
     onMovePoi,
@@ -115,6 +122,7 @@ export default function MapView(props: Props) {
     onAddPoint,
     onMovePoint,
     onRemovePoint,
+    onSelectPoint,
     onSelectPoi,
     onAddPoiAt,
     onMovePoi,
@@ -225,7 +233,25 @@ export default function MapView(props: Props) {
     const layer = wpLayerRef.current;
     if (!layer) return;
     layer.clearLayers();
+    // com muitos pinos, um marcador arrastável por ponto trava o arrasto:
+    // os pinos viram pontos no canvas e só os importantes seguem marcadores
+    const muitos = pinsAsDots(waypoints.length);
     waypoints.forEach((p, i) => {
+      if (muitos && !keepsMarker(i, waypoints.length, selectedWp)) {
+        L.circleMarker(p, {
+          radius: 4,
+          color: accent,
+          weight: 1,
+          fillColor: accent,
+          fillOpacity: 0.85,
+          // clicar no pino não pode virar "adicionar ponto" no mapa
+          bubblingMouseEvents: false,
+        })
+          .on("click", () => cbRef.current.onSelectPoint(i))
+          .addTo(layer);
+        return;
+      }
+
       const first = i === 0;
       const last = i === waypoints.length - 1 && waypoints.length > 1;
       const color = first ? "#22c55e" : last ? "#f87171" : accent;
@@ -255,7 +281,7 @@ export default function MapView(props: Props) {
         cbRef.current.onRemovePoint(i);
       });
     });
-  }, [waypoints, accent, endpoints]);
+  }, [waypoints, accent, endpoints, selectedWp]);
 
   /* --- rota planejada --- */
   useEffect(() => {

@@ -21,8 +21,14 @@ import {
   sampleTrack,
   type LatLng,
 } from "./lib/geo";
-import { fetchRoute, snapToRoad, type Preset, type RouteResult } from "./lib/routing";
-import { makePoi, nextFreeT, sortPois, type Poi } from "./lib/pois";
+import {
+  fetchRoute,
+  isAbortError,
+  snapToRoad,
+  type Preset,
+  type RouteResult,
+} from "./lib/routing";
+import { makePoi, nextFreeT, nextPoiId, sortPois, type Poi } from "./lib/pois";
 import { DEFAULT_ENDPOINTS, type Endpoints } from "./lib/endpoints";
 import { findCharacter } from "./lib/characters";
 import { SceneRenderer, tilesForAnimation, TILE_BUDGET } from "./lib/renderer";
@@ -127,8 +133,26 @@ function App() {
     [route, waypoints],
   );
   const hasRoute = track.pts.length > 1;
-  const character = findCharacter(settings.characterId);
-  const aspect = ASPECTS.find((a) => a.id === settings.aspect) ?? ASPECTS[0];
+  const character = useMemo(
+    () => findCharacter(settings.characterId),
+    [settings.characterId],
+  );
+  const aspect = useMemo(
+    () => ASPECTS.find((a) => a.id === settings.aspect) ?? ASPECTS[0],
+    [settings.aspect],
+  );
+
+  /**
+   * Progresso em passos de 1%, para o painel lateral.
+   *
+   * O painel só precisa saber quais paradas já ficaram para trás — não precisa
+   * de 60 quadros por segundo. Como o `Sidebar` é memoizado e todos os seus
+   * outros props são estáveis (`useCallback`/`useMemo`), arredondar aqui evita
+   * re-renderizar o painel (e o `StopEditor` dentro dele) a cada quadro da
+   * animação. O mapa e a linha do tempo continuam recebendo o valor cheio.
+   */
+  const sidebarProgress = Math.round(progress * 100) / 100;
+
   const activeFormat =
     formats.find((f) => f.id === settings.formatId) ?? formats[0] ?? {
       id: "webm",
@@ -176,25 +200,43 @@ function App() {
       return;
     }
     let alive = true;
+    // cancela o cálculo anterior: sem isso, cada ponto novo deixava uma
+    // requisição pendente em servidores comunitários que pedem uso moderado
+    const controller = new AbortController();
     setLoading(true);
     const timer = setTimeout(async () => {
       try {
-        const res = await fetchRoute(waypoints, routeOptions);
+        const res = await fetchRoute(waypoints, routeOptions, controller.signal);
         if (!alive) return;
         setRoute(res);
+      } catch (err) {
+        // cancelamento é esperado; outras falhas só mantêm o que já está na tela
+        if (!isAbortError(err)) console.error("Falha ao calcular a rota", err);
       } finally {
         if (alive) setLoading(false);
       }
     }, 300);
     return () => {
       alive = false;
+      controller.abort();
       clearTimeout(timer);
       setLoading(false);
     };
   }, [waypoints, routeOptions]);
 
   /* reinicia a animação quando a rota muda */
-  const routeKey = route?.points.map((p) => `${p.lat.toFixed(5)},${p.lng.toFixed(5)}`).join("|") ?? "";
+  /**
+   * Chave estável da rota.
+   *
+   * Fica em `useMemo` de propósito: a animação chama `setProgress` a cada
+   * quadro, e sem isso a geometria inteira do OSRM (overview=full, até 60
+   * trechos) seria percorrida e convertida em string ~60x por segundo.
+   */
+  const routeKey = useMemo(
+    () =>
+      route?.points.map((p) => `${p.lat.toFixed(5)},${p.lng.toFixed(5)}`).join("|") ?? "",
+    [route],
+  );
   useEffect(() => {
     setProgress(0);
     progressRef.current = 0;
@@ -231,12 +273,17 @@ function App() {
    * servidor responde — por isso a linha nasce já em cima da via.
    */
   const snapIndex = useRef(0);
+  const snapAbort = useRef<AbortController | null>(null);
   const snapAndFix = useCallback(
     (raw: LatLng, locate: (list: LatLng[]) => number) => {
       if (!snapEnabledRef.current) return;
       const token = ++snapIndex.current;
+      // cliques rápidos: cancela o encaixe anterior em vez de deixá-lo em voo
+      snapAbort.current?.abort();
+      const controller = new AbortController();
+      snapAbort.current = controller;
       setSnapping(true);
-      snapToRoad(raw, routeOptionsRef.current)
+      snapToRoad(raw, routeOptionsRef.current, controller.signal)
         .then((res) => {
           if (token !== snapIndex.current) return;
           setSnapStreet(res.snapped ? (res.street ?? "via sem nome") : null);
@@ -248,6 +295,9 @@ function App() {
             next[i] = res.point;
             return next;
           });
+        })
+        .catch((err) => {
+          if (!isAbortError(err)) console.error("Falha ao encaixar na rua", err);
         })
         .finally(() => {
           if (token === snapIndex.current) setSnapping(false);
@@ -290,11 +340,12 @@ function App() {
   /* ---------- paradas do percurso ---------- */
   const addPoi = useCallback((kindId: string, t?: number, pos?: LatLng) => {
     lastKindRef.current = kindId;
-    setPois((prev) => {
-      const poi = makePoi(kindId, t ?? nextFreeT(prev), undefined, pos);
-      setSelectedPoi(poi.id);
-      return [...prev, poi];
-    });
+    // O id é sorteado aqui, e não dentro do updater: o updater precisa ser puro
+    // (o StrictMode o executa duas vezes) e a seleção tem de apontar para o id
+    // que realmente entrou na lista.
+    const id = nextPoiId();
+    setPois((prev) => [...prev, makePoi(kindId, t ?? nextFreeT(prev), undefined, pos, id)]);
+    setSelectedPoi(id);
   }, []);
 
   /** clique sobre a linha da rota no mapa */
@@ -674,7 +725,7 @@ function App() {
             onCity={pickCity}
             pois={pois}
             track={track}
-            progress={progress}
+            progress={sidebarProgress}
             selectedPoi={selectedPoi}
             poiMode={poiMode}
             onTogglePoiMode={togglePoiMode}
@@ -787,7 +838,11 @@ function App() {
           )}
 
           {(snapping || snapStreet) && waypoints.length > 0 && (
-            <div className="pointer-events-none absolute bottom-28 left-1/2 z-20 flex -translate-x-1/2 items-center gap-2 rounded-xl border border-white/15 bg-zinc-950/88 px-3 py-1.5 text-[11.5px] font-medium text-zinc-200 shadow-xl backdrop-blur-md">
+            <div
+              role="status"
+              aria-live="polite"
+              className="pointer-events-none absolute bottom-28 left-1/2 z-20 flex -translate-x-1/2 items-center gap-2 rounded-xl border border-white/15 bg-zinc-950/88 px-3 py-1.5 text-[11.5px] font-medium text-zinc-200 shadow-xl backdrop-blur-md"
+            >
               {snapping ? (
                 <>
                   <span className="h-3 w-3 animate-spin rounded-full border-2 border-white/20 border-t-violet-400" />
@@ -809,6 +864,7 @@ function App() {
               onClick={fitRoute}
               disabled={waypoints.length < 2}
               title="Enquadrar a rota inteira"
+              aria-label="Enquadrar a rota inteira"
               className="grid h-9 w-9 place-items-center rounded-xl border border-white/15 bg-zinc-950/85 text-sm text-zinc-200 shadow-xl backdrop-blur-md transition hover:text-white disabled:opacity-35"
             >
               ⤢
@@ -818,6 +874,7 @@ function App() {
               onClick={undoPoint}
               disabled={waypoints.length === 0}
               title="Desfazer último ponto"
+              aria-label="Desfazer último ponto"
               className="grid h-9 w-9 place-items-center rounded-xl border border-white/15 bg-zinc-950/85 text-sm text-zinc-200 shadow-xl backdrop-blur-md transition hover:text-white disabled:opacity-35"
             >
               ↩︎

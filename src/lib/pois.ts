@@ -152,11 +152,30 @@ export function kindById(id: string): PoiKind {
 }
 
 let seq = 0;
-export function makePoi(kindId: string, t: number, label?: string, pos?: LatLng): Poi {
-  const kind = kindById(kindId);
+
+/**
+ * Id único de uma parada.
+ *
+ * Precisa ser gerado **fora** do atualizador de estado do React: em
+ * desenvolvimento o `<StrictMode>` executa o updater duas vezes, e um id
+ * sorteado lá dentro não seria o mesmo que acabou ficando na lista —
+ * a parada recém-criada não apareceria selecionada.
+ */
+export function nextPoiId(): string {
   seq += 1;
+  return `poi-${Date.now().toString(36)}-${seq}`;
+}
+
+export function makePoi(
+  kindId: string,
+  t: number,
+  label?: string,
+  pos?: LatLng,
+  id: string = nextPoiId(),
+): Poi {
+  const kind = kindById(kindId);
   return {
-    id: `poi-${Date.now().toString(36)}-${seq}`,
+    id,
     emoji: kind.emoji,
     label: label ?? kind.name,
     color: kind.color,

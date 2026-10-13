@@ -32,6 +32,22 @@ export function timesOf(pts: LatLng[]): number[] | null {
   return validos >= 2 ? tempos : null;
 }
 
+/**
+ * Relógio do HUD, no formato de relógio de atividade.
+ *
+ * `mm:ss` do `formatTime` serve para o cronômetro do app, mas no HUD uma
+ * pedalada de 3 h 19 min apareceria como **199:00** — minutos e segundos sem
+ * dizer que são minutos. Acima de uma hora, vira `h:mm:ss`.
+ */
+export function formatClock(segundos: number): string {
+  const total = Math.max(0, Math.floor(segundos));
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const seg = total % 60;
+  const dois = (n: number) => String(n).padStart(2, "0");
+  return h > 0 ? `${h}:${dois(m)}:${dois(seg)}` : `${dois(m)}:${dois(seg)}`;
+}
+
 /** Busca binária: primeiro índice cujo valor é >= `alvo`. */
 function lowerBound(valores: number[], alvo: number): number {
   let lo = 0;

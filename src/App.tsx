@@ -28,8 +28,16 @@ import {
   type Preset,
   type RouteResult,
 } from "./lib/routing";
-import { makePoi, nextFreeT, nextPoiId, sortPois, type Poi } from "./lib/pois";
+import { makePoi, nextFreeT, nextPoiId, poiLatLng, sortPois, type Poi } from "./lib/pois";
 import { buildShareUrl, decodeShare, sharedSettingsOverrides } from "./lib/share";
+import {
+  GpxError,
+  gpxFileName,
+  parseGpx,
+  poiKindForSym,
+  simplifyTo,
+  toGpx,
+} from "./lib/gpx";
 import { DEFAULT_ENDPOINTS, type Endpoints } from "./lib/endpoints";
 import { findCharacter } from "./lib/characters";
 import { SceneRenderer, tilesForAnimation, TILE_BUDGET } from "./lib/renderer";
@@ -45,6 +53,17 @@ import { isFastEncodeSupported, recordVideoFast } from "./lib/webcodecs";
 function App() {
   /** Rota recebida por link (`#r=…`). Lida uma única vez, na montagem. */
   const [shared] = useState(() => decodeShare(window.location.hash));
+  /**
+   * Traçado vindo de um GPX.
+   *
+   * Fica separado dos waypoints porque um track gravado **já segue as ruas**:
+   * recalcular pelo roteador mudaria a rota e gastaria chamadas ao servidor
+   * comunitário à toa. Enquanto isto estiver preenchido, o roteador não é
+   * chamado; quando o usuário mexer em qualquer ponto, volta ao normal.
+   */
+  const [rawTrack, setRawTrack] = useState<LatLng[] | null>(null);
+  /** Retorno da importação: erro ou resumo do que entrou. */
+  const [gpxMsg, setGpxMsg] = useState<{ tipo: "erro" | "info"; texto: string } | null>(null);
 
   const [settings, setSettings] = useState<Settings>(() => {
     const f = availableFormats();
@@ -138,8 +157,8 @@ function App() {
    * os próprios waypoints — assim o personagem já aparece no primeiro clique.
    */
   const track = useMemo(
-    () => buildTrack(route?.points?.length ? route.points : waypoints),
-    [route, waypoints],
+    () => buildTrack(rawTrack ?? (route?.points?.length ? route.points : waypoints)),
+    [rawTrack, route, waypoints],
   );
   const hasRoute = track.pts.length > 1;
   const character = useMemo(
@@ -211,6 +230,8 @@ function App() {
   const fitAfterRoute = useRef(Boolean(shared && shared.waypoints.length >= 2));
 
   useEffect(() => {
+    // traçado importado é usado como veio, sem passar pelo roteador
+    if (rawTrack) return;
     if (waypoints.length < 2) {
       setRoute(null);
       setLoading(false);
@@ -243,7 +264,7 @@ function App() {
       clearTimeout(timer);
       setLoading(false);
     };
-  }, [waypoints, routeOptions]);
+  }, [waypoints, routeOptions, rawTrack]);
 
   /* reinicia a animação quando a rota muda */
   /**
@@ -327,8 +348,16 @@ function App() {
     [],
   );
 
+  /**
+   * Abandona o traçado importado do GPX.
+   * Qualquer edição manual significa que o usuário quer traçar de novo — a
+   * partir daí o roteador volta a mandar.
+   */
+  const clearImported = useCallback(() => setRawTrack(null), []);
+
   const addPoint = useCallback(
     (p: LatLng) => {
+      clearImported();
       let added = false;
       setWaypoints((prev) => {
         if (prev.length >= MAX_WAYPOINTS) return prev;
@@ -342,20 +371,25 @@ function App() {
         );
       }
     },
-    [snapAndFix],
+    [snapAndFix, clearImported],
   );
 
   const movePoint = useCallback(
     (index: number, p: LatLng) => {
+      clearImported();
       setWaypoints((prev) => prev.map((w, i) => (i === index ? p : w)));
       snapAndFix(p, () => index);
     },
-    [snapAndFix],
+    [snapAndFix, clearImported],
   );
-  const removePoint = useCallback((index: number) => {
-    setWaypoints((prev) => prev.filter((_, i) => i !== index));
-    setSnapStreet(null);
-  }, []);
+  const removePoint = useCallback(
+    (index: number) => {
+      clearImported();
+      setWaypoints((prev) => prev.filter((_, i) => i !== index));
+      setSnapStreet(null);
+    },
+    [clearImported],
+  );
   const fitRoute = useCallback(() => setFitRequest((n) => n + 1), []);
 
   /* ---------- paradas do percurso ---------- */
@@ -491,6 +525,8 @@ function App() {
   }, [poiMode, selectedPoi, nudgePoi]);
 
   const applyPreset = useCallback((p: Preset) => {
+    clearImported();
+    setGpxMsg(null);
     setWaypoints(p.points);
     setSettings((prev) => ({ ...prev, profile: p.profile }));
     setPois((p.stops ?? []).map((s) => makePoi(s.kindId, s.t, s.label)));
@@ -504,7 +540,7 @@ function App() {
       center: p.points[0],
       zoom: 13,
     });
-  }, []);
+  }, [clearImported]);
 
   const replay = useCallback(() => {
     setProgress(0);
@@ -525,18 +561,106 @@ function App() {
   }, []);
 
   const undoPoint = useCallback(() => {
+    clearImported();
     setWaypoints((p) => p.slice(0, -1));
     setSnapStreet(null);
-  }, []);
+  }, [clearImported]);
   const clearPoints = useCallback(() => {
+    clearImported();
+    setGpxMsg(null);
     setWaypoints([]);
     setPlaying(false);
     setSnapStreet(null);
     setPois([]);
     setSelectedPoi(null);
-  }, []);
+  }, [clearImported]);
 
   /* ---------- exportação ---------- */
+  /* ---------- GPX (importar / exportar) ---------- */
+
+  /** Lê um arquivo GPX e monta a rota a partir dele. */
+  const importarGpx = useCallback(async (file: File) => {
+    setGpxMsg(null);
+    try {
+      const dados = parseGpx(await file.text());
+
+      const temTracado = dados.points.length > 1;
+      // o traçado completo fica guardado; os waypoints são a versão editável
+      const pontos = temTracado ? simplifyTo(dados.points, MAX_WAYPOINTS) : [];
+      setWaypoints(pontos);
+      setRoute(null);
+
+      // pontos soltos do arquivo viram paradas do percurso
+      const base = buildTrack(temTracado ? dados.points : pontos);
+      setPois(
+        dados.waypoints.map((w) => {
+          const near = nearestTOnTrack(base, { lat: w.lat, lng: w.lng });
+          const colada = temTracado && near.offset <= 30;
+          return makePoi(
+            poiKindForSym(w.sym, w.name),
+            temTracado ? near.t : 0.5,
+            w.name,
+            colada || !temTracado ? undefined : { lat: w.lat, lng: w.lng },
+            nextPoiId(),
+          );
+        }),
+      );
+      setSelectedPoi(null);
+      setPlaying(false);
+      setProgress(0);
+      progressRef.current = 0;
+      progressUiRef.current = 0;
+      setRawTrack(temTracado ? dados.points : null);
+      setFitRequest((n) => n + 1);
+
+      // aproveita o nome do arquivo, desde que o usuário não tenha escolhido um
+      if (dados.name) {
+        setSettings((prev) =>
+          prev.title === DEFAULT_SETTINGS.title ? { ...prev, title: dados.name! } : prev,
+        );
+      }
+
+      const partes: string[] = [];
+      partes.push(
+        temTracado
+          ? `${dados.points.length.toLocaleString("pt-BR")} pontos de traçado`
+          : "sem traçado",
+      );
+      if (dados.waypoints.length > 0) {
+        partes.push(
+          `${dados.waypoints.length} ${dados.waypoints.length === 1 ? "parada" : "paradas"}`,
+        );
+      }
+      if (dados.segments > 1) partes.push(`${dados.segments} trechos`);
+      if (dados.reduced) partes.push(`reduzido a ${pontos.length} pontos`);
+      setGpxMsg({ tipo: "info", texto: `GPX importado: ${partes.join(" · ")}.` });
+    } catch (err) {
+      const texto =
+        err instanceof GpxError
+          ? err.message
+          : "Não foi possível ler o arquivo. Verifique se é um GPX válido.";
+      setGpxMsg({ tipo: "erro", texto });
+    }
+  }, []);
+
+  /** Baixa a rota atual como GPX. */
+  const exportarGpx = useCallback(() => {
+    if (!hasRoute) return;
+    const xml = toGpx({
+      points: track.pts,
+      waypoints: sortPois(pois).map((p) => {
+        const pos = poiLatLng(p, track);
+        return { lat: pos.lat, lng: pos.lng, name: p.label, sym: p.emoji };
+      }),
+      name: settings.title.trim() || "Rota",
+      desc: settings.subtitle.trim() || formatDistance(track.total),
+    });
+    downloadBlob(
+      new Blob([xml], { type: "application/gpx+xml" }),
+      gpxFileName(settings.title || "rota"),
+    );
+  }, [hasRoute, track, pois, settings.title, settings.subtitle]);
+
   /** Copia o permalink da rota atual. */
   const copiarLink = useCallback(async () => {
     const url = buildShareUrl({ waypoints, settings, pois, endpoints, city });
@@ -785,7 +909,11 @@ function App() {
             waypoints={waypoints}
             distance={route?.distance ?? track.total}
             routeSource={route?.source ?? "direct"}
-            note={route?.note}
+            note={
+              rawTrack
+                ? "Traçado importado do GPX — mantido exatamente como veio. Mover, adicionar ou remover um ponto volta a calcular pelo roteador."
+                : route?.note
+            }
             city={city}
             onCity={pickCity}
             pois={pois}
@@ -814,6 +942,9 @@ function App() {
             onPreset={applyPreset}
             onExport={startExport}
             onReplay={replay}
+            onImportGpx={importarGpx}
+            onExportGpx={exportarGpx}
+            gpxMsg={gpxMsg}
           />
         </aside>
 

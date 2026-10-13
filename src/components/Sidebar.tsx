@@ -1,4 +1,4 @@
-import { memo } from "react";
+import { memo, useRef } from "react";
 import CitySearch from "./CitySearch";
 import EndpointEditor from "./EndpointEditor";
 import StopEditor from "./StopEditor";
@@ -53,6 +53,12 @@ type Props = {
   onPreset: (p: Preset) => void;
   onExport: () => void;
   onReplay: () => void;
+  /** importa uma trilha em GPX (o App faz a leitura e a validação) */
+  onImportGpx: (file: File) => void;
+  /** baixa a rota atual como GPX */
+  onExportGpx: () => void;
+  /** retorno da importação, para mostrar erro ou resumo */
+  gpxMsg: { tipo: "erro" | "info"; texto: string } | null;
 };
 
 function Sidebar(props: Props) {
@@ -91,8 +97,12 @@ function Sidebar(props: Props) {
     onPreset,
     onExport,
     onReplay,
+    onImportGpx,
+    onExportGpx,
+    gpxMsg,
   } = props;
 
+  const gpxInput = useRef<HTMLInputElement | null>(null);
   const avgKmh = hasRoute && s.duration > 0 ? (distance / 1000 / s.duration) * 3600 : 0;
   const character = findCharacter(s.characterId);
   const aspect = ASPECTS.find((a) => a.id === s.aspect) ?? ASPECTS[0];
@@ -161,6 +171,57 @@ function Sidebar(props: Props) {
                 </button>
               ))}
             </div>
+          </div>
+          <div className="rounded-xl border border-white/10 bg-black/25 p-3">
+            <div className="mb-2 flex items-center justify-between">
+              <span className="text-[12px] font-semibold text-zinc-200">🛰️ GPX</span>
+              <span className="text-[10.5px] text-zinc-500">Strava, Garmin, Komoot…</span>
+            </div>
+            <div className="flex gap-1.5">
+              <Button onClick={() => gpxInput.current?.click()} className="flex-1" title="Abrir uma trilha gravada (.gpx)">
+                📂 Importar
+              </Button>
+              <Button
+                onClick={onExportGpx}
+                disabled={!hasRoute}
+                className="flex-1"
+                title="Baixar a rota atual como GPX"
+              >
+                ⬇️ Exportar
+              </Button>
+            </div>
+            <input
+              ref={gpxInput}
+              type="file"
+              accept=".gpx,application/gpx+xml,application/xml,text/xml"
+              className="hidden"
+              aria-label="Escolher arquivo GPX"
+              onChange={(e) => {
+                const arquivo = e.target.files?.[0];
+                if (arquivo) onImportGpx(arquivo);
+                // permite reimportar o mesmo arquivo em seguida
+                e.target.value = "";
+              }}
+            />
+            {gpxMsg ? (
+              <p
+                role="status"
+                aria-live="polite"
+                className={
+                  "mt-2 rounded-lg border p-2 text-[11px] leading-snug " +
+                  (gpxMsg.tipo === "erro"
+                    ? "border-red-400/30 bg-red-500/10 text-red-200"
+                    : "border-emerald-400/25 bg-emerald-500/10 text-emerald-200")
+                }
+              >
+                {gpxMsg.texto}
+              </p>
+            ) : (
+              <p className="mt-2 text-[10.5px] leading-snug text-zinc-500">
+                Importar usa o traçado exato do arquivo, sem recalcular pelas ruas. Mover um ponto
+                volta a calcular pelo roteador.
+              </p>
+            )}
           </div>
           <div className="flex gap-1.5">
             <Button onClick={onUndo} disabled={waypoints.length === 0} className="flex-1">

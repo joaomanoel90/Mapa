@@ -173,6 +173,43 @@ referência só anda quando a variação passa do limiar, o que mantém o erro d
 total abaixo do próprio limiar — em vez de acumular o erro das pontas, como
 faria um suavizado.
 
+### HUD no vídeo
+
+No canto superior direito, um painel com os números do percurso:
+
+```
+        ┌─────────────────┐
+        │  24 km/h        │   velocidade (do arquivo)
+        │  ▓▓▓▓▓▓░░░░ 62% │   barra de andamento
+        │  18,4 km  1 h 12│   distância  ·  relógio
+        └─────────────────┘
+```
+
+Distância e andamento saem do traçado. Velocidade e relógio vêm do `<time>` do
+arquivo, e **é aí que o HUD tem que ser honesto**:
+
+| caso | o que aparece |
+|---|---|
+| arquivo com hora | velocidade **real** daquele instante e relógio da pedalada |
+| ciclo parado | `0.0 km/h` — parado é um dado, não uma ausência |
+| rota desenhada à mão | `—` no lugar da velocidade, com a nota "sem arquivo" |
+
+A última linha foi aprendida errando: a primeira versão caía na média do vídeo
+quando não havia hora, e uma rota de 12 km num clipe de 14 s mostrava
+**3.137 km/h**. Número que o arquivo não tem, o HUD não inventa.
+
+**A velocidade passa por uma janela de 20 s**, e o deslocamento usado é a
+**linha reta entre as pontas da janela**. As duas coisas vieram de medir:
+
+- a leitura crua do GPS é barulhenta — dois pontos vizinhos dão picos de 80 km/h
+  numa pedalada de 20;
+- somar a distância percorrida dentro da janela **piora** o ruído, porque um
+  ponto que sai do lugar e volta conta a ida *e* a volta, dobrando o salto. A
+  linha reta cancela o vaivém (que é o que o erro do GPS faz) e continua honesta
+  numa estrada normal, porque 20 s é um trecho curto.
+
+Salto acima de 120 km/h é descartado — nenhum veículo do app chega lá.
+
 ### Quantos pontos sobrevivem### Quantos pontos sobrevivem
 
 São três números diferentes, e vale não confundir:
@@ -278,7 +315,7 @@ ou cortados.
 
 ```bash
 npm run typecheck  # tsc --noEmit
-npm test           # Vitest (295 casos)
+npm test           # Vitest (315 casos)
 npm run check:dist # o build saiu autocontido e sem /src/?
 ```
 
@@ -328,6 +365,7 @@ src/
    ├─ pins.ts               quando o pino vira ponto no mapa
    ├─ pois.ts               paradas do percurso
    ├─ stats.ts              distância, elevação (com corte de ruído), tempo e cartela
+   ├─ hud.ts                velocidade e relógio do HUD (com janela anti-ruído)
    ├─ EndCardPanel.tsx      campos da cartela final (com teste de digitação)
    ├─ gpx.ts                importar/exportar GPX, simplificação de traçado
    ├─ share.ts              permalink da rota (codifica/valida o #r=…)

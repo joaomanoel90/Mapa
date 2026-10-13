@@ -53,6 +53,7 @@ const SHARED_KEYS = [
   "showTitle",
   "showProgress",
   "endCard",
+  "showHud",
   "cardDistance",
   "cardElevation",
   "cardTime",

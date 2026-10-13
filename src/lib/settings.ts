@@ -48,6 +48,8 @@ export type Settings = {
   showProgress: boolean;
   /** cartela com o resumo do percurso nos últimos segundos do vídeo */
   endCard: boolean;
+  /** painel de números no vídeo (velocidade, andamento, distância, relógio) */
+  showHud: boolean;
   /**
    * Os números da cartela são **digitados**, não medidos.
    *
@@ -94,6 +96,7 @@ export const DEFAULT_SETTINGS: Settings = {
   showTitle: true,
   showProgress: true,
   endCard: true,
+  showHud: true,
   cardDistance: "",
   cardElevation: "",
   cardTime: "",
@@ -126,6 +129,7 @@ export function sanitizeSettings(raw: Partial<Settings>): Partial<Settings> {
   if (typeof out.snapToRoad !== "boolean") delete out.snapToRoad;
   if (typeof out.showStopCounter !== "boolean") delete out.showStopCounter;
   if (typeof out.endCard !== "boolean") delete out.endCard;
+  if (typeof out.showHud !== "boolean") delete out.showHud;
   for (const key of ["cardDistance", "cardElevation", "cardTime", "cardNote"] as const) {
     if (typeof out[key] !== "string") delete out[key];
   }

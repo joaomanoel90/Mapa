@@ -10,7 +10,7 @@ import {
   type BasemapId,
   type TileImage,
 } from "./tiles";
-import type { SummaryTile } from "./stats";
+import type { EndCard } from "./stats";
 import {
   TILE_SIZE,
   boundsOf,
@@ -70,8 +70,8 @@ export type FrameState = {
   /** segundos desde o início (para efeitos) */
   elapsed: number;
   duration: number;
-  /** números da cartela final — null quando não há nada para mostrar */
-  summary: SummaryTile[] | null;
+  /** cartela final (números digitados + linha de baixo) — null quando não há nada */
+  summary: EndCard | null;
 };
 
 /* ------------------------------------------------------------------ */
@@ -1118,6 +1118,14 @@ const SUMMARY_FADE_S = 0.6;
  * então uma rota desenhada à mão mostra um número, e uma pedalada importada
  * mostra a fileira inteira.
  */
+/**
+ * Cartela final: os números digitados no painel e a linha de baixo.
+ *
+ * Nada é medido aqui — o que aparece é o que foi escrito (a montagem é do
+ * `endCard`, no stats.ts). A única decisão deste desenho é **caber**: os
+ * textos vêm de um campo livre, então o corpo da letra encolhe antes de o
+ * excesso virar "…", e o texto nunca vaza da tela em retrato.
+ */
 function drawSummary(
   ctx: CanvasRenderingContext2D,
   width: number,
@@ -1126,8 +1134,8 @@ function drawSummary(
   onDark: boolean,
   sf: number,
 ) {
-  const tiras = input.summary;
-  if (!tiras || tiras.length === 0) return;
+  const card = input.summary;
+  if (!card || (card.tiles.length === 0 && !card.note)) return;
 
   const dur = Math.max(1, input.duration);
   // percentual do vídeo em que a cartela começa (limitado a 45% em clipes curtos)
@@ -1137,10 +1145,84 @@ function drawSummary(
   if (input.t < inicio) return;
   const alpha = fade > 0 ? Math.min(1, Math.max(0, (input.t - inicio) / fade)) : 1;
 
+  const claro = !onDark;
   const pad = 34 * sf;
-  const valorFs = Math.round(46 * sf);
-  const labelFs = Math.round(12.5 * sf);
   const gap = 34 * sf;
+  const maxW = width * 0.92;
+
+  const fValor = (px: number) =>
+    `800 ${Math.round(px)}px "Inter","Segoe UI",system-ui,sans-serif`;
+  const fLabel = (px: number) =>
+    `600 ${Math.round(px)}px "Inter","Segoe UI",system-ui,sans-serif`;
+
+  /** Corta com "…" o que não couber na largura dada, medindo de verdade. */
+  const cortar = (texto: string, max: number, fonte: string) => {
+    ctx.font = fonte;
+    if (ctx.measureText(texto).width <= max) return texto;
+    let fim = texto.length;
+    while (fim > 1 && ctx.measureText(`${texto.slice(0, fim - 1)}…`).width > max) fim--;
+    return `${texto.slice(0, Math.max(1, fim - 1)).trimEnd()}…`;
+  };
+
+  /** Com este corpo de letra, cabe na tela? */
+  const medirCom = (vFs: number, nFs: number) => {
+    const labelFs = Math.round(vFs * 0.27);
+    ctx.font = fValor(vFs);
+    const valores = card.tiles.map((t) => ctx.measureText(t.value).width);
+    ctx.font = fLabel(labelFs);
+    const labels = card.tiles.map((t, i) =>
+      Math.max(valores[i], ctx.measureText(t.label.toUpperCase()).width),
+    );
+    const tiras = labels.reduce((a, b) => a + b, 0) + gap * Math.max(0, labels.length - 1);
+    ctx.font = fLabel(nFs);
+    const nota = card.note ? ctx.measureText(card.note).width : 0;
+    return { labelFs, precisa: Math.max(tiras, nota) + pad * 2 };
+  };
+
+  // 1) encolhe o corpo da letra até caber (ou até o piso)
+  let valorFs = Math.round(46 * sf);
+  const piso = Math.round(valorFs * 0.55);
+  let noteFs = Math.round(15 * sf);
+  let medida = medirCom(valorFs, noteFs);
+  while (medida.precisa > maxW && valorFs > piso) {
+    valorFs = Math.max(piso, valorFs - 2);
+    noteFs = Math.max(Math.round(11 * sf), Math.round(valorFs * 0.33));
+    medida = medirCom(valorFs, noteFs);
+  }
+  const labelFs = medida.labelFs;
+
+  // 2) o que ainda não couber vira "…"
+  const larguraTira = Math.max(
+    60 * sf,
+    (maxW - pad * 2 - gap * Math.max(0, card.tiles.length - 1)) /
+      Math.max(1, card.tiles.length),
+  );
+  const tiras = card.tiles.map((t) => ({
+    label: t.label.toUpperCase(),
+    value: cortar(t.value, larguraTira, fValor(valorFs)),
+  }));
+  const nota = card.note ? cortar(card.note, maxW - pad * 2, fLabel(noteFs)) : null;
+
+  // 3) mede o que será desenhado de fato, para a caixa abraçar o conteúdo
+  ctx.font = fValor(valorFs);
+  const larguraValor = tiras.map((t) => ctx.measureText(t.value).width);
+  ctx.font = fLabel(labelFs);
+  const larguraLabel = tiras.map((t) => ctx.measureText(t.label).width);
+  const colunas = tiras.map((t, i) => ({
+    ...t,
+    w: Math.max(larguraValor[i], larguraLabel[i]),
+  }));
+  const totalW = colunas.reduce((a, c) => a + c.w, 0) + gap * Math.max(0, colunas.length - 1);
+  ctx.font = fLabel(noteFs);
+  const notaW = nota ? ctx.measureText(nota).width : 0;
+
+  const boxW = Math.min(maxW, Math.max(totalW, notaW) + pad * 2);
+  const altura =
+    (colunas.length > 0 ? valorFs * 1.15 + labelFs * 1.35 : 0) +
+    (nota ? noteFs * 1.5 : 0) +
+    pad * 1.6;
+  const boxX = (width - boxW) / 2;
+  const boxY = (height - altura) / 2;
 
   ctx.save();
   ctx.globalAlpha = alpha;
@@ -1149,23 +1231,7 @@ function drawSummary(
   ctx.fillStyle = onDark ? "rgba(3,7,18,0.45)" : "rgba(15,23,42,0.32)";
   ctx.fillRect(0, 0, width, height);
 
-  // mede cada coluna para a caixa abraçar o conteúdo
-  const colunas = tiras.map((tira) => {
-    ctx.font = `800 ${valorFs}px "Inter","Segoe UI",system-ui,sans-serif`;
-    const wv = ctx.measureText(tira.value).width;
-    ctx.font = `600 ${labelFs}px "Inter","Segoe UI",system-ui,sans-serif`;
-    const wl = ctx.measureText(tira.label.toUpperCase()).width;
-    return { tira, w: Math.max(wv, wl) };
-  });
-  const totalW =
-    colunas.reduce((acc, c) => acc + c.w, 0) + gap * Math.max(0, colunas.length - 1);
-
-  const boxW = totalW + pad * 2;
-  const boxH = valorFs + labelFs + pad * 2.1;
-  const boxX = (width - boxW) / 2;
-  const boxY = (height - boxH) / 2;
-
-  roundRect(ctx, boxX, boxY, boxW, boxH, 20 * sf);
+  roundRect(ctx, boxX, boxY, boxW, altura, 20 * sf);
   ctx.fillStyle = onDark ? "rgba(9,12,20,0.82)" : "rgba(255,255,255,0.88)";
   ctx.shadowColor = "rgba(0,0,0,0.45)";
   ctx.shadowBlur = 26 * sf;
@@ -1175,21 +1241,31 @@ function drawSummary(
   ctx.strokeStyle = onDark ? "rgba(255,255,255,0.14)" : "rgba(15,23,42,0.12)";
   ctx.stroke();
 
-  const claro = !onDark;
-  let x = boxX + pad;
   ctx.textAlign = "center";
   ctx.textBaseline = "alphabetic";
-  const linhaValor = boxY + pad * 1.2 + valorFs * 0.8;
-  for (const { tira, w } of colunas) {
-    ctx.font = `800 ${valorFs}px "Inter","Segoe UI",system-ui,sans-serif`;
-    ctx.fillStyle = claro ? "#0f172a" : "#ffffff";
-    ctx.fillText(tira.value, x + w / 2, linhaValor);
+  let base = boxY + pad * 0.8 + valorFs * 0.85;
 
-    ctx.font = `600 ${labelFs}px "Inter","Segoe UI",system-ui,sans-serif`;
-    ctx.fillStyle = claro ? "rgba(15,23,42,0.55)" : "rgba(255,255,255,0.6)";
-    ctx.fillText(tira.label.toUpperCase(), x + w / 2, linhaValor + valorFs * 0.62);
-    x += w + gap;
+  if (colunas.length > 0) {
+    let x = boxX + (boxW - totalW) / 2;
+    for (const c of colunas) {
+      ctx.font = fValor(valorFs);
+      ctx.fillStyle = claro ? "#0f172a" : "#ffffff";
+      ctx.fillText(c.value, x + c.w / 2, base);
+
+      ctx.font = fLabel(labelFs);
+      ctx.fillStyle = claro ? "rgba(15,23,42,0.55)" : "rgba(255,255,255,0.6)";
+      ctx.fillText(c.label, x + c.w / 2, base + labelFs * 1.5);
+      x += c.w + gap;
+    }
+    base += labelFs * 1.35;
   }
+
+  if (nota) {
+    ctx.font = fLabel(noteFs);
+    ctx.fillStyle = claro ? "rgba(15,23,42,0.62)" : "rgba(255,255,255,0.68)";
+    ctx.fillText(nota, boxX + boxW / 2, base + noteFs * 1.6);
+  }
+
   ctx.restore();
 }
 

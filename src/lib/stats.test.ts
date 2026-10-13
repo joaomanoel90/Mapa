@@ -2,12 +2,16 @@ import { describe, expect, it } from "vitest";
 import type { LatLng } from "./geo";
 import {
   ELE_NOISE_M,
+  MAX_CARD_TEXT,
+  cardSuggestions,
   elevationSummary,
+  endCard,
   formatDuration,
   rideSummary,
   summaryDate,
   summaryTiles,
   timeSummary,
+  type CardFields,
 } from "./stats";
 
 /** Pontos com altitude, para os testes de elevação. */
@@ -185,5 +189,93 @@ describe("rideSummary", () => {
     expect(r.elevation?.gain).toBe(100);
     expect(r.time).toBeNull();
     expect(r.points).toBe(3);
+  });
+});
+
+describe("endCard", () => {
+  const T0 = Date.parse("2026-10-13T09:00:00Z");
+  const COM_TUDO = rideSummary(
+    [
+      { lat: -23.5, lng: -48.4, ele: 700, t: T0 },
+      { lat: -23.51, lng: -48.41, ele: 842, t: T0 + 3600_000 },
+    ],
+    71_030,
+  );
+  const vazio: CardFields = {
+    cardDistance: "",
+    cardElevation: "",
+    cardTime: "",
+    cardNote: "",
+  };
+
+  it("mostra o que foi digitado, e não o que o arquivo mediu", () => {
+    const card = endCard(
+      { cardDistance: "42 km", cardElevation: "700 m", cardTime: "1 h 30", cardNote: "" },
+      COM_TUDO,
+    );
+    expect(card?.tiles.map((t) => t.value)).toEqual(["42 km", "700 m", "1 h 30"]);
+    expect(card?.tiles.map((t) => t.label)).toEqual(["distância", "elevação", "tempo"]);
+  });
+
+  it("campo vazio não vira linha", () => {
+    const card = endCard({ ...vazio, cardDistance: "42 km" }, COM_TUDO);
+    expect(card?.tiles).toHaveLength(1);
+    expect(card?.tiles[0].label).toBe("distância");
+  });
+
+  it("sem nada escrito, não há cartela — nem com data no arquivo", () => {
+    const semHora = rideSummary([{ lat: 0, lng: 0 }, { lat: 0, lng: 1 }], 1000);
+    expect(endCard(vazio, semHora)).toBeNull();
+    // o arquivo tem data, mas ninguém escreveu nada: a cartela não aparece
+    expect(endCard(vazio, COM_TUDO)).toBeNull();
+  });
+
+  it("escrever só a linha de baixo já cria a cartela", () => {
+    const card = endCard({ ...vazio, cardNote: "Domingo no sítio" }, COM_TUDO);
+    expect(card?.tiles).toHaveLength(0);
+    expect(card?.note).toBe("Domingo no sítio");
+  });
+
+  it("a data do arquivo entra sozinha na linha de baixo", () => {
+    const card = endCard({ ...vazio, cardDistance: "42 km" }, COM_TUDO);
+    expect(card?.note).toContain("2026");
+  });
+
+  it("o que foi escrito na linha de baixo substitui a data", () => {
+    const card = endCard({ ...vazio, cardNote: "com os amigos do pedal" }, COM_TUDO);
+    expect(card?.note).toBe("com os amigos do pedal");
+  });
+
+  it("espaços sobrando não contam como texto", () => {
+    expect(endCard({ ...vazio, cardDistance: "   " }, { ...COM_TUDO, time: null })).toBeNull();
+    const card = endCard({ ...vazio, cardDistance: "  42 km  " }, COM_TUDO);
+    expect(card?.tiles[0].value).toBe("42 km");
+  });
+
+  it("quebra de linha digitada vira espaço", () => {
+    const card = endCard({ ...vazio, cardDistance: "42\nkm" }, COM_TUDO);
+    expect(card?.tiles[0].value).toBe("42 km");
+  });
+
+  it("limita o tamanho do texto (o link do permalink agradece)", () => {
+    const enorme = "x".repeat(MAX_CARD_TEXT + 50);
+    const card = endCard({ ...vazio, cardDistance: enorme }, COM_TUDO);
+    expect(card?.tiles[0].value).toHaveLength(MAX_CARD_TEXT);
+  });
+
+  it("guarda a sugestão do arquivo para o painel mostrar ao lado", () => {
+    const card = endCard({ ...vazio, cardDistance: "42 km" }, COM_TUDO);
+    expect(card?.sugestao.distance).toBe("71,03 km");
+    expect(card?.sugestao.elevation).toBe("+142 m");
+    expect(card?.sugestao.time).toBe("1 h");
+    expect(card?.sugestao.date).toContain("2026");
+  });
+
+  it("a sugestão existe mesmo sem cartela nenhuma", () => {
+    const semHora = rideSummary([{ lat: 0, lng: 0 }, { lat: 0, lng: 1 }], 12_400);
+    expect(endCard(vazio, semHora)).toBeNull();
+    expect(cardSuggestions(semHora).distance).toBe("12,4 km");
+    expect(cardSuggestions(semHora).elevation).toBeNull();
+    expect(cardSuggestions(semHora).date).toBeNull();
   });
 });

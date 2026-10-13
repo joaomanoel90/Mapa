@@ -138,6 +138,37 @@ describe("decodeShare", () => {
     expect(r?.settings).toEqual(DEFAULT_SETTINGS);
   });
 
+  it("leva os textos da cartela final no link", () => {
+    const settings = {
+      ...DEFAULT_SETTINGS,
+      cardDistance: "49 km",
+      cardElevation: "+1.676 m",
+      cardTime: "3 h 19 min",
+      cardNote: "com os amigos do pedal",
+    };
+    const r = decodeShare(buildShareUrl(base({ settings })));
+    expect(r?.settings.cardDistance).toBe("49 km");
+    expect(r?.settings.cardElevation).toBe("+1.676 m");
+    expect(r?.settings.cardTime).toBe("3 h 19 min");
+    expect(r?.settings.cardNote).toBe("com os amigos do pedal");
+  });
+
+  it("cartela vazia não ocupa byte nenhum no link", () => {
+    const comCartela = buildShareUrl(
+      base({ settings: { ...DEFAULT_SETTINGS, cardDistance: "49 km" } }),
+    );
+    const semCartela = buildShareUrl(base());
+    expect(comCartela.length).toBeGreaterThan(semCartela.length);
+    // os outros três campos continuam fora do link quando estão vazios
+    const json = JSON.parse(
+      atob(payloadOf(comCartela).split(".")[1].replace(/-/g, "+").replace(/_/g, "/")),
+    );
+    expect(json.s.cardDistance).toBe("49 km");
+    expect(json.s.cardElevation).toBeUndefined();
+    expect(json.s.cardTime).toBeUndefined();
+    expect(json.s.cardNote).toBeUndefined();
+  });
+
   it("recupera paradas, inclusive fora da rota", () => {
     const pois = [
       makePoi("igreja", 0.3, "Igreja Matriz", undefined, "a"),

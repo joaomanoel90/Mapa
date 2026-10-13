@@ -145,6 +145,76 @@ export function summaryTiles(s: RideSummary): SummaryTile[] {
   return tiras;
 }
 
+/** Quanto cabe em cada campo da cartela (o vídeo corta, mas o link agradece). */
+export const MAX_CARD_TEXT = 40;
+
+/** Os campos digitados no painel. */
+export type CardFields = {
+  cardDistance: string;
+  cardElevation: string;
+  cardTime: string;
+  cardNote: string;
+};
+
+/** O que a cartela mostra: as tiras de número e a linha de baixo. */
+export type EndCard = {
+  tiles: SummaryTile[];
+  note: string | null;
+  /** o que o arquivo diz, para o painel usar como dica e no botão de copiar */
+  sugestao: { distance: string; elevation: string | null; time: string | null; date: string | null };
+};
+
+/** Texto de um campo: sem espaços sobrando, quebrado em uma linha só e com teto. */
+function campo(v: string): string {
+  return (v ?? "").replace(/\s+/g, " ").trim().slice(0, MAX_CARD_TEXT);
+}
+
+/**
+ * Monta a cartela final.
+ *
+ * Os números vêm **do que foi digitado** — o arquivo só sugere. Isso deixa a
+ * cartela servir para uma rota desenhada à mão (que não tem altitude nem hora)
+ * e para quem quer escrever o número que o Strava mostrou, sem digitar no
+ * escuro: o painel mostra a sugestão ao lado de cada campo.
+ *
+ * `null` quando não há nada para mostrar, e aí o vídeo termina sem cartela.
+ */
+export function endCard(f: CardFields, file: RideSummary): EndCard | null {
+  const sugestao = cardSuggestions(file);
+
+  const tiles: SummaryTile[] = [];
+  const dist = campo(f.cardDistance);
+  if (dist) tiles.push({ value: dist, label: "distância" });
+  const ele = campo(f.cardElevation);
+  if (ele) tiles.push({ value: ele, label: "elevação" });
+  const tempo = campo(f.cardTime);
+  if (tempo) tiles.push({ value: tempo, label: "tempo" });
+
+  const nota = campo(f.cardNote);
+  // A cartela existe porque alguém escreveu algo. A data do arquivo só
+  // **enfeita** uma cartela que já existe — se ela sozinha criasse a cartela,
+  // quem não digitou nada ganharia um retângulo com uma data no fim do vídeo.
+  if (tiles.length === 0 && !nota) return null;
+
+  return { tiles, note: nota || sugestao.date || null, sugestao };
+}
+
+/**
+ * O que o arquivo diz, para o painel mostrar ao lado de cada campo.
+ *
+ * Separado de `endCard` porque o painel precisa das sugestões mesmo quando a
+ * cartela está vazia (é ali que o botão "usar os números do arquivo" aparece).
+ */
+export function cardSuggestions(file: RideSummary): EndCard["sugestao"] {
+  const dados = summaryTiles(file);
+  return {
+    distance: dados[0]?.value ?? "",
+    elevation: dados.find((t) => t.label === "elevação")?.value ?? null,
+    time: dados.find((t) => t.label === "tempo")?.value ?? null,
+    date: summaryDate(file),
+  };
+}
+
 /** Data do percurso, escrita por extenso ("13 de outubro de 2026"). */
 export function summaryDate(s: RideSummary): string | null {
   if (!s.time) return null;

@@ -48,6 +48,18 @@ export type Settings = {
   showProgress: boolean;
   /** cartela com o resumo do percurso nos últimos segundos do vídeo */
   endCard: boolean;
+  /**
+   * Os números da cartela são **digitados**, não medidos.
+   *
+   * O arquivo de GPS é a sugestão (o painel mostra o valor do arquivo como
+   * dica e oferece um botão para copiá-lo), mas quem manda é o texto. Campo
+   * vazio = a linha não aparece.
+   */
+  cardDistance: string;
+  cardElevation: string;
+  cardTime: string;
+  /** linha de baixo; vazia mostra a data do percurso, quando o arquivo tem */
+  cardNote: string;
   title: string;
   subtitle: string;
   aspect: AspectId;
@@ -82,6 +94,10 @@ export const DEFAULT_SETTINGS: Settings = {
   showTitle: true,
   showProgress: true,
   endCard: true,
+  cardDistance: "",
+  cardElevation: "",
+  cardTime: "",
+  cardNote: "",
   title: "Minha rota",
   subtitle: "",
   aspect: "16:9",
@@ -110,6 +126,9 @@ export function sanitizeSettings(raw: Partial<Settings>): Partial<Settings> {
   if (typeof out.snapToRoad !== "boolean") delete out.snapToRoad;
   if (typeof out.showStopCounter !== "boolean") delete out.showStopCounter;
   if (typeof out.endCard !== "boolean") delete out.endCard;
+  for (const key of ["cardDistance", "cardElevation", "cardTime", "cardNote"] as const) {
+    if (typeof out[key] !== "string") delete out[key];
+  }
   if (typeof out.fastExport !== "boolean") delete out.fastExport;
   const profiles = ["car", "bike", "foot", "straight"];
   if (!out.profile || !profiles.includes(out.profile)) delete out.profile;

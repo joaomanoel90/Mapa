@@ -10,6 +10,15 @@ export const PROFILES: { id: Profile; name: string; emoji: string; label: string
   { id: "straight", name: "Livre", emoji: "✏️", label: "Linha reta entre os pontos" },
 ];
 
+/**
+ * Servidores de rota, em ordem de preferência.
+ *
+ * O `router.project-osrm.org` só serve o perfil de carro — por isso ele é
+ * fallback **apenas** para `car`. Usá-lo em bike/pé devolveria traçado de
+ * carro (rodovia, mão única), o que seria pior do que assumir a falha.
+ * Para esses perfis a resiliência vem de retentar após 429 e de avisar o
+ * usuário quando o servidor não responde (ver `RouteResult.note`).
+ */
 const ENDPOINTS: Record<Exclude<Profile, "straight">, string[]> = {
   car: [
     "https://routing.openstreetmap.de/routed-car/route/v1/driving/",
@@ -77,7 +86,39 @@ function engineFor(o: RouteOptions): Exclude<Profile, "straight"> | null {
   return o.profile;
 }
 
-async function requestLeg(a: LatLng, b: LatLng, o: RouteOptions): Promise<Leg> {
+/** Requisição cancelada porque uma rota mais nova tomou o lugar dela. */
+export function isAbortError(err: unknown): boolean {
+  if (typeof err !== "object" || err === null) return false;
+  const e = err as { name?: string; code?: number };
+  return e.name === "AbortError" || e.code === 20;
+}
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/** Teto de espera para não travar a interface quando o servidor pede pausa. */
+const RETRY_AFTER_MAX_MS = 1500;
+
+/** Quanto o servidor pediu para esperar (429 / Retry-After), com teto. */
+function retryAfterMs(res: Response): number {
+  const raw = res.headers.get("Retry-After");
+  if (!raw) return 400;
+  const secs = Number(raw);
+  if (Number.isFinite(secs)) {
+    return Math.min(RETRY_AFTER_MAX_MS, Math.max(0, secs * 1000));
+  }
+  const when = Date.parse(raw);
+  if (Number.isFinite(when)) {
+    return Math.min(RETRY_AFTER_MAX_MS, Math.max(0, when - Date.now()));
+  }
+  return 400;
+}
+
+async function requestLeg(
+  a: LatLng,
+  b: LatLng,
+  o: RouteOptions,
+  signal?: AbortSignal,
+): Promise<Leg> {
   const engine = engineFor(o);
   if (!engine) return directLeg(a, b);
 
@@ -86,39 +127,60 @@ async function requestLeg(a: LatLng, b: LatLng, o: RouteOptions): Promise<Leg> {
   const qs = "overview=full&geometries=geojson&alternatives=false&steps=false&continue_straight=false";
 
   for (const base of ENDPOINTS[engine]) {
-    try {
-      const res = await fetch(`${base}${coord}?${qs}`, { headers: { Accept: "application/json" } });
-      if (!res.ok) continue;
-      const data = await res.json();
-      const coords: [number, number][] | undefined = data?.routes?.[0]?.geometry?.coordinates;
-      if (data?.code !== "Ok" || !coords?.length) continue;
-      return {
-        points: coords.map(([lng, lat]) => ({ lat, lng })),
-        distance: Number(data.routes[0].distance) || 0,
-        direct: false,
-      };
-    } catch {
-      /* tenta o próximo servidor */
+    // duas tentativas por servidor: a segunda só acontece depois de um 429
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const res = await fetch(`${base}${coord}?${qs}`, {
+          headers: { Accept: "application/json" },
+          signal,
+        });
+
+        if (res.status === 429) {
+          // limite de uso do servidor comunitário: espera o tempo pedido
+          // e tenta uma vez mais antes de passar para o próximo
+          if (attempt === 0) {
+            await sleep(retryAfterMs(res));
+            continue;
+          }
+          break;
+        }
+        if (!res.ok) break;
+
+        const data = await res.json();
+        const coords: [number, number][] | undefined = data?.routes?.[0]?.geometry?.coordinates;
+        if (data?.code !== "Ok" || !coords?.length) break;
+        return {
+          points: coords.map(([lng, lat]) => ({ lat, lng })),
+          distance: Number(data.routes[0].distance) || 0,
+          direct: false,
+        };
+      } catch (err) {
+        // cancelamento não é falha do servidor: propaga para o chamador
+        if (isAbortError(err)) throw err;
+        break; // erro de rede: tenta o próximo servidor
+      }
     }
   }
   return directLeg(a, b);
 }
 
-function getLeg(a: LatLng, b: LatLng, o: RouteOptions): Promise<Leg> {
+function getLeg(a: LatLng, b: LatLng, o: RouteOptions, signal?: AbortSignal): Promise<Leg> {
   const key = legKey(a, b, o);
   const cached = legCache.get(key);
   if (cached) return Promise.resolve(cached);
   const running = inflight.get(key);
   if (running) return running;
 
-  const p = requestLeg(a, b, o)
+  const p = requestLeg(a, b, o, signal)
     .then((leg) => {
       legCache.set(key, leg);
       inflight.delete(key);
       return leg;
     })
-    .catch(() => {
+    .catch((err) => {
       inflight.delete(key);
+      // cancelamento não vira cache: a próxima tentativa deve bater no servidor
+      if (isAbortError(err)) throw err;
       return directLeg(a, b);
     });
   inflight.set(key, p);
@@ -171,6 +233,7 @@ const MAX_SNAP_METERS = 220;
 export async function snapToRoad(
   point: LatLng,
   options: RouteOptions,
+  signal?: AbortSignal,
 ): Promise<SnapResult> {
   const engine = engineFor(options);
   if (!engine) return { point, distance: 0, snapped: false };
@@ -181,30 +244,43 @@ export async function snapToRoad(
 
   const coord = `${point.lng.toFixed(6)},${point.lat.toFixed(6)}`;
   for (const base of NEAREST[engine]) {
-    try {
-      const res = await fetch(`${base}${coord}?number=1`, {
-        headers: { Accept: "application/json" },
-      });
-      if (!res.ok) continue;
-      const data = await res.json();
-      const wp = data?.waypoints?.[0];
-      if (data?.code !== "Ok" || !wp?.location) continue;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const res = await fetch(`${base}${coord}?number=1`, {
+          headers: { Accept: "application/json" },
+          signal,
+        });
 
-      const [lng, lat] = wp.location as [number, number];
-      const distance = Number(wp.distance) || 0;
-      const out: SnapResult =
-        distance > MAX_SNAP_METERS
-          ? { point, distance, snapped: false }
-          : {
-              point: { lat, lng },
-              street: typeof wp.name === "string" && wp.name ? wp.name : undefined,
-              distance,
-              snapped: true,
-            };
-      snapCache.set(key, out);
-      return out;
-    } catch {
-      /* tenta o próximo servidor */
+        if (res.status === 429) {
+          if (attempt === 0) {
+            await sleep(retryAfterMs(res));
+            continue;
+          }
+          break;
+        }
+        if (!res.ok) break;
+
+        const data = await res.json();
+        const wp = data?.waypoints?.[0];
+        if (data?.code !== "Ok" || !wp?.location) break;
+
+        const [lng, lat] = wp.location as [number, number];
+        const distance = Number(wp.distance) || 0;
+        const out: SnapResult =
+          distance > MAX_SNAP_METERS
+            ? { point, distance, snapped: false }
+            : {
+                point: { lat, lng },
+                street: typeof wp.name === "string" && wp.name ? wp.name : undefined,
+                distance,
+                snapped: true,
+              };
+        snapCache.set(key, out);
+        return out;
+      } catch (err) {
+        if (isAbortError(err)) throw err;
+        break; // erro de rede: tenta o próximo servidor
+      }
     }
   }
   const fallback: SnapResult = { point, distance: 0, snapped: false };
@@ -226,6 +302,7 @@ export async function snapToRoad(
 export async function fetchRoute(
   waypoints: LatLng[],
   options: RouteOptions,
+  signal?: AbortSignal,
 ): Promise<RouteResult> {
   if (waypoints.length < 2) {
     return { points: [...waypoints], distance: 0, source: "direct", reused: 0 };
@@ -246,7 +323,7 @@ export async function fetchRoute(
     new Array(Math.min(CONCURRENCY, Math.max(1, jobs.length))).fill(0).map(async () => {
       while (cursor < jobs.length) {
         const job = jobs[cursor++];
-        legs[job.i] = await getLeg(job.a, job.b, options);
+        legs[job.i] = await getLeg(job.a, job.b, options, signal);
       }
     }),
   );

@@ -10,10 +10,20 @@ const __dirname = path.dirname(__filename);
 
 // https://vite.dev/config/
 export default defineConfig({
+  // Caminhos relativos: funciona em qualquer subpasta (ex.: usuario.github.io/Mapa/).
+  base: "./",
   plugins: [react(), tailwindcss(), viteSingleFile()],
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "src"),
     },
+  },
+  server: {
+    host: true, // permite acesso por outros hosts (contêineres, túneis, prévias remotas)
+    allowedHosts: true,
+  },
+  preview: {
+    host: true,
+    allowedHosts: true,
   },
 });

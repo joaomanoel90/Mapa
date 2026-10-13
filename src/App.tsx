@@ -15,6 +15,7 @@ import {
 } from "./lib/settings";
 import { pinsAsDots } from "./lib/pins";
 import { endCard, rideSummary } from "./lib/stats";
+import { timesOf } from "./lib/hud";
 import {
   buildTrack,
   formatDistance,
@@ -282,6 +283,15 @@ function App() {
     () => rideSummary(rawTrack ?? track.pts, track.total),
     [rawTrack, track],
   );
+  /**
+   * Horas dos pontos do traçado, quando o arquivo é de GPS.
+   *
+   * Calculado sobre o traçado **importado** (o mais fiel) e memoizado: o
+   * renderizador desenha ~30 quadros por segundo e não pode varrer milhares de
+   * pontos por quadro.
+   */
+  const horas = useMemo(() => timesOf(rawTrack ?? track.pts), [rawTrack, track]);
+
   const cartela = useMemo(
     () =>
       endCard(
@@ -745,6 +755,7 @@ function App() {
       showTitle: settings.showTitle,
       showProgress: settings.showProgress,
       showSummary: settings.endCard,
+      showHud: settings.showHud,
       title: settings.title,
       subtitle: settings.subtitle,
     };
@@ -776,6 +787,7 @@ function App() {
           elapsed,
           duration: settings.duration,
           summary: cartela,
+          times: horas,
         });
 
       // os servidores gratuitos pedem uso moderado

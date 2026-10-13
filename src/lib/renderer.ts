@@ -11,12 +11,14 @@ import {
   type TileImage,
 } from "./tiles";
 import type { EndCard } from "./stats";
+import { elapsedAt, speedAt } from "./hud";
 import {
   TILE_SIZE,
   boundsOf,
   buildTrack,
   fitZoom,
   formatDistance,
+  formatTime,
   haversine,
   project,
   sampleTrack,
@@ -50,6 +52,8 @@ export type SceneStyle = {
   showProgress: boolean;
   /** cartela com o resumo do percurso nos últimos segundos do vídeo */
   showSummary: boolean;
+  /** painel de números no canto (velocidade, distância, relógio) */
+  showHud: boolean;
   title: string;
   subtitle: string;
 };
@@ -72,6 +76,13 @@ export type FrameState = {
   duration: number;
   /** cartela final (números digitados + linha de baixo) — null quando não há nada */
   summary: EndCard | null;
+  /**
+   * Horas dos pontos do traçado (NaN onde não há), quando o arquivo é de GPS.
+   *
+   * É o que permite o HUD mostrar a velocidade **real** e o relógio da
+   * pedalada. Sem isso ele mostra a média do vídeo e diz que é média.
+   */
+  times: number[] | null;
 };
 
 /* ------------------------------------------------------------------ */
@@ -495,6 +506,7 @@ export class SceneRenderer {
 
     // --- overlays ---
     if (style.showProgress) drawProgress(ctx, width, height, input, sf);
+    if (style.showHud) drawHud(ctx, width, input, sample, sf, onDark);
     if (style.showSummary) drawSummary(ctx, width, height, input, onDark, sf);
 
     // atribuição obrigatória dos mapas gratuitos
@@ -1265,6 +1277,118 @@ function drawSummary(
     ctx.fillStyle = claro ? "rgba(15,23,42,0.62)" : "rgba(255,255,255,0.68)";
     ctx.fillText(nota, boxX + boxW / 2, base + noteFs * 1.6);
   }
+
+  ctx.restore();
+}
+
+/**
+ * Painel de números no canto superior direito.
+ *
+ * Velocidade, andamento do percurso, distância e relógio. A velocidade sai do
+ * `<time>` do arquivo quando existe (janela de 20 s em volta do instante); sem
+ * arquivo de GPS, mostra a média do vídeo e o rótulo diz `média` — é a
+ * diferença entre não ter o dado e inventar um.
+ */
+function drawHud(
+  ctx: CanvasRenderingContext2D,
+  width: number,
+  input: FrameState,
+  sample: { distance: number },
+  sf: number,
+  onDark: boolean,
+) {
+  const { track, t, style, duration, times } = input;
+  if (track.pts.length === 0) return;
+
+  const comRelogio = times !== null;
+  // Sem hora no arquivo não há velocidade para mostrar (a média do vídeo seria
+  // um número sem sentido: a rota toda em poucos segundos de clipe). Parado, a
+  // velocidade é zero de verdade — e isso o HUD mostra.
+  const velocidade = comRelogio ? Math.max(0, speedAt(track.pts, track.cum, t, times) ?? 0) : null;
+  const relogio = comRelogio ? elapsedAt(track.pts, track.cum, t, times) : t * duration;
+
+  const claro = !onDark;
+  const pad = 22 * sf;
+  const fsBig = Math.round(34 * sf);
+  const fsMed = Math.round(13 * sf);
+  const fsSmall = Math.round(11 * sf);
+  const barraH = Math.round(6 * sf);
+  const largura = Math.round(178 * sf);
+
+  const fBig = `800 ${fsBig}px "Inter","Segoe UI",system-ui,sans-serif`;
+  const fMed = `700 ${fsMed}px "Inter","Segoe UI",system-ui,sans-serif`;
+  const fSmall = `600 ${fsSmall}px "Inter","Segoe UI",system-ui,sans-serif`;
+
+  const linhas =
+    Math.round(fsBig * 1.2) + Math.round(fsMed * 1.6) + barraH + Math.round(fsSmall * 1.4);
+  const altura = linhas + pad * 2;
+  const x = width - pad - largura;
+  const y = pad;
+
+  ctx.save();
+  roundRect(ctx, x, y, largura, altura, 14 * sf);
+  ctx.fillStyle = onDark ? "rgba(9,12,20,0.72)" : "rgba(255,255,255,0.86)";
+  ctx.shadowColor = "rgba(0,0,0,0.35)";
+  ctx.shadowBlur = 16 * sf;
+  ctx.fill();
+  ctx.shadowBlur = 0;
+  ctx.lineWidth = 1.5 * sf;
+  ctx.strokeStyle = onDark ? "rgba(255,255,255,0.14)" : "rgba(15,23,42,0.12)";
+  ctx.stroke();
+
+  let cy = y + pad + fsBig * 0.82;
+  const cx = x + largura / 2;
+
+  // velocidade (número grande) + unidade
+  ctx.textAlign = "center";
+  ctx.textBaseline = "alphabetic";
+  ctx.font = fBig;
+  ctx.fillStyle = claro ? "#0f172a" : "#ffffff";
+  const txtVel = velocidade === null ? "—" : velocidade.toFixed(velocidade < 10 ? 1 : 0);
+  const wVel = ctx.measureText(txtVel).width;
+  ctx.font = fSmall;
+  const wUni = ctx.measureText("km/h").width;
+  const inicioVel = cx - (wVel + 4 * sf + wUni) / 2;
+  ctx.font = fBig;
+  ctx.textAlign = "left";
+  ctx.fillText(txtVel, inicioVel, cy);
+  ctx.font = fSmall;
+  ctx.fillStyle = claro ? "rgba(15,23,42,0.55)" : "rgba(255,255,255,0.6)";
+  ctx.fillText("km/h", inicioVel + wVel + 4 * sf, cy);
+
+  // sem arquivo de GPS, uma nota explica o traço no lugar do número
+  if (velocidade === null) {
+    ctx.font = fSmall;
+    ctx.textAlign = "right";
+    ctx.fillStyle = claro ? "rgba(15,23,42,0.45)" : "rgba(255,255,255,0.45)";
+    ctx.fillText("sem arquivo", x + largura - pad, cy - fsBig * 0.78);
+    ctx.textAlign = "left";
+  }
+
+  // barra de andamento
+  cy += Math.round(fsBig * 0.42);
+  const bx = x + pad;
+  const bw = largura - pad * 2;
+  roundRect(ctx, bx, cy, bw, barraH, barraH / 2);
+  ctx.fillStyle = claro ? "rgba(15,23,42,0.12)" : "rgba(255,255,255,0.22)";
+  ctx.fill();
+  const progresso = Math.max(0, Math.min(1, t));
+  roundRect(ctx, bx, cy, Math.max(barraH, bw * progresso), barraH, barraH / 2);
+  ctx.fillStyle = style.accent;
+  ctx.fill();
+
+  // distância percorrida  ·  relógio
+  cy += barraH + Math.round(fsSmall * 1.5);
+  const esquerda = formatDistance(sample.distance);
+  const direita = formatTime(Math.round(relogio ?? 0));
+  ctx.font = fMed;
+  ctx.fillStyle = claro ? "#0f172a" : "#ffffff";
+  ctx.textAlign = "left";
+  ctx.fillText(esquerda, bx, cy);
+  ctx.font = fSmall;
+  ctx.fillStyle = claro ? "rgba(15,23,42,0.6)" : "rgba(255,255,255,0.66)";
+  ctx.textAlign = "right";
+  ctx.fillText(direita, bx + bw, cy);
 
   ctx.restore();
 }

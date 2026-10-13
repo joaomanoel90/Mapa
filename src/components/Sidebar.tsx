@@ -473,6 +473,12 @@ function Sidebar(props: Props) {
               onChange={(v) => update("showTraveled", v)}
             />
             <Toggle
+              icon="🧭"
+              label="HUD no vídeo"
+              checked={s.showHud}
+              onChange={(v) => update("showHud", v)}
+            />
+            <Toggle
               icon="🏁"
               label="Cartela final"
               checked={s.endCard}

@@ -52,6 +52,7 @@ const style: SceneStyle = {
   showTitle: false,
   showProgress: false,
   showSummary: true,
+  showHud: true,
   title: "",
   subtitle: "",
 };
@@ -64,7 +65,12 @@ const TRACK_PTS = [
 ];
 const track = buildTrack(TRACK_PTS);
 
-const estado = (t: number, duration: number, summary: EndCard | null): FrameState => ({
+const estado = (
+  t: number,
+  duration: number,
+  summary: EndCard | null,
+  times: number[] | null = null,
+): FrameState => ({
   track,
   t,
   character: findCharacter("car"),
@@ -76,6 +82,7 @@ const estado = (t: number, duration: number, summary: EndCard | null): FrameStat
   elapsed: t * duration,
   duration,
   summary,
+  times,
 });
 
 /** A cartela como o usuário digita no painel. */
@@ -199,5 +206,85 @@ describe("cartela final do vídeo", () => {
     const { ctx, textos } = fakeCtx();
     new SceneRenderer("dark").render(ctx, 720, 1280, estado(1, 14, cartela));
     expect(textos).toContain("49 km");
+  });
+});
+
+describe("HUD no vídeo", () => {
+  const T0 = Date.parse("2026-10-13T09:00:00Z");
+  /** 10 pontos de 100 m a cada 10 s = 36 km/h, com hora do arquivo */
+  const GPS_PTS = Array.from({ length: 10 }, (_, i) => ({
+    lat: 0,
+    lng: (i * 100) / 111_320,
+    ele: 700 + i,
+    t: T0 + i * 10_000,
+  }));
+  const gpsTrack = buildTrack(GPS_PTS);
+  const horas = GPS_PTS.map((p) => p.t as number);
+
+  it("mostra velocidade, distância e relógio quando o arquivo tem hora", () => {
+    const { ctx, textos } = fakeCtx();
+    new SceneRenderer("dark").render(ctx, 1280, 720, {
+      ...estado(0.5, 14, null, horas),
+      track: gpsTrack,
+    });
+    expect(textos).toContain("36");        // km/h medida, sem decimais acima de 10
+    expect(textos).toContain("km/h");
+    expect(textos).toContain("00:45");     // metade de 90 s de percurso
+    // sem hora não existe rótulo de média
+    expect(textos).not.toContain("média");
+  });
+
+  it("sem arquivo de GPS não inventa velocidade: mostra um traço", () => {
+    const { ctx, textos } = fakeCtx();
+    new SceneRenderer("dark").render(ctx, 1280, 720, {
+      ...estado(0.5, 14, null, null),
+      track: gpsTrack,
+    });
+    // a média do vídeo daria milhares de km/h numa rota longa em clipe curto
+    expect(textos).toContain("—");
+    expect(textos).toContain("sem arquivo");
+    expect(textos).toContain("km/h");
+  });
+
+  it("parado no percurso mostra 0 km/h, e não um traço", () => {
+    const parado = [
+      { lat: -23.5, lng: -48.4, t: T0 },
+      { lat: -23.5, lng: -48.4, t: T0 + 60_000 },
+    ];
+    const { ctx, textos } = fakeCtx();
+    new SceneRenderer("dark").render(ctx, 1280, 720, {
+      ...estado(0.5, 14, null, [T0, T0 + 60_000]),
+      track: buildTrack(parado),
+    });
+    expect(textos).toContain("0.0");
+    expect(textos).not.toContain("—");
+  });
+
+  it("respeita o interruptor do painel", () => {
+    const { ctx, textos } = fakeCtx();
+    new SceneRenderer("dark").render(ctx, 1280, 720, {
+      ...estado(0.5, 14, null, horas),
+      track: gpsTrack,
+      style: { ...style, showHud: false },
+    });
+    expect(textos).not.toContain("km/h");
+  });
+
+  it("não desenha nada numa trilha vazia", () => {
+    const { ctx, textos } = fakeCtx();
+    new SceneRenderer("dark").render(ctx, 1280, 720, {
+      ...estado(0, 14, null, null),
+      track: buildTrack([]),
+    });
+    expect(textos).not.toContain("km/h");
+  });
+
+  it("cabe na tela em retrato", () => {
+    const { ctx, textos } = fakeCtx();
+    new SceneRenderer("dark").render(ctx, 720, 1280, {
+      ...estado(0.5, 14, null, horas),
+      track: gpsTrack,
+    });
+    expect(textos).toContain("km/h");
   });
 });

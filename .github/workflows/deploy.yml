@@ -37,18 +37,33 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          atual=$(gh api "repos/$GITHUB_REPOSITORY/pages" --jq '.build_type' 2>/dev/null || echo "desconhecido")
+          atual=$(curl -sS -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/pages" | python3 -c "import sys,json; print(json.load(sys.stdin).get('build_type','desconhecido'))" 2>/dev/null || echo "desconhecido")
           echo "Origem atual do Pages: $atual"
-          if [ "$atual" != "workflow" ]; then
-            echo "Trocando de $atual para build via GitHub Actions..."
-            if gh api -X PUT "repos/$GITHUB_REPOSITORY/pages" -f build_type=workflow >/dev/null 2>&1; then
-              echo "Origem agora: $(gh api "repos/$GITHUB_REPOSITORY/pages" --jq '.build_type')"
-            else
-              echo "::warning::Nao foi possivel trocar a origem do Pages automaticamente."
-              echo "::warning::Va em Settings -> Pages -> Source e escolha 'GitHub Actions'."
-            fi
-          else
+
+          if [ "$atual" = "workflow" ]; then
             echo "Já está configurado para publicar via GitHub Actions."
+            exit 0
+          fi
+
+          echo "Trocando de $atual para build via GitHub Actions..."
+          resp=$(curl -sS -w "\n%{http_code}" -X PUT \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            -H "Content-Type: application/json" \
+            -d '{"build_type":"workflow"}' \
+            "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/pages")
+          code=$(echo "$resp" | tail -n1)
+          body=$(echo "$resp" | sed '$d')
+          echo "Resposta da API (HTTP $code): $body"
+
+          if [ "$code" = "200" ] || [ "$code" = "204" ]; then
+            echo "Pronto: o Pages agora publica via GitHub Actions."
+          else
+            echo "::warning::Nao foi possivel trocar a origem do Pages automaticamente (HTTP $code)."
+            echo "::warning::Va em Settings -> Pages -> Source e escolha 'GitHub Actions'."
           fi
 
       - name: Configurar Pages

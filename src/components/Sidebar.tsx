@@ -8,6 +8,7 @@ import type { Place } from "../lib/geocode";
 import type { Poi } from "../lib/pois";
 import { Button, Label, Section, Segmented, Slider, TextInput, Toggle } from "./ui";
 import { ASPECTS, MAX_WAYPOINTS, type AspectId, type Settings } from "../lib/settings";
+import { summaryDate, summaryTiles, type RideSummary } from "../lib/stats";
 import { PROFILES, PRESETS, type Profile, type Preset } from "../lib/routing";
 import { BASEMAPS, BASEMAP_ORDER } from "../lib/tiles";
 import { findCharacter } from "../lib/characters";
@@ -59,6 +60,8 @@ type Props = {
   onExportGpx: () => void;
   /** retorno da importação, para mostrar erro ou resumo */
   gpxMsg: { tipo: "erro" | "info"; texto: string } | null;
+  /** números que vão para a cartela do fim do vídeo */
+  resumo: RideSummary;
 };
 
 function Sidebar(props: Props) {
@@ -88,6 +91,7 @@ function Sidebar(props: Props) {
     endpoints,
     onEndpoints,
     loading,
+    resumo,
     formats,
     hasRoute,
     maxZoom,
@@ -464,7 +468,14 @@ function Sidebar(props: Props) {
               checked={s.showTraveled}
               onChange={(v) => update("showTraveled", v)}
             />
+            <Toggle
+              icon="🏁"
+              label="Cartela final"
+              checked={s.endCard}
+              onChange={(v) => update("endCard", v)}
+            />
           </div>
+          <ResumoFinal resumo={resumo} />
           <Button variant="soft" onClick={onReplay} disabled={!hasRoute} className="w-full">
             ▶︎ Pré-visualizar animação
           </Button>
@@ -613,6 +624,49 @@ function Sidebar(props: Props) {
           automaticamente no vídeo exportado, como exigem as licenças.
         </p>
       </footer>
+    </div>
+  );
+}
+
+/**
+ * Prévia da cartela final.
+ *
+ * Mostra exatamente os mesmos números que o vídeo vai mostrar — inclusive
+ * escondendo elevação e tempo quando o arquivo não os tem —, para não haver
+ * surpresa no vídeo exportado.
+ */
+function ResumoFinal({ resumo }: { resumo: RideSummary }) {
+  const tiras = summaryTiles(resumo);
+  const data = summaryDate(resumo);
+  if (resumo.distanceM <= 0) return null;
+
+  return (
+    <div className="rounded-xl border border-white/10 bg-black/30 p-3">
+      <div className="flex items-center justify-between text-[12px]">
+        <span className="text-zinc-400">🏁 Cartela final</span>
+        <span className="text-[11px] text-zinc-500">
+          {resumo.time ? "com data e tempo" : "só o que o arquivo traz"}
+        </span>
+      </div>
+      <div className="mt-2 flex items-baseline justify-between gap-2">
+        {tiras.map((t) => (
+          <div key={t.label} className="text-center">
+            <div className="text-[15px] font-extrabold leading-tight text-white">
+              {t.value}
+            </div>
+            <div className="text-[9.5px] font-semibold uppercase tracking-wide text-zinc-500">
+              {t.label}
+            </div>
+          </div>
+        ))}
+      </div>
+      {data && <p className="mt-1.5 text-center text-[10.5px] text-zinc-500">{data}</p>}
+      {!resumo.elevation && (
+        <p className="mt-2 text-[10.5px] leading-snug text-zinc-500">
+          📂 Importe um GPX de GPS (Strava, Garmin…) para incluir <b>elevação</b> e{" "}
+          <b>tempo</b> na cartela — o arquivo traz a altitude de cada ponto.
+        </p>
+      )}
     </div>
   );
 }

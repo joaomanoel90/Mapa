@@ -46,6 +46,8 @@ export type Settings = {
   showEndpoints: boolean;
   showTitle: boolean;
   showProgress: boolean;
+  /** cartela com o resumo do percurso nos últimos segundos do vídeo */
+  endCard: boolean;
   title: string;
   subtitle: string;
   aspect: AspectId;
@@ -79,6 +81,7 @@ export const DEFAULT_SETTINGS: Settings = {
   showEndpoints: true,
   showTitle: true,
   showProgress: true,
+  endCard: true,
   title: "Minha rota",
   subtitle: "",
   aspect: "16:9",
@@ -106,6 +109,7 @@ export function sanitizeSettings(raw: Partial<Settings>): Partial<Settings> {
   if (typeof out.ignoreOneway !== "boolean") delete out.ignoreOneway;
   if (typeof out.snapToRoad !== "boolean") delete out.snapToRoad;
   if (typeof out.showStopCounter !== "boolean") delete out.showStopCounter;
+  if (typeof out.endCard !== "boolean") delete out.endCard;
   if (typeof out.fastExport !== "boolean") delete out.fastExport;
   const profiles = ["car", "bike", "foot", "straight"];
   if (!out.profile || !profiles.includes(out.profile)) delete out.profile;

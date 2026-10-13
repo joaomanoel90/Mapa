@@ -14,6 +14,7 @@ import {
   type Settings,
 } from "./lib/settings";
 import { pinsAsDots } from "./lib/pins";
+import { rideSummary, summaryTiles } from "./lib/stats";
 import {
   buildTrack,
   formatDistance,
@@ -268,6 +269,20 @@ function App() {
       setLoading(false);
     };
   }, [waypoints, routeOptions, rawTrack]);
+
+  /**
+   * Resumo do percurso para a cartela final.
+   *
+   * Calculado sobre o traçado **importado**, quando existe: ele tem todos os
+   * pontos do arquivo, enquanto o traçado desenhado passa pelo teto de pontos.
+   * Memoizado porque a animação redesenha a cada quadro e varrer milhares de
+   * pontos por quadro seria desperdício.
+   */
+  const resumo = useMemo(
+    () => rideSummary(rawTrack ?? track.pts, track.total),
+    [rawTrack, track],
+  );
+  const cartela = useMemo(() => summaryTiles(resumo), [resumo]);
 
   /* reinicia a animação quando a rota muda */
   /**
@@ -711,6 +726,7 @@ function App() {
       showStopCounter: settings.showStopCounter,
       showTitle: settings.showTitle,
       showProgress: settings.showProgress,
+      showSummary: settings.endCard,
       title: settings.title,
       subtitle: settings.subtitle,
     };
@@ -741,6 +757,7 @@ function App() {
           endpoints,
           elapsed,
           duration: settings.duration,
+          summary: cartela,
         });
 
       // os servidores gratuitos pedem uso moderado
@@ -945,6 +962,7 @@ function App() {
             endpoints={endpoints}
             onEndpoints={setEndpoints}
             loading={loading}
+            resumo={resumo}
             formats={formats}
             hasRoute={hasRoute}
             maxZoom={maxZoom}

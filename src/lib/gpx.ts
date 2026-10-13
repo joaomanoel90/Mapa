@@ -77,7 +77,54 @@ function readPoint(el: Element): LatLng | null {
   if (!latBruto?.trim() || !lngBruto?.trim()) return null;
   const lat = Number(latBruto);
   const lng = Number(lngBruto);
-  return validCoord(lat, lng) ? { lat, lng } : null;
+  if (!validCoord(lat, lng)) return null;
+
+  const p: LatLng = { lat, lng };
+  // altitude: o Garmin grava valores absurdos de vez em quando (e o barômetro
+  // de alguns aparelhos chega a -400 m), então só aceitamos a faixa da Terra
+  const ele = readNumber(filhoLocal(el, "ele"));
+  if (ele !== null && ele > -500 && ele < 9000) p.ele = ele;
+
+  // hora: sem data válida o ponto fica sem tempo, e o resumo mostra só o que tem
+  const hora = readTime(filhoLocal(el, "time"));
+  if (hora !== null) p.t = hora;
+
+  return p;
+}
+
+/**
+ * Filho direto com este nome local.
+ *
+ * Aqui vale a varredura da lista de filhos, e **não** `querySelectorAll`: isso
+ * roda uma vez por ponto, e num arquivo de 100 mil pontos a diferença é entre
+ * ~0,3 s e mais de 5 s (medido — o seletor por ponto estourava o teste).
+ */
+function filhoLocal(el: Element, nome: string): Element | undefined {
+  for (let c = el.firstElementChild; c; c = c.nextElementSibling) {
+    if (c.localName === nome) return c;
+  }
+  return undefined;
+}
+
+/** Texto de um elemento, sem as tags internas. */
+function texto(el: Element | undefined): string {
+  return el?.textContent?.trim() ?? "";
+}
+
+/** Número do texto de um elemento, ou null quando vazio/inválido. */
+function readNumber(el: Element | undefined): number | null {
+  const bruto = texto(el);
+  if (!bruto) return null;
+  const n = Number(bruto);
+  return Number.isFinite(n) ? n : null;
+}
+
+/** `<time>` no formato ISO 8601 (o único que o GPX permite), em epoch ms. */
+function readTime(el: Element | undefined): number | null {
+  const bruto = texto(el);
+  if (!bruto) return null;
+  const ms = Date.parse(bruto);
+  return Number.isFinite(ms) ? ms : null;
 }
 
 export type GpxWaypoint = {
@@ -86,6 +133,8 @@ export type GpxWaypoint = {
   name?: string;
   /** símbolo/pictograma, quando o arquivo traz */
   sym?: string;
+  /** altitude do ponto solto, quando o arquivo traz */
+  ele?: number;
 };
 
 export type GpxParseResult = {
@@ -353,7 +402,22 @@ export function toGpx(data: GpxExportData, criadoEm = isoNow()): string {
 
   linhas.push("  <trk>", `    <name>${escapeXml(nome)}</name>`, "    <trkseg>");
   for (const p of data.points) {
-    linhas.push(`      <trkpt lat="${coord(p.lat)}" lon="${coord(p.lng)}" />`);
+    // altitude e hora entram quando existem: é o que faz o arquivo exportado
+    // continuar servindo para quem treina (e para reimportar sem perder nada)
+    const dentro: string[] = [];
+    if (typeof p.ele === "number" && Number.isFinite(p.ele)) {
+      dentro.push(`<ele>${p.ele.toFixed(1)}</ele>`);
+    }
+    if (typeof p.t === "number" && Number.isFinite(p.t)) {
+      dentro.push(`<time>${new Date(p.t).toISOString()}</time>`);
+    }
+    if (dentro.length === 0) {
+      linhas.push(`      <trkpt lat="${coord(p.lat)}" lon="${coord(p.lng)}" />`);
+      continue;
+    }
+    linhas.push(`      <trkpt lat="${coord(p.lat)}" lon="${coord(p.lng)}">`);
+    for (const d of dentro) linhas.push(`        ${d}`);
+    linhas.push("      </trkpt>");
   }
   linhas.push("    </trkseg>", "  </trk>", "</gpx>", "");
 

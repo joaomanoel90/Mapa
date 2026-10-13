@@ -10,11 +10,13 @@ import {
   type BasemapId,
   type TileImage,
 } from "./tiles";
+import type { SummaryTile } from "./stats";
 import {
   TILE_SIZE,
   boundsOf,
   buildTrack,
   fitZoom,
+  formatDistance,
   haversine,
   project,
   sampleTrack,
@@ -46,6 +48,8 @@ export type SceneStyle = {
   showStopCounter: boolean;
   showTitle: boolean;
   showProgress: boolean;
+  /** cartela com o resumo do percurso nos últimos segundos do vídeo */
+  showSummary: boolean;
   title: string;
   subtitle: string;
 };
@@ -66,6 +70,8 @@ export type FrameState = {
   /** segundos desde o início (para efeitos) */
   elapsed: number;
   duration: number;
+  /** números da cartela final — null quando não há nada para mostrar */
+  summary: SummaryTile[] | null;
 };
 
 /* ------------------------------------------------------------------ */
@@ -489,6 +495,7 @@ export class SceneRenderer {
 
     // --- overlays ---
     if (style.showProgress) drawProgress(ctx, width, height, input, sf);
+    if (style.showSummary) drawSummary(ctx, width, height, input, onDark, sf);
 
     // atribuição obrigatória dos mapas gratuitos
     drawAttribution(ctx, width, height, bm.attribution, style.showProgress, sf);
@@ -723,7 +730,7 @@ function drawEventToast(
     at: endAt,
     emoji: endpoints.b?.emoji.trim() || "🏁",
     title: endpoints.b?.label.trim() || "Chegada",
-    sub: `Percurso completo · ${(total / 1000).toFixed(total < 10000 ? 2 : 1)} km`,
+    sub: `Percurso completo · ${formatDistance(total)}`,
     color: "#f87171",
   });
 
@@ -992,7 +999,7 @@ function drawTitle(
   const pad = 26 * sf;
   const title = style.title.trim();
   const km = track.total / 1000;
-  const kmTxt = `${km.toFixed(km < 10 ? 2 : 1)} km`;
+  const kmTxt = formatDistance(km * 1000);
   const aName = endpoints.a?.label.trim();
   const bName = endpoints.b?.label.trim();
   const journey =
@@ -1087,6 +1094,103 @@ function drawTitle(
   void track;
   ctx.restore();
   return boxY + boxH;
+}
+
+/**
+ * Distância em texto no vídeo usa o mesmo formato do painel (`formatDistance`):
+ * vírgula decimal em pt-BR. Antes o título escrevia "3.02 km" com ponto e a
+ * cartela "3,02 km" com vírgula — dois formatos no mesmo quadro.
+ */
+
+/**
+ * Quantos segundos a cartela fica na tela, e em quanto tempo ela entra.
+ *
+ * Contados a partir do fim do vídeo: o personagem chega junto com a cartela
+ * ficando legível, e ela continua até o último quadro.
+ */
+const SUMMARY_HOLD_S = 4.2;
+const SUMMARY_FADE_S = 0.6;
+
+/**
+ * Cartela final: distância, elevação e tempo do percurso.
+ *
+ * Só desenha o que o arquivo trouxe (a montagem das tiras é do `stats.ts`),
+ * então uma rota desenhada à mão mostra um número, e uma pedalada importada
+ * mostra a fileira inteira.
+ */
+function drawSummary(
+  ctx: CanvasRenderingContext2D,
+  width: number,
+  height: number,
+  input: FrameState,
+  onDark: boolean,
+  sf: number,
+) {
+  const tiras = input.summary;
+  if (!tiras || tiras.length === 0) return;
+
+  const dur = Math.max(1, input.duration);
+  // percentual do vídeo em que a cartela começa (limitado a 45% em clipes curtos)
+  const hold = Math.min(0.45, SUMMARY_HOLD_S / dur);
+  const fade = Math.min(hold, SUMMARY_FADE_S / dur);
+  const inicio = 1 - hold;
+  if (input.t < inicio) return;
+  const alpha = fade > 0 ? Math.min(1, Math.max(0, (input.t - inicio) / fade)) : 1;
+
+  const pad = 34 * sf;
+  const valorFs = Math.round(46 * sf);
+  const labelFs = Math.round(12.5 * sf);
+  const gap = 34 * sf;
+
+  ctx.save();
+  ctx.globalAlpha = alpha;
+
+  // escurece a cena para o texto não brigar com o mapa
+  ctx.fillStyle = onDark ? "rgba(3,7,18,0.45)" : "rgba(15,23,42,0.32)";
+  ctx.fillRect(0, 0, width, height);
+
+  // mede cada coluna para a caixa abraçar o conteúdo
+  const colunas = tiras.map((tira) => {
+    ctx.font = `800 ${valorFs}px "Inter","Segoe UI",system-ui,sans-serif`;
+    const wv = ctx.measureText(tira.value).width;
+    ctx.font = `600 ${labelFs}px "Inter","Segoe UI",system-ui,sans-serif`;
+    const wl = ctx.measureText(tira.label.toUpperCase()).width;
+    return { tira, w: Math.max(wv, wl) };
+  });
+  const totalW =
+    colunas.reduce((acc, c) => acc + c.w, 0) + gap * Math.max(0, colunas.length - 1);
+
+  const boxW = totalW + pad * 2;
+  const boxH = valorFs + labelFs + pad * 2.1;
+  const boxX = (width - boxW) / 2;
+  const boxY = (height - boxH) / 2;
+
+  roundRect(ctx, boxX, boxY, boxW, boxH, 20 * sf);
+  ctx.fillStyle = onDark ? "rgba(9,12,20,0.82)" : "rgba(255,255,255,0.88)";
+  ctx.shadowColor = "rgba(0,0,0,0.45)";
+  ctx.shadowBlur = 26 * sf;
+  ctx.fill();
+  ctx.shadowBlur = 0;
+  ctx.lineWidth = 2 * sf;
+  ctx.strokeStyle = onDark ? "rgba(255,255,255,0.14)" : "rgba(15,23,42,0.12)";
+  ctx.stroke();
+
+  const claro = !onDark;
+  let x = boxX + pad;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "alphabetic";
+  const linhaValor = boxY + pad * 1.2 + valorFs * 0.8;
+  for (const { tira, w } of colunas) {
+    ctx.font = `800 ${valorFs}px "Inter","Segoe UI",system-ui,sans-serif`;
+    ctx.fillStyle = claro ? "#0f172a" : "#ffffff";
+    ctx.fillText(tira.value, x + w / 2, linhaValor);
+
+    ctx.font = `600 ${labelFs}px "Inter","Segoe UI",system-ui,sans-serif`;
+    ctx.fillStyle = claro ? "rgba(15,23,42,0.55)" : "rgba(255,255,255,0.6)";
+    ctx.fillText(tira.label.toUpperCase(), x + w / 2, linhaValor + valorFs * 0.62);
+    x += w + gap;
+  }
+  ctx.restore();
 }
 
 function drawProgress(

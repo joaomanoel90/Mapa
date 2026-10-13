@@ -243,8 +243,11 @@ function Sidebar(props: Props) {
             <div className="flex items-center justify-between text-[12px]">
               <span className="text-zinc-400">Paradas</span>
               <span className="font-semibold text-white">
-                {waypoints.length}
-                <span className="font-normal text-zinc-500"> / {MAX_WAYPOINTS}</span>
+                {waypoints.length.toLocaleString("pt-BR")}
+                <span className="font-normal text-zinc-500">
+                  {" "}
+                  / {MAX_WAYPOINTS.toLocaleString("pt-BR")}
+                </span>
               </span>
             </div>
             {hasRoute && (

@@ -59,6 +59,16 @@ describe("sanitizeSettings", () => {
     expect(sanitizeSettings(raw({ snapToRoad: false })).snapToRoad).toBe(false);
   });
 
+  it("exige booleano na exportação rápida", () => {
+    expect(sanitizeSettings(raw({ fastExport: "sim" })).fastExport).toBeUndefined();
+    expect(sanitizeSettings(raw({ fastExport: false })).fastExport).toBe(false);
+  });
+
+  it("liga a exportação rápida por padrão", () => {
+    // o app cai sozinho para o MediaRecorder quando o navegador não suporta
+    expect(DEFAULT_SETTINGS.fastExport).toBe(true);
+  });
+
   it("não deixa passar lixo vindo de JSON corrompido", () => {
     const out = sanitizeSettings(
       raw({ basemap: 7, aspect: [], duration: {}, profile: [], followZoom: "x" }),

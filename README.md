@@ -69,9 +69,23 @@ npm run preview
 
 ### Gravação de vídeo
 
-A exportação usa `MediaRecorder` + `canvas.captureStream()`, disponível em Chrome, Edge, Firefox
-e Safari atuais (desktop e Android). No **iPhone/iPad o suporte é limitado** — se o botão de
-exportar aparecer desabilitado, é isso. A pré-visualização funciona em todos.
+Há **dois motores**, escolhidos automaticamente:
+
+| Motor | Como funciona | Quando é usado |
+|---|---|---|
+| **Rápida (WebCodecs)** | Renderiza os quadros o mais rápido que a máquina conseguir, com timestamp exato via `VideoEncoder`, e monta o arquivo com `mp4-muxer`/`webm-muxer` | Padrão, quando o navegador sabe codificar o formato escolhido |
+| **Tempo real (`MediaRecorder`)** | `canvas.captureStream()` gravando enquanto a animação roda | Fallback, ou quando você desliga o interruptor ⚡ |
+
+A diferença é grande: um vídeo de 14 s sai **em poucos segundos** no motor rápido, e o `fps` do
+arquivo é exatamente o escolhido — no tempo real, um quadro perdido vira engasgo. O motor rápido
+também não precisa da aba visível.
+
+Cada formato tem um codec associado: MP4 usa H.264, WebM usa VP9 ou VP8. Se o navegador recusar
+o codec do formato escolhido, a exportação cai para tempo real sozinha, sem erro na tela.
+
+No **iPhone/iPad o suporte costuma ser melhor pelo WebCodecs** do que pelo `MediaRecorder` — se a
+exportação rápida não estiver disponível e o botão aparecer desabilitado, é o limite do navegador.
+A pré-visualização funciona em todos.
 
 ### Serviços gratuitos usados
 
@@ -159,7 +173,8 @@ src/
 │  └─ ExportModal.tsx       gravação e download do vídeo
 └─ lib/
    ├─ renderer.ts           desenha cada quadro do vídeo no canvas
-   ├─ recorder.ts           MediaRecorder → MP4/WebM
+   ├─ webcodecs.ts          exportação rápida (VideoEncoder + muxer)
+   ├─ recorder.ts           gravação em tempo real (MediaRecorder)
    ├─ routing.ts            rotas OSRM por trecho, com cache
    ├─ tiles.ts              mapas gratuitos e filtros de estilo
    ├─ geo.ts                matemática geográfica e projeção

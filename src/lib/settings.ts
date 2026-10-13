@@ -48,6 +48,12 @@ export type Settings = {
   fps: number;
   formatId: string;
   bitrateMbps: number;
+  /**
+   * Exportação rápida com WebCodecs: renderiza o vídeo o mais rápido que a
+   * máquina conseguir, em vez de gravar em tempo real. Cai sozinha para o
+   * `MediaRecorder` quando o navegador não suporta o formato escolhido.
+   */
+  fastExport: boolean;
 };
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -75,6 +81,7 @@ export const DEFAULT_SETTINGS: Settings = {
   fps: 30,
   formatId: "",
   bitrateMbps: 10,
+  fastExport: true,
 };
 
 /**
@@ -95,6 +102,7 @@ export function sanitizeSettings(raw: Partial<Settings>): Partial<Settings> {
   if (typeof out.ignoreOneway !== "boolean") delete out.ignoreOneway;
   if (typeof out.snapToRoad !== "boolean") delete out.snapToRoad;
   if (typeof out.showStopCounter !== "boolean") delete out.showStopCounter;
+  if (typeof out.fastExport !== "boolean") delete out.fastExport;
   const profiles = ["car", "bike", "foot", "straight"];
   if (!out.profile || !profiles.includes(out.profile)) delete out.profile;
   return out;

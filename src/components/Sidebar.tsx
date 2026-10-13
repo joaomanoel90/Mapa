@@ -396,7 +396,7 @@ function Sidebar(props: Props) {
         </div>
       </Section>
 
-      <Section step={6} title="Exportar vídeo" hint="A gravação acontece em tempo real no seu navegador.">
+      <Section step={6} title="Exportar vídeo" hint="A gravação acontece no seu navegador — nada é enviado para servidor.">
         <div className="space-y-3">
           <div>
             <Label value={`${aspect.w}×${aspect.h} px`}>Formato da tela</Label>
@@ -450,6 +450,19 @@ function Sidebar(props: Props) {
               ))}
             </select>
           </div>
+          <div className="space-y-1.5">
+            <Toggle
+              icon="⚡"
+              label="Exportação rápida (WebCodecs)"
+              checked={s.fastExport}
+              onChange={(v) => update("fastExport", v)}
+            />
+            <p className="text-[11px] leading-snug text-zinc-500">
+              Renderiza o vídeo o mais rápido que o aparelho conseguir, com fps exato, em vez de
+              gravar em tempo real. Se o navegador não souber codificar o formato escolhido, a
+              gravação em tempo real entra no lugar automaticamente.
+            </p>
+          </div>
           <div className="space-y-2">
             <Toggle
               icon="🏷️"
@@ -495,8 +508,9 @@ function Sidebar(props: Props) {
             </p>
           ) : (
             <p className="text-[11px] leading-snug text-zinc-500">
-              Dica: mantenha esta aba visível durante a gravação ({s.duration}s) para não perder
-              quadros.
+              {s.fastExport
+                ? `A exportação rápida não precisa da aba visível. Se ela não estiver disponível, a gravação em tempo real levará ${s.duration}s — mantenha a aba visível nesse caso.`
+                : `Dica: mantenha esta aba visível durante a gravação (${s.duration}s) para não perder quadros.`}
             </p>
           )}
         </div>

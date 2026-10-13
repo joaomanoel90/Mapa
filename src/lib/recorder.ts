@@ -1,16 +1,57 @@
+export type VideoContainer = "mp4" | "webm";
+
 export type VideoFormat = {
   id: string;
   label: string;
   ext: string;
   mime: string;
+  /** contêiner do arquivo final */
+  container: VideoContainer;
+  /** codec no formato que o WebCodecs espera — usado na exportação rápida */
+  codec: string;
 };
 
 const CANDIDATES: VideoFormat[] = [
-  { id: "mp4-h264", label: "MP4 (H.264)", ext: "mp4", mime: "video/mp4;codecs=avc1.42E01E" },
-  { id: "mp4", label: "MP4", ext: "mp4", mime: "video/mp4" },
-  { id: "webm-vp9", label: "WebM (VP9)", ext: "webm", mime: "video/webm;codecs=vp9" },
-  { id: "webm-vp8", label: "WebM (VP8)", ext: "webm", mime: "video/webm;codecs=vp8" },
-  { id: "webm", label: "WebM", ext: "webm", mime: "video/webm" },
+  {
+    id: "mp4-h264",
+    label: "MP4 (H.264)",
+    ext: "mp4",
+    mime: "video/mp4;codecs=avc1.42E01E",
+    container: "mp4",
+    codec: "avc1.42E01E",
+  },
+  {
+    id: "mp4",
+    label: "MP4",
+    ext: "mp4",
+    mime: "video/mp4",
+    container: "mp4",
+    codec: "avc1.42E01E",
+  },
+  {
+    id: "webm-vp9",
+    label: "WebM (VP9)",
+    ext: "webm",
+    mime: "video/webm;codecs=vp9",
+    container: "webm",
+    codec: "vp09.00.10.08",
+  },
+  {
+    id: "webm-vp8",
+    label: "WebM (VP8)",
+    ext: "webm",
+    mime: "video/webm;codecs=vp8",
+    container: "webm",
+    codec: "vp8",
+  },
+  {
+    id: "webm",
+    label: "WebM",
+    ext: "webm",
+    mime: "video/webm",
+    container: "webm",
+    codec: "vp8",
+  },
 ];
 
 export function availableFormats(): VideoFormat[] {

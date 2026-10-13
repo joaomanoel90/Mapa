@@ -40,6 +40,7 @@ import {
   recordVideo,
   type VideoFormat,
 } from "./lib/recorder";
+import { isFastEncodeSupported, recordVideoFast } from "./lib/webcodecs";
 
 function App() {
   /** Rota recebida por link (`#r=…`). Lida uma única vez, na montagem. */
@@ -167,6 +168,8 @@ function App() {
       label: "WebM",
       ext: "webm",
       mime: "video/webm",
+      container: "webm" as const,
+      codec: "vp8",
     };
 
   const update = useCallback(<K extends keyof Settings>(key: K, value: Settings[K]) => {
@@ -647,7 +650,7 @@ function App() {
       setExportProgress(0);
       setPhase("recording");
 
-      const blob = await recordVideo({
+      const engine = {
         canvas: canvasForRecord ?? canvasRef.current ?? document.createElement("canvas"),
         width: aspect.w,
         height: aspect.h,
@@ -655,7 +658,7 @@ function App() {
         durationSec: settings.duration,
         format: activeFormat,
         bitrate: Math.round(settings.bitrateMbps * 1_000_000),
-        onProgress: (t) => {
+        onProgress: (t: number) => {
           // atualiza a barra sem re-renderizar a app a cada quadro
           if (t - progressUiRef.current > 0.04 || t >= 1) {
             progressUiRef.current = t;
@@ -663,11 +666,21 @@ function App() {
           }
         },
         shouldCancel: () => cancelRef.current,
-        draw: (c, t, elapsed) => {
+        draw: (c: CanvasRenderingContext2D, t: number, elapsed: number) => {
           void c;
           paint(t, elapsed);
         },
-      });
+      };
+
+      // WebCodecs renderiza mais rápido que o tempo real e com fps exato.
+      // Se o navegador não souber codificar o formato escolhido, cai para o
+      // MediaRecorder — que continua funcionando, só que em tempo real.
+      const rapida =
+        settings.fastExport &&
+        (await isFastEncodeSupported(activeFormat, aspect.w, aspect.h, settings.fps));
+      if (cancelRef.current) throw new CancelledError();
+
+      const blob = rapida ? await recordVideoFast(engine) : await recordVideo(engine);
       setVideo({
         blob,
         url: URL.createObjectURL(blob),

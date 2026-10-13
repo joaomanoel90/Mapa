@@ -25,7 +25,7 @@ Qualquer hospedagem de site estático serve. Da mais rápida para a mais complet
 | **Netlify Drop** | Acesse [app.netlify.com/drop](https://app.netlify.com/drop) e **arraste a pasta `dist`** para a página. Sai no ar em segundos, com HTTPS. | Grátis |
 | **Cloudflare Pages** | Painel → Workers & Pages → *Upload assets* → arraste a pasta `dist`. | Grátis |
 | **Vercel** | `npm i -g vercel` e depois `vercel --prod` na raiz do projeto. | Grátis |
-| **GitHub Pages** | Suba o repositório, vá em *Settings → Pages* e publique a pasta `dist` (ou use a Action abaixo). | Grátis |
+| **GitHub Pages** | Já configurado: `.github/workflows/deploy.yml` builda e publica sozinho a cada push na `main`. | Grátis |
 | **Hospedagem própria** | Envie `dist/index.html` por FTP para a pasta pública (`public_html`, `www`…). | Varia |
 
 #### Configuração para Netlify / Vercel / Cloudflare
@@ -37,34 +37,13 @@ Se conectar direto ao repositório Git, use:
 
 #### GitHub Pages automático
 
-Crie `.github/workflows/deploy.yml`:
+O workflow já está no repositório em `.github/workflows/deploy.yml`: a cada push na `main`
+ele roda `npm ci`, `npm run build` e publica a pasta `dist`.
 
-```yaml
-name: Deploy
-on:
-  push: { branches: [main] }
-permissions:
-  contents: read
-  pages: write
-  id-token: write
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with: { node-version: 20, cache: npm }
-      - run: npm ci
-      - run: npm run build
-      - uses: actions/upload-pages-artifact@v3
-        with: { path: dist }
-  deploy:
-    needs: build
-    runs-on: ubuntu-latest
-    environment: github-pages
-    steps:
-      - uses: actions/deploy-pages@v4
-```
+> **Importante:** o GitHub Pages deve estar em *Settings → Pages → Source: **GitHub Actions***.
+> Publicar a raiz do repositório ("Deploy from a branch") **não funciona**, porque a raiz contém
+> o código-fonte do Vite (`index.html` apontando para `/src/main.tsx`), e não o site já compilado.
+> O navegador não executa `.tsx` nem resolve os pacotes do `node_modules` — a página abre em branco.
 
 ---
 

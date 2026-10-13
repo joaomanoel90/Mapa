@@ -107,6 +107,42 @@ no canto do mapa e dentro do vídeo exportado — não remova.
 
 ---
 
+## 🛰️ GPX (importar e exportar)
+
+O app lê e escreve GPX 1.1 — o formato que Strava, Garmin, Komoot e afins usam.
+Fica na seção **Traçar a rota**, no painel.
+
+**Importar (📂):** escolha um `.gpx` e a rota aparece pronta, com os pontos soltos
+(`<wpt>`) virando paradas do percurso. O tipo de cada parada é deduzido do
+símbolo (`<sym>`, padrão Garmin) ou do próprio nome — "Church" e "Igreja Matriz"
+viram ⛪ Igreja, "Fuel" e "Posto Ipiranga" viram ⛽ Posto.
+
+**Exportar (⬇️):** baixa a rota atual com o traçado e as paradas.
+
+### Dois detalhes que valem saber
+
+**O traçado importado não é recalculado.** Um track gravado já segue as ruas, então
+repassá-lo pelo roteador mudaria a rota e gastaria chamadas ao servidor comunitário
+à toa. O arquivo é usado exatamente como veio. Assim que você mover, adicionar ou
+remover um ponto, o roteador volta a mandar.
+
+**Traçados longos são simplificados, não cortados.** Um track gravado tem milhares
+de pontos e o app aceita 60 paradas, então o traçado passa por simplificação
+Douglas–Peucker: a tolerância é ajustada por busca binária até caber no limite,
+preservando as curvas. Um GPX de 3.000 pontos vira 60 pontos com o mesmo formato.
+
+> O GPX guarda 6 casas decimais (~11 cm), o que é mais preciso do que o formato
+> costuma trazer.
+
+### Segurança
+
+O XML é entrada não confiável, então o parser recusa DTD (vetor de expansão de
+entidades), limita a 100 mil pontos e valida cada coordenada — inclusive
+descartando pontos sem os dois atributos, já que `Number(null)` é `0` e um
+`<trkpt>` sem `lat` acabaria no equador.
+
+---
+
 ## 🔗 Compartilhar a rota
 
 O botão **🔗 Compartilhar** no topo gera um link que reabre a rota inteira:
@@ -131,7 +167,7 @@ ou cortados.
 
 ```bash
 npm run typecheck  # tsc --noEmit
-npm test           # Vitest (110 casos)
+npm test           # Vitest (199 casos)
 npm run check:dist # o build saiu autocontido e sem /src/?
 ```
 
@@ -179,6 +215,7 @@ src/
    ├─ tiles.ts              mapas gratuitos e filtros de estilo
    ├─ geo.ts                matemática geográfica e projeção
    ├─ pois.ts               paradas do percurso
+   ├─ gpx.ts                importar/exportar GPX, simplificação de traçado
    ├─ share.ts              permalink da rota (codifica/valida o #r=…)
    └─ geocode.ts            busca de cidades
 ```

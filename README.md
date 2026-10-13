@@ -278,7 +278,7 @@ ou cortados.
 
 ```bash
 npm run typecheck  # tsc --noEmit
-npm test           # Vitest (288 casos)
+npm test           # Vitest (295 casos)
 npm run check:dist # o build saiu autocontido e sem /src/?
 ```
 
@@ -328,6 +328,7 @@ src/
    ├─ pins.ts               quando o pino vira ponto no mapa
    ├─ pois.ts               paradas do percurso
    ├─ stats.ts              distância, elevação (com corte de ruído), tempo e cartela
+   ├─ EndCardPanel.tsx      campos da cartela final (com teste de digitação)
    ├─ gpx.ts                importar/exportar GPX, simplificação de traçado
    ├─ share.ts              permalink da rota (codifica/valida o #r=…)
    └─ geocode.ts            busca de cidades

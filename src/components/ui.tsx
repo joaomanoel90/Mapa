@@ -187,17 +187,27 @@ export function TextInput({
   onChange,
   placeholder,
   maxLength,
+  ariaLabel,
 }: {
   value: string;
   onChange: (v: string) => void;
   placeholder?: string;
   maxLength?: number;
+  /**
+   * Nome acessível do campo.
+   *
+   * Os rótulos dos painéis são um `<span>` ao lado, não um `<label>` ligado ao
+   * campo — então quem lê a tela não sabe o que é cada caixa. Daí o
+   * `aria-label`, que também dá um jeito estável de achar o campo nos testes.
+   */
+  ariaLabel?: string;
 }) {
   return (
     <input
       value={value}
       maxLength={maxLength}
       placeholder={placeholder}
+      aria-label={ariaLabel}
       onChange={(e) => onChange(e.target.value)}
       className="w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-[13px] text-white placeholder:text-zinc-500 focus:border-violet-400/60 focus:outline-none focus:ring-2 focus:ring-violet-500/20"
     />

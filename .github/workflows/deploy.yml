@@ -33,6 +33,24 @@ jobs:
       - name: Build
         run: npm run build
 
+      - name: Garantir que o Pages publique via GitHub Actions
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          atual=$(gh api "repos/$GITHUB_REPOSITORY/pages" --jq '.build_type' 2>/dev/null || echo "desconhecido")
+          echo "Origem atual do Pages: $atual"
+          if [ "$atual" != "workflow" ]; then
+            echo "Trocando de $atual para build via GitHub Actions..."
+            if gh api -X PUT "repos/$GITHUB_REPOSITORY/pages" -f build_type=workflow >/dev/null 2>&1; then
+              echo "Origem agora: $(gh api "repos/$GITHUB_REPOSITORY/pages" --jq '.build_type')"
+            else
+              echo "::warning::Nao foi possivel trocar a origem do Pages automaticamente."
+              echo "::warning::Va em Settings -> Pages -> Source e escolha 'GitHub Actions'."
+            fi
+          else
+            echo "Já está configurado para publicar via GitHub Actions."
+          fi
+
       - name: Configurar Pages
         uses: actions/configure-pages@v5
 

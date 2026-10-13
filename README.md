@@ -126,10 +126,27 @@ repassá-lo pelo roteador mudaria a rota e gastaria chamadas ao servidor comunit
 à toa. O arquivo é usado exatamente como veio. Assim que você mover, adicionar ou
 remover um ponto, o roteador volta a mandar.
 
-**Traçados longos são simplificados, não cortados.** Um track gravado tem milhares
-de pontos e o app aceita 60 paradas, então o traçado passa por simplificação
-Douglas–Peucker: a tolerância é ajustada por busca binária até caber no limite,
-preservando as curvas. Um GPX de 3.000 pontos vira 60 pontos com o mesmo formato.
+### Quantos pontos sobrevivem
+
+São três números diferentes, e vale não confundir:
+
+| Etapa | Limite | Por quê |
+|---|---|---|
+| Leitura do arquivo | 100.000 pontos | um GPX maior que isso é amostrado uniformemente |
+| Traçado desenhado | 12.000 pontos | teto de desempenho da tela e do vídeo |
+| Paradas (pinos) | 60 | são pontos de **controle**, arrastáveis — e cada uma vira uma requisição ao roteador |
+| Arquivo exportado | **o mesmo que entrou** | exportar devolve o traçado importado inteiro |
+
+Um track de GPS comum — uma pedalada de 1 h gravando a cada segundo, ~3.600 pontos —
+aparece inteiro, sem simplificação. E o ciclo importar → exportar **não perde nada**:
+o que sai é fiel ao que entrou, mesmo quando o arquivo é grande demais para desenhar.
+
+> Os 60 pinos não são um corte do traçado: são só as alças que dá para arrastar.
+> O painel mostra "Pontos do traçado" separado de "Paradas" justamente por isso.
+
+Quando o traçado importado é maior do que 12.000 pontos, ele passa por
+simplificação Douglas–Peucker: a tolerância é ajustada por busca binária até caber,
+preservando as curvas. O arquivo original continua guardado para a exportação.
 
 > O GPX guarda 6 casas decimais (~11 cm), o que é mais preciso do que o formato
 > costuma trazer.
@@ -140,6 +157,24 @@ O XML é entrada não confiável, então o parser recusa DTD (vetor de expansão
 entidades), limita a 100 mil pontos e valida cada coordenada — inclusive
 descartando pontos sem os dois atributos, já que `Number(null)` é `0` e um
 `<trkpt>` sem `lat` acabaria no equador.
+
+### Desempenho do desenho
+
+A rota é redesenhada a cada quadro da animação, e o renderizador **descarta o que
+está fora da tela** antes de projetar: a janela visível vira uma caixa de
+coordenadas (4 chamadas de projeção inversa por quadro) e cada segmento é testado
+por comparação simples. A projeção — que usa `sin` e `log` — fica reservada para o
+que realmente aparece.
+
+Com a câmera acompanhando o personagem no zoom 16, a janela mostra uns 3 km; numa
+rota de 70 km isso é ~4% dos pontos. Medido, por quadro:
+
+| Pontos | Antes | Depois |
+|---|---|---|
+| 1.200 | 0,145 ms | **0,039 ms** |
+| 12.000 | — | **0,047 ms** |
+
+Ou seja: 10× mais pontos no traçado **e** mais rápido do que antes.
 
 ---
 
@@ -167,7 +202,7 @@ ou cortados.
 
 ```bash
 npm run typecheck  # tsc --noEmit
-npm test           # Vitest (199 casos)
+npm test           # Vitest (214 casos)
 npm run check:dist # o build saiu autocontido e sem /src/?
 ```
 

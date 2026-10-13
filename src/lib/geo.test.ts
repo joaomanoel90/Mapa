@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { LatLng } from "./geo";
 import {
   bearing,
   buildTrack,
@@ -8,7 +9,11 @@ import {
   haversine,
   nearestTOnTrack,
   nudge,
+  project,
   sampleTrack,
+  TRACK_POINT_LIMIT,
+  unproject,
+  visibleRuns,
 } from "./geo";
 
 describe("haversine", () => {
@@ -68,11 +73,29 @@ describe("buildTrack", () => {
   });
 
   it("reduz trilhas muito longas preservando as pontas", () => {
-    const input = Array.from({ length: 3000 }, (_, i) => ({ lat: -23 + i * 0.0001, lng: -48 }));
+    const input = Array.from({ length: TRACK_POINT_LIMIT + 500 }, (_, i) => ({
+      lat: -23 + i * 0.0001,
+      lng: -48,
+    }));
     const t = buildTrack(input);
+    expect(t.pts.length).toBeLessThanOrEqual(TRACK_POINT_LIMIT);
     expect(t.pts.length).toBeLessThan(input.length);
     expect(t.pts[0]).toEqual(input[0]);
     expect(t.pts[t.pts.length - 1]).toEqual(input[input.length - 1]);
+  });
+
+  it("deixa passar intacta uma trilha de GPS comum", () => {
+    // uma pedalada de 1 h a 1 ponto/s dá ~3.600 pontos: antes isso era
+    // decimado para 1.200 e a rota ficava angulosa
+    const pedalada = Array.from({ length: 3600 }, (_, i) => ({
+      lat: -23.5 + Math.sin(i / 200) * 0.02,
+      lng: -48.4 + Math.cos(i / 200) * 0.02,
+    }));
+    expect(buildTrack(pedalada).pts).toHaveLength(3600);
+  });
+
+  it("o teto comporta arquivos de GPS longos", () => {
+    expect(TRACK_POINT_LIMIT).toBeGreaterThanOrEqual(10_000);
   });
 });
 
@@ -182,5 +205,141 @@ describe("formatadores", () => {
     expect(formatTime(65)).toBe("01:05");
     expect(formatTime(3600)).toBe("60:00");
     expect(formatTime(-5)).toBe("00:00");
+  });
+});
+
+describe("unproject", () => {
+  it("é o inverso exato de project", () => {
+    for (const [lat, lng, z] of [
+      [-23.4903, -48.4128, 16],
+      [0, 0, 0],
+      [51.5074, -0.1278, 12],
+      [-33.8688, 151.2093, 9],
+      [64.1466, -21.9426, 18],
+    ] as [number, number, number][]) {
+      const p = project(lat, lng, z);
+      const volta = unproject(p.x, p.y, z);
+      expect(volta.lat).toBeCloseTo(lat, 6);
+      expect(volta.lng).toBeCloseTo(lng, 6);
+    }
+  });
+
+  it("devolve o ponto certo nos cantos do mundo", () => {
+    const n = 256 * Math.pow(2, 3);
+    expect(unproject(0, 0, 3).lng).toBeCloseTo(-180, 6);
+    expect(unproject(n, 0, 3).lng).toBeCloseTo(180, 6);
+    // y=0 é o topo do Mercator, y=n é a base
+    expect(unproject(0, 0, 3).lat).toBeGreaterThan(85);
+    expect(unproject(0, n, 3).lat).toBeLessThan(-85);
+  });
+
+  it("acompanha o zoom", () => {
+    const z10 = project(-23.5, -48.4, 10);
+    const z16 = project(-23.5, -48.4, 16);
+    // no mesmo pixel do mundo, cada zoom aponta para um lugar diferente
+    expect(unproject(z10.x, z10.y, 10).lat).toBeCloseTo(-23.5, 6);
+    expect(unproject(z16.x, z16.y, 16).lat).toBeCloseTo(-23.5, 6);
+  });
+});
+
+describe("visibleRuns", () => {
+  /** Linha reta com n pontos, de oeste para leste. */
+  const linha = (n: number, lngIni = 0, lngFim = 1): LatLng[] =>
+    Array.from({ length: n }, (_, i) => ({
+      lat: 0,
+      lng: lngIni + ((lngFim - lngIni) * i) / (n - 1),
+    }));
+
+  const janela = (oeste: number, leste: number, sul = -1, norte = 1) => ({
+    north: norte,
+    south: sul,
+    east: leste,
+    west: oeste,
+  });
+
+  it("devolve tudo quando a janela cobre o traçado", () => {
+    expect(visibleRuns(linha(10), janela(-1, 2))).toEqual([[0, 9]]);
+  });
+
+  it("devolve nada quando o traçado está fora", () => {
+    expect(visibleRuns(linha(10), janela(50, 60))).toEqual([]);
+  });
+
+  it("recorta a faixa de índices que aparece", () => {
+    const runs = visibleRuns(linha(101), janela(0.4, 0.6));
+    expect(runs).toHaveLength(1);
+    const [ini, fim] = runs[0];
+    // o índice 40 está em lng 0,4 e o 60 em 0,6
+    expect(ini).toBeGreaterThanOrEqual(39);
+    expect(ini).toBeLessThanOrEqual(40);
+    expect(fim).toBeGreaterThanOrEqual(60);
+    expect(fim).toBeLessThanOrEqual(61);
+  });
+
+  it("inclui o segmento que atravessa a janela com as pontas fora", () => {
+    // dois pontos distantes: nenhum está dentro, mas a linha entre eles cruza
+    const pts = [
+      { lat: 0, lng: -10 },
+      { lat: 0, lng: 10 },
+    ];
+    expect(visibleRuns(pts, janela(-1, 1))).toEqual([[0, 1]]);
+  });
+
+  it("devolve várias faixas quando o traçado sai e volta", () => {
+    // "U": entra, sai pela direita, volta
+    const pts: LatLng[] = [
+      { lat: 0, lng: 0 },
+      { lat: 0, lng: 0.5 },
+      { lat: 50, lng: 0.5 },
+      { lat: 50, lng: 1.5 },
+      { lat: 0, lng: 1.5 },
+      { lat: 0, lng: 0.5 },
+    ];
+    const runs = visibleRuns(pts, janela(-1, 1));
+    expect(runs.length).toBeGreaterThanOrEqual(2);
+    // as pontas de cada faixa são índices válidos, em ordem crescente
+    let anterior = -1;
+    for (const [ini, fim] of runs) {
+      expect(ini).toBeGreaterThanOrEqual(0);
+      expect(fim).toBeLessThan(pts.length);
+      expect(ini).toBeLessThanOrEqual(fim);
+      expect(ini).toBeGreaterThan(anterior);
+      anterior = ini;
+    }
+  });
+
+  it("respeita o índice final (trecho percorrido)", () => {
+    const runs = visibleRuns(linha(100), janela(-1, 2), 30);
+    expect(runs).toEqual([[0, 30]]);
+    // nenhuma faixa passa do limite pedido
+    for (const [, fim] of runs) expect(fim).toBeLessThanOrEqual(30);
+  });
+
+  it("devolve tudo com a janela do mundo inteiro", () => {
+    expect(visibleRuns(linha(10), janela(-180, 180, -90, 90))).toEqual([[0, 9]]);
+  });
+
+  it("considera as quatro bordas da caixa", () => {
+    const pts = linha(10); // lat 0, lng 0..1
+    expect(visibleRuns(pts, janela(0.5, 2, 10, 20))).toEqual([]); // acima
+    expect(visibleRuns(pts, janela(0.5, 2, -20, -10))).toEqual([]); // abaixo
+    expect(visibleRuns(pts, janela(5, 6))).toEqual([]); // à direita
+    expect(visibleRuns(pts, janela(-2, -1))).toEqual([]); // à esquerda
+  });
+
+  it("aguenta entradas degeneradas", () => {
+    expect(visibleRuns([], janela(-1, 1))).toEqual([]);
+    expect(visibleRuns([{ lat: 0, lng: 0 }], janela(-1, 1))).toEqual([]);
+    expect(visibleRuns(linha(2), janela(-1, 1), 0)).toEqual([]);
+  });
+
+  it("todas as faixas são válidas para desenhar", () => {
+    const pts = linha(1000);
+    const runs = visibleRuns(pts, janela(0.2, 0.3));
+    expect(runs.length).toBeGreaterThan(0);
+    for (const [ini, fim] of runs) {
+      expect(pts[ini]).toBeDefined();
+      expect(pts[fim]).toBeDefined();
+    }
   });
 });

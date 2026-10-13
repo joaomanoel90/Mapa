@@ -93,6 +93,47 @@ no canto do mapa e dentro do vídeo exportado — não remova.
 
 ---
 
+## 🔗 Compartilhar a rota
+
+O botão **🔗 Compartilhar** no topo gera um link que reabre a rota inteira:
+traçado, paradas (inclusive as que ficam fora da rota), partida/chegada, título,
+duração, estilo de mapa e personagem.
+
+O que **não** vai no link: as configurações que dependem do aparelho — `fps`,
+bitrate e formato de vídeo. Quem abre escolhe as suas.
+
+O traçado é redesenhado pelo OSRM ao abrir o link (só os pontos clicados viajam),
+com precisão de ~1 m, que é a do formato. Um exemplo real de 12 pontos e 3 paradas
+fica em **~430 caracteres**.
+
+Como a URL vem de fora, tudo que chega pelo `#` passa por validação antes de
+virar estado: coordenadas fora da faixa, cores fora do formato hexadecimal,
+tipos de parada inexistentes, textos longos e listas gigantes são descartados
+ou cortados.
+
+---
+
+## 🧪 Testes e verificação
+
+```bash
+npm run typecheck  # tsc --noEmit
+npm test           # Vitest (110 casos)
+npm run check:dist # o build saiu autocontido e sem /src/?
+```
+
+O `npm run build` roda o `tsc` antes do Vite — o Vite **não** faz verificação de
+tipos, então sem isso um erro de tipo chegaria em produção sem aviso.
+
+O `check:dist` existe por causa de um incidente: o GitHub Pages já publicou a
+raiz do repositório no lugar do build, servindo o `index.html` que aponta para
+`/src/main.tsx`. O navegador não executa `.tsx` e o site abria em branco. A
+checagem transforma aquele erro silencioso em falha de CI.
+
+O workflow `.github/workflows/ci.yml` roda tudo isso em cada push na `main` e em
+pull requests.
+
+---
+
 ## 🗺️ Rodando localmente
 
 ```bash
@@ -123,5 +164,6 @@ src/
    ├─ tiles.ts              mapas gratuitos e filtros de estilo
    ├─ geo.ts                matemática geográfica e projeção
    ├─ pois.ts               paradas do percurso
+   ├─ share.ts              permalink da rota (codifica/valida o #r=…)
    └─ geocode.ts            busca de cidades
 ```

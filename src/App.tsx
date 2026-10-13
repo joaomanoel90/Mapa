@@ -29,6 +29,7 @@ import {
   type RouteResult,
 } from "./lib/routing";
 import { makePoi, nextFreeT, nextPoiId, sortPois, type Poi } from "./lib/pois";
+import { buildShareUrl, decodeShare, sharedSettingsOverrides } from "./lib/share";
 import { DEFAULT_ENDPOINTS, type Endpoints } from "./lib/endpoints";
 import { findCharacter } from "./lib/characters";
 import { SceneRenderer, tilesForAnimation, TILE_BUDGET } from "./lib/renderer";
@@ -41,33 +42,38 @@ import {
 } from "./lib/recorder";
 
 function App() {
+  /** Rota recebida por link (`#r=…`). Lida uma única vez, na montagem. */
+  const [shared] = useState(() => decodeShare(window.location.hash));
+
   const [settings, setSettings] = useState<Settings>(() => {
     const f = availableFormats();
     const base = { ...DEFAULT_SETTINGS, formatId: f[0]?.id ?? "" };
+
+    let salvos: Partial<Settings> = {};
     try {
       const saved = localStorage.getItem("rotacast:settings");
-      if (saved) {
-        const parsed = sanitizeSettings(JSON.parse(saved) as Partial<Settings>);
-        return {
-          ...base,
-          ...parsed,
-          formatId: f.some((x) => x.id === parsed.formatId)
-            ? parsed.formatId!
-            : base.formatId,
-        };
-      }
+      if (saved) salvos = sanitizeSettings(JSON.parse(saved) as Partial<Settings>);
     } catch {
       /* ignora */
     }
-    return base;
+
+    // o link descreve uma cena específica, então vence o que estava salvo
+    const doLink = shared ? sharedSettingsOverrides(shared.settings) : {};
+    const merged = { ...base, ...salvos, ...doLink };
+    return {
+      ...merged,
+      formatId: f.some((x) => x.id === merged.formatId) ? merged.formatId : base.formatId,
+    };
   });
-  const [waypoints, setWaypoints] = useState<LatLng[]>([]);
+  const [waypoints, setWaypoints] = useState<LatLng[]>(() => shared?.waypoints ?? []);
   const [route, setRoute] = useState<RouteResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [progress, setProgress] = useState(0);
   const [playing, setPlaying] = useState(false);
   const [showSidebar, setShowSidebar] = useState(false);
-  const [city, setCity] = useState<Place | null>(HOME_CITY);
+  /** confirmação visual do "Copiar link" */
+  const [linkCopiado, setLinkCopiado] = useState(false);
+  const [city, setCity] = useState<Place | null>(() => shared?.city ?? HOME_CITY);
   const [flyTo, setFlyTo] = useState<FlyTarget | null>(null);
   /** contador: cada incremento pede um reenquadramento manual da rota */
   const [fitRequest, setFitRequest] = useState(0);
@@ -75,13 +81,15 @@ function App() {
   const [snapping, setSnapping] = useState(false);
   const [snapStreet, setSnapStreet] = useState<string | null>(null);
   /** paradas do percurso (ponte, cachoeira, igreja…) */
-  const [pois, setPois] = useState<Poi[]>([]);
+  const [pois, setPois] = useState<Poi[]>(() => shared?.pois ?? []);
   const [selectedPoi, setSelectedPoi] = useState<string | null>(null);
   /** modo "mira": clicar no mapa posiciona parada (pode ser fora da rota) */
   const [poiMode, setPoiMode] = useState(false);
   const lastKindRef = useRef("destino");
   /** partida/chegada como locais marcados (🏠 Casa → 💦 Cachoeira) */
   const [endpoints, setEndpoints] = useState<Endpoints>(() => {
+    // a partida/chegada do link vence a que estava salva
+    if (shared && (shared.endpoints.a || shared.endpoints.b)) return shared.endpoints;
     try {
       const raw = localStorage.getItem("rotacast:endpoints");
       if (raw) {
@@ -193,6 +201,12 @@ function App() {
   const snapEnabledRef = useRef(settings.snapToRoad);
   snapEnabledRef.current = settings.snapToRoad;
 
+  /**
+   * Rota aberta por link: enquadrar assim que o traçado chegar.
+   * Enquadrar na montagem só mostraria os pontos clicados, e não as ruas.
+   */
+  const fitAfterRoute = useRef(Boolean(shared && shared.waypoints.length >= 2));
+
   useEffect(() => {
     if (waypoints.length < 2) {
       setRoute(null);
@@ -209,6 +223,10 @@ function App() {
         const res = await fetchRoute(waypoints, routeOptions, controller.signal);
         if (!alive) return;
         setRoute(res);
+        if (fitAfterRoute.current) {
+          fitAfterRoute.current = false;
+          setFitRequest((n) => n + 1);
+        }
       } catch (err) {
         // cancelamento é esperado; outras falhas só mantêm o que já está na tela
         if (!isAbortError(err)) console.error("Falha ao calcular a rota", err);
@@ -516,6 +534,20 @@ function App() {
   }, []);
 
   /* ---------- exportação ---------- */
+  /** Copia o permalink da rota atual. */
+  const copiarLink = useCallback(async () => {
+    const url = buildShareUrl({ waypoints, settings, pois, endpoints, city });
+    try {
+      await navigator.clipboard.writeText(url);
+      setLinkCopiado(true);
+      window.setTimeout(() => setLinkCopiado(false), 2200);
+    } catch {
+      // área de transferência bloqueada (contexto inseguro ou permissão):
+      // mostra o link para copiar à mão em vez de falhar em silêncio
+      window.prompt("Copie o link da rota:", url);
+    }
+  }, [waypoints, settings, pois, endpoints, city]);
+
   const startExport = useCallback(async () => {
     if (!hasRoute) return;
     setVideo(null);
@@ -700,8 +732,28 @@ function App() {
         </div>
         <button
           type="button"
+          onClick={copiarLink}
+          disabled={waypoints.length === 0}
+          title={
+            waypoints.length === 0
+              ? "Trace uma rota para gerar o link"
+              : "Copiar um link que abre esta rota, com a cena e as paradas"
+          }
+          aria-label="Copiar link da rota"
+          className={
+            "ml-auto shrink-0 rounded-xl border px-3 py-2 text-xs font-semibold transition-colors disabled:opacity-35 " +
+            (linkCopiado
+              ? "border-emerald-400/40 bg-emerald-500/15 text-emerald-300"
+              : "border-white/10 bg-white/5 text-zinc-200 hover:text-white")
+          }
+        >
+          {linkCopiado ? "✓ Link copiado" : "🔗 Compartilhar"}
+        </button>
+
+        <button
+          type="button"
           onClick={() => setShowSidebar((v) => !v)}
-          className="ml-auto rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs font-semibold text-zinc-200 lg:hidden"
+          className="shrink-0 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs font-semibold text-zinc-200 lg:hidden"
         >
           {showSidebar ? "Ver mapa" : "Ver controles"}
         </button>

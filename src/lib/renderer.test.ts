@@ -161,6 +161,19 @@ function arcoDoAndamento(arcos: number[][]) {
   return { x, y, r, fracao: (fim - ini) / (Math.PI * 2) };
 }
 
+/**
+ * As fotos do quadro, separadas por onde aparecem.
+ *
+ * Quem tem foto mostra **duas** imagens: a pequena, dentro do selo do pino (o
+ * trajeto inteiro) e a grande, que aparece quando o personagem passa. Os testes
+ * de "a foto apareceu" falam da grande; o pino tem os seus.
+ */
+const LIMITE_PINO = 40; // o miolo do pino tem ~29 px de lado em 1280×720
+const fotosGrandes = (f: ReturnType<typeof fakeCtx>) =>
+  f.imagens.filter((i) => i.args[6] > LIMITE_PINO);
+const fotosDoPino = (f: ReturnType<typeof fakeCtx>) =>
+  f.imagens.filter((i) => i.args[6] <= LIMITE_PINO);
+
 const style: SceneStyle = {
   accent: "#a3e635",
   basemap: "dark",
@@ -694,9 +707,10 @@ describe("foto da parada no vídeo", () => {
       stops: [parada({ photo: SRC })],
       photos: cacheComFoto,
     });
-    expect(imagens.length).toBe(1);
+    const grandes = fotosGrandes({ imagens } as never);
+    expect(grandes.length).toBe(1);
     // recorte quadrado e centralizado da foto deitada (800×400 → 400×400 do meio)
-    const [sx, sy, size] = imagens[0].args;
+    const [sx, sy, size] = grandes[0].args;
     expect([sx, sy, size]).toEqual([200, 0, 400]);
   });
 
@@ -707,7 +721,9 @@ describe("foto da parada no vídeo", () => {
       stops: [parada({ photo: SRC })],
       photos: cacheComFoto,
     });
-    expect(imagens.length).toBe(0);
+    expect(fotosGrandes({ imagens } as never).length).toBe(0);
+    // mas o pino já mostra a foto pequena: é o que impede o pino de ficar oco
+    expect(fotosDoPino({ imagens } as never).length).toBe(1);
   });
 
   it("some depois do tempo da foto (não fica no vídeo até o fim)", () => {
@@ -717,8 +733,8 @@ describe("foto da parada no vídeo", () => {
     const tarde = fakeCtx();
     desenhar(cedo.ctx, { ...estado(0.5 + 0.6 / 14, 14, null), ...comFoto });
     desenhar(tarde.ctx, { ...estado(0.5 + 4 / 14, 14, null), ...comFoto });
-    expect(cedo.imagens.length).toBe(1);
-    expect(tarde.imagens.length).toBe(0);
+    expect(fotosGrandes(cedo).length).toBe(1);
+    expect(fotosGrandes(tarde).length).toBe(0);
   });
 
   it("num vídeo longo, a foto dura o mesmo tempo de vídeo (não some por ser rota longa)", () => {
@@ -730,7 +746,7 @@ describe("foto da parada no vídeo", () => {
       stops: [parada({ photo: SRC })],
       photos: cacheComFoto,
     });
-    expect(imagens.length).toBe(1);
+    expect(fotosGrandes({ imagens } as never).length).toBe(1);
   });
 
   it("a foto entra com alfa crescente e fica opaca", () => {
@@ -741,8 +757,8 @@ describe("foto da parada no vídeo", () => {
     const comum = { stops: [parada({ photo: SRC })], photos: cacheComFoto };
     desenhar(naHora.ctx, { ...estado(0.5, 14, null), ...comum });
     desenhar(depois.ctx, { ...estado(0.5 + 0.6 / 14, 14, null), ...comum });
-    expect(naHora.imagens.length).toBe(0); // ainda em fade de entrada
-    expect(depois.imagens[0].alpha).toBeCloseTo(1, 2);
+    expect(fotosGrandes(naHora).length).toBe(0); // ainda em fade de entrada
+    expect(fotosGrandes(depois)[0].alpha).toBeCloseTo(1, 2);
   });
 
   it("sem a foto pronta, a etiqueta continua saindo — sem buraco no lugar dela", () => {
@@ -895,9 +911,9 @@ describe("parada passada duas vezes", () => {
     // (a janela fecha em 0,5 + 2,6/14 = 0,686)
     desenhar(meio.ctx, { ...estado(0.7, 14, null), ...comum });
     desenhar(volta.ctx, { ...estado(0.8 + 1.4 / 14, 14, null), ...comum });
-    expect(ida.imagens.length).toBe(1);
-    expect(meio.imagens.length).toBe(0);
-    expect(volta.imagens.length).toBe(1);
+    expect(fotosGrandes(ida).length).toBe(1);
+    expect(fotosGrandes(meio).length).toBe(0);
+    expect(fotosGrandes(volta).length).toBe(1);
   });
 
   it("o aviso do topo aparece nas duas pontas, com o km de cada passagem", () => {
@@ -1003,8 +1019,8 @@ describe("foto da partida e da chegada", () => {
       endpoints: { a: LOCAL, b: null },
       photos: cacheComFoto,
     });
-    expect(imagens.length).toBe(1);
-    const [, , , size] = imagens[0].args;
+    expect(fotosGrandes({ imagens } as never).length).toBe(1);
+    const [, , , size] = fotosGrandes({ imagens } as never)[0].args;
     expect(size).toBe(400); // recorte quadrado da foto deitada
   });
 
@@ -1014,8 +1030,8 @@ describe("foto da partida e da chegada", () => {
     const comum = { endpoints: { a: null, b: LOCAL }, photos: cacheComFoto };
     desenhar(cedo.ctx, { ...estado(0.5, 14, null), ...comum });
     desenhar(fim.ctx, { ...estado(1 - 1.4 / 14, 14, null), ...comum });
-    expect(cedo.imagens.length).toBe(0);
-    expect(fim.imagens.length).toBe(1);
+    expect(fotosGrandes(cedo).length).toBe(0);
+    expect(fotosGrandes(fim).length).toBe(1);
   });
 
   it("a foto da partida já está na tela no primeiro quadro", () => {
@@ -1027,8 +1043,8 @@ describe("foto da partida e da chegada", () => {
       endpoints: { a: LOCAL, b: null },
       photos: cacheComFoto,
     });
-    expect(imagens.length).toBe(1);
-    expect(imagens[0].alpha).toBeCloseTo(1, 2);
+    expect(fotosGrandes({ imagens } as never).length).toBe(1);
+    expect(fotosGrandes({ imagens } as never)[0].alpha).toBeCloseTo(1, 2);
   });
 
   it("a foto da chegada continua na tela no último quadro", () => {
@@ -1038,8 +1054,8 @@ describe("foto da partida e da chegada", () => {
       endpoints: { a: null, b: LOCAL },
       photos: cacheComFoto,
     });
-    expect(imagens.length).toBe(1);
-    expect(imagens[0].alpha).toBeCloseTo(1, 2);
+    expect(fotosGrandes({ imagens } as never).length).toBe(1);
+    expect(fotosGrandes({ imagens } as never)[0].alpha).toBeCloseTo(1, 2);
   });
 
   it("a foto da partida sai depois de alguns segundos (não fica o vídeo todo)", () => {
@@ -1049,7 +1065,7 @@ describe("foto da partida e da chegada", () => {
       endpoints: { a: LOCAL, b: null },
       photos: cacheComFoto,
     });
-    expect(imagens.length).toBe(0);
+    expect(fotosGrandes({ imagens } as never).length).toBe(0);
   });
 
   it("partida com foto não vira aviso no topo", () => {
@@ -1153,8 +1169,8 @@ describe("partida e chegada no vídeo", () => {
       photos: cacheComFoto,
     });
     // args = [sx, sy, size, dx, dy, dw, dh]: dw é o lado desenhado na tela
-    const ladoParada = daParada.imagens[0].args[6];
-    const ladoLocal = doLocal.imagens[0].args[6];
+    const ladoParada = fotosGrandes(daParada)[0].args[6];
+    const ladoLocal = fotosGrandes(doLocal)[0].args[6];
     expect(ladoLocal).toBeLessThan(ladoParada);
     expect(ladoLocal).toBeCloseTo(56, 0);
     expect(ladoParada).toBeCloseTo(78, 0);
@@ -1225,6 +1241,73 @@ describe("partida e chegada no vídeo", () => {
     expect(overlapsCard({ x: 1100, y: 280 }, 17, caixa)).toBe(false); // à direita
     expect(overlapsCard({ x: 640, y: 210 }, 17, caixa)).toBe(true); // encostando por cima
     expect(overlapsCard({ x: 640, y: 100 }, 17, caixa)).toBe(false); // acima, sem encostar
+  });
+
+  it("o miolo do pino tem imagem o trajeto inteiro (não fica oco)", () => {
+    // a regra antiga ("a foto ocupa o lugar do emoji") deixava o pino vazio: a
+    // foto grande é desenhada ACIMA do pino, e só nos segundos da largada. No
+    // meio do vídeo, o selo ficava sem nada dentro.
+    const { ctx, imagens } = fakeCtx();
+    desenhar(ctx, {
+      ...estado(0.5, 14, null),
+      endpoints: { a: LOCAL_A, b: LOCAL_B },
+      photos: cacheComFoto,
+    });
+    const doPino = fotosDoPino({ imagens } as never);
+    expect(doPino.length).toBe(2); // partida e chegada
+    for (const img of doPino) {
+      // args = [sx, sy, size, size, dx, dy, dw, dh]
+      const [, , size, , , , dw] = img.args;
+      expect(size).toBe(400); // 800×400 → quadrado de 400 do meio
+      expect(dw).toBeCloseTo(2 * (17 - 2.6), 1); // diâmetro de dentro do aro
+      expect(dw).toBeLessThan(2 * 17); // e cabe dentro do pino
+    }
+  });
+
+  it("sem foto no local, o pino mostra o emoji (não fica vazio)", () => {
+    const { ctx, imagens, textos } = fakeCtx();
+    desenhar(ctx, {
+      ...estado(0.5, 14, null),
+      endpoints: { a: { emoji: "🏠", label: "Casa" }, b: null },
+      photos: cacheVazio,
+    });
+    expect(fotosDoPino({ imagens } as never).length).toBe(0);
+    expect(textos).toContain("🏠");
+  });
+
+  it("local sem emoji e sem foto continua com a letra A/B", () => {
+    const { ctx, textos, textosCor } = fakeCtx();
+    desenhar(ctx, {
+      ...estado(0.5, 14, null),
+      endpoints: { a: { emoji: "", label: "Casa" }, b: null },
+      photos: cacheVazio,
+    });
+    expect(textos).toContain("A");
+    expect(textosCor[textos.indexOf("A")]).toBe("#22c55e");
+  });
+
+  it("a parada com foto também mostra a foto dentro do pino", () => {
+    // os dois pinos seguem a mesma regra: com foto, o miolo é a foto
+    const { ctx, imagens, textos } = fakeCtx();
+    desenhar(ctx, {
+      ...estado(0.5, 14, null),
+      stops: [parada({ photo: SRC, t: 0.8 })],
+      photos: cacheComFoto,
+    });
+    expect(fotosDoPino({ imagens } as never).length).toBe(1);
+    // e o emoji do pino não aparece nesse caso (a foto tomou o miolo)
+    expect(textos.filter((t) => t === "🌉").length).toBe(0);
+  });
+
+  it("a parada sem foto continua com o emoji no pino", () => {
+    const { ctx, imagens, textos } = fakeCtx();
+    desenhar(ctx, {
+      ...estado(0.5, 14, null),
+      stops: [parada({ t: 0.8 })],
+      photos: cacheComFoto,
+    });
+    expect(fotosDoPino({ imagens } as never).length).toBe(0);
+    expect(textos.filter((t) => t === "🌉").length).toBeGreaterThan(0);
   });
 
   it("`liftToClear` sobe só o necessário, e só quando há sobreposição", () => {

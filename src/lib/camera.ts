@@ -72,11 +72,17 @@ export function openingProgress(elapsed: number, duration: number): number {
   return easeInOutCubic(x);
 }
 
-/** Meia-janela (em fração do vídeo) em que a parada aproxima a câmera. */
+/**
+ * Meia-janela (em fração do **percurso**) em que a parada puxa a câmera.
+ *
+ * ~1,6 s de percurso de cada lado: acompanha a janela da foto (2,6 s de vídeo) e
+ * é o tempo que a câmera leva para **chegar** na parada. Com uma janela curta
+ * ela só começava a se mexer nos últimos quadros, e a parada continuava saindo
+ * pela borda no 9:16.
+ */
 export function stopSpan(duration: number): number {
   const d = Number.isFinite(duration) && duration > 0 ? duration : 10;
-  // ~1,2 s de cada lado, com limites: em vídeo curto não dá para abrir muito
-  return Math.max(0.03, Math.min(0.12, 1.2 / d));
+  return Math.max(0.03, Math.min(0.12, 1.6 / d));
 }
 
 /**
@@ -86,18 +92,38 @@ export function stopSpan(duration: number): number {
  * teria como ser "mais perto" que a outra).
  */
 export function stopBoost(t: number, stopTs: number[], duration: number): number {
-  if (stopTs.length === 0) return 0;
+  return stopFocus(t, stopTs, duration).forca;
+}
+
+/**
+ * A parada que a câmera está focando neste instante — e com que força.
+ *
+ * Devolve o **instante da passagem** e não só a intensidade porque a câmera
+ * precisa saber para onde ir: no quadro estreito (9:16) a parada ficava fora da
+ * tela, e a única forma de mostrá-la inteira (foto e nome) é levar a **parada**
+ * ao centro em vez de manter o personagem no centro.
+ */
+export function stopFocus(
+  t: number,
+  stopTs: number[],
+  duration: number,
+): { forca: number; ts: number | null } {
+  if (stopTs.length === 0) return { forca: 0, ts: null };
   const span = stopSpan(duration);
   let maior = 0;
+  let escolhida: number | null = null;
   for (const ts of stopTs) {
     if (!Number.isFinite(ts)) continue;
     const d = Math.abs(t - ts);
     if (d >= span) continue;
     const x = 1 - d / span;
     const suave = x * x * (3 - 2 * x);
-    if (suave > maior) maior = suave;
+    if (suave > maior) {
+      maior = suave;
+      escolhida = ts;
+    }
   }
-  return maior;
+  return { forca: maior, ts: escolhida };
 }
 
 /**
@@ -115,6 +141,15 @@ export function cameraTarget(input: {
   maxZoom: number;
   elapsed: number;
   duration: number;
+  /**
+   * Segundos de vídeo do **percurso** (sem o voo e sem a cartela).
+   *
+   * A janela do foco é medida em fração do percurso — e não do vídeo — para
+   * valer o mesmo em qualquer duração de vídeo. Sem ele, vale `duration`.
+   */
+  routeSeconds?: number;
+  /** Onde fica a parada (a câmera vai até ela). Sem isto, não há deslocamento. */
+  stopPos?: (ts: number) => { lat: number; lng: number } | null;
 }): CameraTarget {
   const { track, t, camera, width, height, maxZoom, elapsed, duration } = input;
   const b = boundsOf(track.pts);
@@ -128,14 +163,26 @@ export function cameraTarget(input: {
   const pos = sampleTrack(track, t).pos;
   const cine = camera.cinematic;
   const abertura = cine?.opening ? openingProgress(elapsed, duration) : 1;
-  const boost = cine?.stops ? stopBoost(t, cine.stopTs, duration) : 0;
-  const alvo = Math.min(camera.followZoom + boost * STOP_BOOST, maxZoom);
+
+  /*
+   * Ênfase na parada: a câmera anda **até a parada** e chega mais perto.
+   *
+   * Antes o personagem ficava sempre no centro e a parada podia sair pela borda
+   * — no 9:16, onde o quadro é estreito, era o que acontecia. Levar a parada ao
+   * centro é o que garante que ela, a foto e o nome apareçam inteiros.
+   */
+  const rotaSec = input.routeSeconds && input.routeSeconds > 0 ? input.routeSeconds : duration;
+  const foco = cine?.stops ? stopFocus(t, cine.stopTs, rotaSec) : { forca: 0, ts: null };
+  const ponto = foco.ts !== null ? input.stopPos?.(foco.ts) ?? null : null;
+  const alvo = Math.min(camera.followZoom + foco.forca * STOP_BOOST, maxZoom);
+  const focoLat = ponto ? pos.lat + (ponto.lat - pos.lat) * foco.forca : pos.lat;
+  const focoLng = ponto ? pos.lng + (ponto.lng - pos.lng) * foco.forca : pos.lng;
 
   return {
-    lat: centro.lat + (pos.lat - centro.lat) * abertura,
-    lng: centro.lng + (pos.lng - centro.lng) * abertura,
+    lat: centro.lat + (focoLat - centro.lat) * abertura,
+    lng: centro.lng + (focoLng - centro.lng) * abertura,
     zoom: fitZ + (alvo - fitZ) * abertura,
     opening: abertura,
-    boost,
+    boost: foco.forca,
   };
 }

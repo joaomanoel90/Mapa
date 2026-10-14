@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { buildTrack, cumulative } from "./geo";
+import { buildTimeline, routeEnd, type Timeline } from "./timeline";
 import { colorizeRoute, NEUTRAL_COLOR } from "./coloring";
 import { formatClock, timesOf } from "./hud";
 import { type PhotoImage, type PhotoLookup } from "./photos";
@@ -199,12 +200,21 @@ const TRACK_PTS = [
 ];
 const track = buildTrack(TRACK_PTS);
 
+/**
+ * Um quadro qualquer.
+ *
+ * `t` é o progresso do **percurso** (é assim que o renderizador fala) e
+ * `elapsed` é o instante do **vídeo**, em segundos — as janelas de vídeo
+ * (fotos, cartela) são medidas nele. Quando há cartela, o percurso termina
+ * antes do fim do vídeo: 4,2 s ficam reservados para ela.
+ */
 const estado = (
   t: number,
   duration: number,
   summary: EndCard | null,
   times: number[] | null = null,
   cardSeconds: number | null = null,
+  timeline: Timeline | null = null,
 ): FrameState => ({
   track,
   t,
@@ -216,6 +226,7 @@ const estado = (
   endpoints: { a: null, b: null },
   elapsed: t * duration,
   duration,
+  timeline: timeline ?? buildTimeline(duration, { voo: false, cartela: summary !== null }),
   summary,
   times,
   cardSeconds,
@@ -1308,6 +1319,39 @@ describe("partida e chegada no vídeo", () => {
     });
     expect(fotosDoPino({ imagens } as never).length).toBe(0);
     expect(textos.filter((t) => t === "🌉").length).toBeGreaterThan(0);
+  });
+
+  it("a cartela final só entra depois do fim do percurso", () => {
+    // o pedido: "cartela aparecendo muito antes, terminar percurso e depois
+    // aparecer". Antes ela entrava em 79% do percurso e cobria o fim do trajeto.
+    const tl = buildTimeline(20, { voo: true, cartela: true });
+    const fim = routeEnd(tl); // 15,8 s de vídeo (voo 2,6 + percurso 13,2)
+    const antes = { ...estado(1, 20, cartela, null, null, tl), elapsed: fim - 0.1 };
+    const depois = { ...estado(1, 20, cartela, null, null, tl), elapsed: fim + 0.7 };
+
+    const cedo = fakeCtx();
+    desenhar(cedo.ctx, antes);
+    expect(cedo.textos).not.toContain("49 km");
+
+    const tarde = fakeCtx();
+    desenhar(tarde.ctx, depois);
+    expect(tarde.textos).toContain("49 km");
+  });
+
+  it("com o voo, a foto da partida aparece no pouso (não durante o voo)", () => {
+    // o personagem espera o voo; a foto dele é do pouso em diante
+    const tl = buildTimeline(20, { voo: true, cartela: true });
+    const voando = { ...estado(0, 20, null, null, null, tl), elapsed: tl.voo - 0.5 };
+    const pousado = { ...estado(0, 20, null, null, null, tl), elapsed: tl.voo + 0.1 };
+    const marcas = { a: LOCAL_A, b: null };
+
+    const a = fakeCtx();
+    desenhar(a.ctx, { ...voando, endpoints: marcas, photos: cacheComFoto });
+    expect(fotosGrandes(a).length).toBe(0);
+
+    const b = fakeCtx();
+    desenhar(b.ctx, { ...pousado, endpoints: marcas, photos: cacheComFoto });
+    expect(fotosGrandes(b).length).toBe(1);
   });
 
   it("`liftToClear` sobe só o necessário, e só quando há sobreposição", () => {

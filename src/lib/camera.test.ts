@@ -7,6 +7,7 @@ import {
   openingProgress,
   openingSeconds,
   stopBoost,
+  stopFocus,
   stopSpan,
   type CinematicConfig,
 } from "./camera";
@@ -34,6 +35,7 @@ const alvo = (
   t: number,
   elapsed: number,
   patch: { cinematic?: Partial<CinematicConfig>; followZoom?: number; mode?: "fit" | "follow" } = {},
+  extra: { routeSeconds?: number; stopPos?: (ts: number) => { lat: number; lng: number } | null } = {},
 ) =>
   cameraTarget({
     track,
@@ -48,7 +50,15 @@ const alvo = (
     maxZoom: MAX_ZOOM,
     elapsed,
     duration: 14,
+    ...extra,
   });
+
+/** Onde o traçado está no progresso `ts` (a parada do teste). */
+const ponto = (ts: number) => {
+  const pts = track.pts;
+  const i = Math.min(pts.length - 1, Math.max(0, Math.round(ts * (pts.length - 1))));
+  return { lat: pts[i].lat, lng: pts[i].lng };
+};
 
 describe("abertura", () => {
   it("dura pouco: tem teto e nunca come o vídeo inteiro", () => {
@@ -152,5 +162,72 @@ describe("quando não vale", () => {
     const inicio = alvo(0, 5, { cinematic: { opening: true } });
     const fim = alvo(1, 5, { cinematic: { opening: true } });
     expect(fim.lat).toBeGreaterThan(inicio.lat);
+  });
+});
+
+describe("foco na parada (9:16)", () => {
+  const PARADA = 0.5;
+  const posParada = ponto(PARADA);
+
+  it("leva a parada ao centro no momento da passagem", () => {
+    // o personagem continua sendo o alvo padrão; a parada vira o alvo quando
+    // ela é o assunto do quadro. No 9:16 o quadro é estreito: com o personagem
+    // sempre no centro, a parada (e a foto com o nome) saía pela borda.
+    const emCima = alvo(PARADA, 5, { cinematic: { stops: true, stopTs: [PARADA] } }, {
+      stopPos: ponto,
+    });
+    const semFoco = alvo(PARADA, 5, {}, { stopPos: ponto });
+    expect(emCima.lat).toBeCloseTo(posParada.lat, 9);
+    expect(emCima.lng).toBeCloseTo(posParada.lng, 9);
+    // e é mesmo diferente de seguir o personagem
+    expect(Math.abs(emCima.lat - semFoco.lat)).toBeGreaterThan(1e-6);
+  });
+
+  it("no meio do caminho entre personagem e parada, se aproximando", () => {
+    const ts = PARADA - stopSpan(14) * 0.5; // meia janela antes
+    const meia = alvo(ts, 5, { cinematic: { stops: true, stopTs: [PARADA] } }, { stopPos: ponto });
+    const posPersonagem = ponto(ts);
+    expect(meia.boost).toBeCloseTo(0.5, 6);
+    // fica entre os dois — nem no personagem, nem na parada
+    expect(meia.lat).toBeGreaterThan(Math.min(posPersonagem.lat, posParada.lat));
+    expect(meia.lat).toBeLessThan(Math.max(posPersonagem.lat, posParada.lat));
+  });
+
+  it("a janela do foco é medida no percurso, não no vídeo", () => {
+    // com um vídeo de 20 s e 13 s de percurso, a mesma parada tem que ser
+    // focada na mesma fração do percurso (é o que o vídeo mostra)
+    const cineStops = { stops: true, stopTs: [PARADA] };
+    const videoLongo = alvo(PARADA, 5, { cinematic: cineStops }, { routeSeconds: 20, stopPos: ponto });
+    const percursoCurto = alvo(PARADA, 5, { cinematic: cineStops }, { routeSeconds: 10, stopPos: ponto });
+    expect(videoLongo.boost).toBeCloseTo(1, 6);
+    expect(percursoCurto.boost).toBeCloseTo(1, 6);
+    // e a janela acompanha o percurso: meia janela antes, a força é a mesma
+    const meiaLongo = alvo(PARADA - stopSpan(20) * 0.5, 5, { cinematic: cineStops }, {
+      routeSeconds: 20,
+      stopPos: ponto,
+    });
+    const meiaCurto = alvo(PARADA - stopSpan(10) * 0.5, 5, { cinematic: cineStops }, {
+      routeSeconds: 10,
+      stopPos: ponto,
+    });
+    expect(meiaLongo.boost).toBeCloseTo(meiaCurto.boost, 6);
+  });
+
+  it("sem saber onde a parada está, não há deslocamento (mas o zoom de ênfase fica)", () => {
+    // `stopPos` é o que permite ir até a parada; sem ele, o comportamento é o
+    // antigo — e nenhum teste depende de geografia
+    const semPonto = alvo(PARADA, 5, { cinematic: { stops: true, stopTs: [PARADA] } });
+    const semNada = alvo(PARADA, 5, {});
+    expect(semPonto.boost).toBeCloseTo(1, 6);
+    expect(semPonto.zoom).toBeGreaterThan(semNada.zoom);
+    expect(semPonto.lat).toBeCloseTo(semNada.lat, 9);
+  });
+
+  it("`stopFocus` diz qual parada está focada (e `stopBoost` continua valendo)", () => {
+    const entre = stopFocus(PARADA, [0.2, PARADA], 14);
+    expect(entre.ts).toBe(PARADA);
+    expect(entre.forca).toBeCloseTo(1, 6);
+    expect(stopFocus(0.9, [0.2, PARADA], 14)).toEqual({ forca: 0, ts: null });
+    expect(stopBoost(PARADA, [PARADA], 14)).toBeCloseTo(1, 6);
   });
 });

@@ -314,15 +314,15 @@ do meio).
 
 Duas fotos, as duas **reduzidas a 640 px** antes de entrar no app:
 
-- **foto da parada** — aparece em uma polaroide no vídeo quando o personagem
-  passa por ela, e vira o próprio pino no mapa (o selo do pino passa a mostrar a
-  foto, com um pontinho branco indicando que há uma);
+- **foto da parada** — aparece em um **círculo com o anel na cor da parada**
+  quando o personagem passa por ela, e vira o próprio pino no mapa (o selo do
+  pino passa a mostrar a foto, com um pontinho branco indicando que há uma);
 - **foto do projeto** — aparece em círculo no alto da cartela final.
 
 **Por que reduzir.** Uma foto de celular tem 4.000 px e 4 MB. Guardada como veio,
 estouraria o `localStorage` (que tem ~5 MB para o site inteiro) e desenharia uma
 imagem gigante reduzida em cada um dos ~30 quadros por segundo. A versão guardada
-é um JPEG de 640 px (~45 KB): suficiente para o pino, a polaroide e o avatar, que
+é um JPEG de 640 px (~45 KB): suficiente para o pino, o círculo e o avatar, que
 são pequenos na tela.
 
 **A janela da foto é medida em segundos de vídeo** (2,6 s, com 0,4 s de entrada e
@@ -332,9 +332,15 @@ travessia de 435 km são **0,04 s** de vídeo. Em segundos, a foto aparece do me
 jeito em qualquer rota — e a pré-visualização e a gravação continuam idênticas,
 porque as duas usam o mesmo instante `t`.
 
-**O recorte é quadrado e centralizado** nas duas: uma foto deitada perde as
-laterais (não vira um retângulo de altura estranha no meio do mapa) e o assunto
-fica no meio. A etiqueta do nome **sobe** para dar lugar à polaroide em vez de
+**A foto da parada era uma polaroide** (quadrado branco com moldura, levemente
+inclinado) e ficou estranha no vídeo: o branco chamava mais atenção do que a
+própria foto, e o quadrado parecia um papel colado no mapa. Virou **círculo**,
+com o anel na cor da parada e um contorno escuro fino para não sumir no mapa
+claro — a mesma ideia do pino e do avatar da cartela, que já eram redondos.
+
+**O recorte continua quadrado e centralizado** nas duas: uma foto deitada perde
+as laterais (não vira um retângulo de altura estranha no meio do mapa) e o
+assunto fica no meio. A etiqueta do nome **sobe** para dar lugar à foto em vez de
 ficar por baixo dela.
 
 **Três cuidados que vieram de medir:**
@@ -503,7 +509,7 @@ ou cortados.
 
 ```bash
 npm run typecheck  # tsc --noEmit
-npm test           # Vitest (452 casos)
+npm test           # Vitest (454 casos)
 npm run check:dist # o build saiu autocontido e sem /src/?
 ```
 

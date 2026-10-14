@@ -1109,7 +1109,7 @@ function drawStops(
       const alfaPino = Math.min(1, 0.3 + p * 1.2);
       ctx.save();
       ctx.globalAlpha = alfaPino * fotoAlpha;
-      drawPolaroid(ctx, foto, 0, baseRotulo - alturaFoto - 6 * sf, ladoFoto, stop.color, sf);
+      drawStopCircle(ctx, foto, 0, baseRotulo - alturaFoto - 6 * sf, ladoFoto, stop.color, sf);
       ctx.restore();
     }
 
@@ -1162,14 +1162,23 @@ function drawStops(
 }
 
 /**
- * Foto da parada em polaroide: quadrado com moldura clara, leve rotação e a
- * borda na cor da parada — a mesma cor do pino e da etiqueta.
+ * Foto da parada em **círculo**, com o anel na cor da parada.
  *
- * O recorte é quadrado e centralizado (`coverSquare`): a foto preenche o
- * quadrado sem esticar, e uma foto deitada perde as pontas laterais em vez de
- * virar um retângulo de altura estranha no meio do mapa.
+ * A primeira versão era uma polaroide: quadrado branco com moldura e uma leve
+ * rotação. Ficou estranho no vídeo — o branco chamava mais atenção do que a
+ * própria foto, e o quadrado parecia um papel colado no mapa. O círculo dialoga
+ * com o pino (que já é redondo) e com o avatar da cartela, que também é
+ * redondo: os três são a mesma ideia desenhada do mesmo jeito.
+ *
+ * O que sobrou da polaroide é o que funcionava: o recorte **quadrado e
+ * centralizado** (`coverSquare`), então uma foto deitada perde as pontas
+ * laterais em vez de sair achatada num oval.
+ *
+ * O anel tem duas camadas — um contorno escuro fino por fora e a cor da parada
+ * por cima. Sem o contorno, a foto sumiria no mapa claro; com ele, aparece nos
+ * dois estilos de mapa.
  */
-function drawPolaroid(
+function drawStopCircle(
   ctx: CanvasRenderingContext2D,
   img: { width: number; height: number } & CanvasImageSource,
   cx: number,
@@ -1178,24 +1187,29 @@ function drawPolaroid(
   color: string,
   sf: number,
 ) {
-  const moldura = 5 * sf;
-  const w = lado + moldura * 2;
-  const h = lado + moldura * 2;
-  const top = bottomY - h;
+  const raio = lado / 2;
+  const anel = 3 * sf;
+  const cy = bottomY - raio;
 
   ctx.save();
-  ctx.translate(cx, top + h / 2);
-  ctx.rotate(-3 * (Math.PI / 180));
+  ctx.translate(cx, cy);
 
-  ctx.shadowColor = "rgba(0,0,0,0.5)";
-  ctx.shadowBlur = 14 * sf;
-  ctx.shadowOffsetY = 4 * sf;
-  roundRect(ctx, -w / 2, -h / 2, w, h, 3 * sf);
-  ctx.fillStyle = "#ffffff";
+  // aro claro (segura a foto em qualquer mapa)
+  ctx.beginPath();
+  ctx.arc(0, 0, raio + anel, 0, Math.PI * 2);
+  ctx.shadowColor = "rgba(0,0,0,0.45)";
+  ctx.shadowBlur = 12 * sf;
+  ctx.shadowOffsetY = 3 * sf;
+  ctx.fillStyle = "rgba(9,12,20,0.9)";
   ctx.fill();
   ctx.shadowColor = "transparent";
   ctx.shadowOffsetY = 0;
 
+  // a foto, recortada no círculo
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(0, 0, raio, 0, Math.PI * 2);
+  ctx.clip();
   const { sx, sy, size } = coverSquare(img.width, img.height);
   ctx.drawImage(
     img as CanvasImageSource,
@@ -1203,16 +1217,20 @@ function drawPolaroid(
     sy,
     size,
     size,
-    -lado / 2,
-    -h / 2 + moldura,
+    -raio,
+    -raio,
     lado,
     lado,
   );
+  ctx.restore();
 
-  ctx.lineWidth = 1.8 * sf;
+  // o anel, na cor da parada — a mesma do pino e da etiqueta
+  ctx.beginPath();
+  ctx.arc(0, 0, raio + anel / 2, 0, Math.PI * 2);
+  ctx.lineWidth = anel;
   ctx.strokeStyle = color;
-  roundRect(ctx, -w / 2, -h / 2, w, h, 3 * sf);
   ctx.stroke();
+
   ctx.restore();
 }
 

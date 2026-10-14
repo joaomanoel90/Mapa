@@ -220,7 +220,94 @@ segundos sem dizer que são minutos.
 
 Salto acima de 120 km/h é descartado — nenhum veículo do app chega lá.
 
-### Quantos pontos sobrevivem### Quantos pontos sobrevivem### Quantos pontos sobrevivem
+**E as horas são as do traçado desenhado, não as do arquivo cru.** O desenho é
+uma redução do arquivo (teto de 12.000 pontos): um GPX de 50.000 pontos vira
+10.001. Com o vetor de horas do arquivo inteiro, os índices apontavam para pontos
+que não estavam na tela — medido antes da correção, o relógio lia **1:23:20** na
+metade de uma pedalada de **13:53:19**, cinco vezes menos do que devia. O app
+manda o vetor do traçado desenhado (mesmos pontos, mesmas horas), e o
+renderizador **confere o tamanho**: se não casar, o HUD mostra "sem arquivo" em
+vez de um número errado. A rota colorida recebeu a mesma guarda.
+
+### Rota colorida (velocidade ou inclinação)
+
+Tudo num mesmo interruptor de três posições: **Sólida** (como sempre foi),
+**Velocidade** e **Inclinação**. As duas últimas são facultativas e dependem do
+arquivo — sem `<ele>` não há inclinação, sem `<time>` não há velocidade, e os
+pontos sem o dado saem em **cinza** (com o aviso "sem dado" na legenda) em vez
+de uma cor inventada.
+
+| modo | escala | o que lê |
+|---|---|---|
+| Inclinação | fixa: −6% · −4% · −2% · −1% · +1% · +2% · +4% · +6% | `<ele>` sobre a distância |
+| Velocidade | **do percurso**: percentis 5 e 95 das velocidades medidas | `<time>`, com a mesma janela de 20 s do HUD |
+
+A escala da inclinação é fixa de propósito (a mesma cor significa a mesma coisa
+em qualquer lugar do mundo, e o meio da escala é a cor neutra, então um percurso
+plano aparece plano); a da velocidade é do percurso, porque 30 km/h é rápido de
+bicicleta e devagar de carro.
+
+**Três cuidados que vieram de medir:**
+
+- **A linha não é repintada ponto a ponto.** Oito faixas de cor = **oito
+  passadas** com um único `stroke()` cada, mais uma para o cinza. Um traço por
+  segmento seriam doze mil traços por quadro, e o vídeo é desenhado 30 vezes por
+  segundo. Os pontos visíveis são projetados **uma vez** por quadro e as passadas
+  só leem índices (vetores reaproveitados, sem alocar).
+- **A altitude do GPS é barulhenta.** Um degrau de 4 m entre dois pontos
+  distantes 10 m é 40% de rampa que não existe. A altitude passa por uma média
+  móvel **por distância** (±40 m) antes de virar inclinação, e a rampa é medida
+  numa janela de 200 m. Medido no perfil sintético do teste de ponta a ponta: o
+  erro contra a rampa verdadeira ficou em **0,10 ponto percentual**, e uma
+  pedalada plana com ±2 m de barulho quase não passa de ±2%.
+- **Um ponto fora do lugar não pinta o percurso.** Com a janela de 200 m, um
+  pico isolado de 60 m afeta menos de 5% dos pontos.
+
+Embaixo, no canto, sai a **legenda**: o nome da escala, as faixas de cor e os
+dois extremos escritos. Sem ela, cor não significa nada — a faixa não diz se são
+12 ou 40 km/h.
+
+### Marcas de km
+
+Um ponto no traçado e, ao lado, quantos quilômetros. O passo acompanha o
+tamanho da rota (1, 2, 5, 10, 20, 25, 50 ou 100 km), limitado a **12 marcas** —
+numa travessia de 400 km, uma marca por km seriam 400 números empilhados.
+
+- até o passo de **5 km**, *toda* marca leva número (marca muda é um ponto sem
+  significado no meio do mapa);
+- em passos maiores só as redondas levam, senão as etiquetas cobrem o traçado.
+
+Rota de 55 km: passo 5 → 11 marcas, de 5 a 55. Rota de 3 km: passo 1 → 3 marcas.
+Abaixo de 1 km não há marca nenhuma (não existe km redondo para marcar).
+
+### Câmera cinematográfica
+
+Também facultativa, e só faz sentido na câmera **Seguir** (no "Rota toda" a rota
+já está inteira na tela, e o painel avisa).
+
+- **Abertura:** o vídeo começa com a região inteira na tela — o mesmo
+  enquadramento do "Rota toda" — e pousa na rota. Duração: 25% do vídeo, com
+  teto de 2,6 s.
+- **Paradas:** chegando perto de uma parada marcada, a câmera **aproxima** 1,4
+  nível de zoom e volta depois de passar. É zoom, não desvio: o personagem
+  continua no centro. Duas paradas vizinhas não somam zoom, e a janela acompanha
+  a duração do vídeo (~1,2 s de cada lado).
+
+O alvo da câmera virou uma **função pura** (`camera.ts`) — antes morava dentro do
+`render`, misturado com a suavização, e não tinha como ser testado. Durante a
+abertura a câmera vai colada no alvo (o alvo já é a animação pronta; suavizar de
+novo só atrasaria o pouso).
+
+**A abertura entra na conta dos blocos de mapa** (`tilesForAnimation`): a vista
+larga da região e as vistas aproximadas das paradas são baixadas no aquecimento.
+Sem isso o começo do vídeo sairia com o mapa vazio. Custo medido numa rota de
+55 km em 1280×720: **1.124 blocos** com a abertura e as paradas ligadas, contra
+1.089 só com as paradas — os dois extras juntos custam ~35 blocos, dentro do teto
+de 1.400. As vistas de parada são limitadas a **oito** paradas por rota (numa
+rota com cinquenta, aproximar em todas dobraria a conta sem ninguém reparar nas
+do meio).
+
+### Quantos pontos sobrevivem
 
 São três números diferentes, e vale não confundir:
 
@@ -269,6 +356,11 @@ rota de 70 km isso é ~4% dos pontos. Medido, por quadro:
 | 12.000 | — | **0,047 ms** |
 
 Ou seja: 10× mais pontos no traçado **e** mais rápido do que antes.
+
+Com a **rota colorida** ligada o desenho é o mesmo caminho, feito em nove
+passadas (uma por faixa de cor) em vez de duas — e com os pontos visíveis
+projetados uma única vez por quadro em vetores reaproveitados. Sem esse cuidado
+seriam dezoito mil projeções por quadro num percurso longo visto de longe.
 
 ### Muitos pinos
 
@@ -325,7 +417,7 @@ ou cortados.
 
 ```bash
 npm run typecheck  # tsc --noEmit
-npm test           # Vitest (331 casos)
+npm test           # Vitest (381 casos)
 npm run check:dist # o build saiu autocontido e sem /src/?
 ```
 

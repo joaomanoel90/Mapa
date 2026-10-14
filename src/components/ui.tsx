@@ -117,6 +117,10 @@ export function Toggle({
   return (
     <button
       type="button"
+      // o estado do interruptor precisa ser legível fora da tela também
+      role="switch"
+      aria-checked={checked}
+      aria-label={label}
       onClick={() => onChange(!checked)}
       className={cn(
         "flex w-full items-center gap-2 rounded-xl border px-2.5 py-2 text-left text-[12px] font-medium transition-colors",

@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_SETTINGS, type Settings } from "./settings";
-import { decodeSettings, loadSettings, saveSettings } from "./persist";
+import {
+  decodeSettings,
+  loadEndpoints,
+  loadSettings,
+  saveEndpoints,
+  saveSettings,
+} from "./persist";
 
 /** Armazenamento de mentira que estoura quando o texto passa de `limite`. */
 function storageComLimite(limite = Infinity) {
@@ -49,6 +55,56 @@ describe("gravar preferências", () => {
   it("sem foto, um estouro de cota é falha mesmo", () => {
     const s = storageComLimite(10);
     expect(saveSettings(s, DEFAULT_SETTINGS)).toBe("falhou");
+  });
+});
+
+describe("gravar partida e chegada", () => {
+  const comFotoNosLocais = {
+    a: { emoji: "🏠", label: "Casa", photo: FOTO },
+    b: { emoji: "💦", label: "Cachoeira", photo: FOTO },
+  };
+
+  it("grava os dois locais quando cabe", () => {
+    const s = storageComLimite();
+    expect(saveEndpoints(s, comFotoNosLocais)).toBe("ok");
+    expect(s.getItem("rotacast:endpoints")).toContain("Cachoeira");
+  });
+
+  it("quando as fotos não cabem, guarda os locais sem elas e diz o que fez", () => {
+    // perder emoji e nome em silêncio seria pior do que perder só as fotos
+    const s = storageComLimite(120);
+    expect(saveEndpoints(s, comFotoNosLocais)).toBe("sem-foto");
+    const guardado = JSON.parse(s.getItem("rotacast:endpoints") as string);
+    expect(guardado.a).toEqual({ emoji: "🏠", label: "Casa" });
+    expect(guardado.b).toEqual({ emoji: "💦", label: "Cachoeira" });
+  });
+
+  it("avisa quando nem sem as fotos coube", () => {
+    const s = storageComLimite(5);
+    expect(saveEndpoints(s, comFotoNosLocais)).toBe("falhou");
+  });
+
+  it("sem foto, um estouro de cota é falha mesmo", () => {
+    const s = storageComLimite(5);
+    expect(
+      saveEndpoints(s, { a: { emoji: "🏠", label: "Casa" }, b: null }),
+    ).toBe("falhou");
+  });
+
+  it("lê de volta o que foi guardado, já saneado", () => {
+    const s = storageComLimite();
+    saveEndpoints(s, comFotoNosLocais);
+    const lido = loadEndpoints(s);
+    expect(lido.a?.photo).toBe(FOTO);
+    expect(lido.b?.label).toBe("Cachoeira");
+  });
+
+  it("lixo guardado não impede o app de abrir", () => {
+    const s = storageComLimite();
+    s.setItem("rotacast:endpoints", "{nem json é");
+    expect(loadEndpoints(s)).toEqual({ a: null, b: null });
+    s.setItem("rotacast:endpoints", JSON.stringify({ a: { emoji: 1 }, b: "x" }));
+    expect(loadEndpoints(s)).toEqual({ a: null, b: null });
   });
 });
 

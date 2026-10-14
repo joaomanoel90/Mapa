@@ -300,6 +300,38 @@ describe("sharedSettingsOverrides", () => {
     expect(r?.pois[0].t).toBeCloseTo(0.4, 3);
   });
 
+  it("a foto da partida e da chegada não entra no link", () => {
+    // o link leva emoji e nome, mas não a foto: ~70 KB de texto não passam por
+    // mensageiro, e a foto de quem abre continua sendo a dele
+    const foto = "data:image/jpeg;base64," + "A".repeat(400);
+    const url = buildShareUrl(
+      base({
+        endpoints: {
+          a: { emoji: "🏠", label: "Casa", photo: foto },
+          b: { emoji: "💦", label: "Cachoeira" },
+        },
+      }),
+    );
+    expect(url).not.toContain("data:image");
+    const r = decodeShare(url);
+    expect(r?.endpoints.a).toEqual({ emoji: "🏠", label: "Casa" });
+    expect(r?.endpoints.b).toEqual({ emoji: "💦", label: "Cachoeira" });
+  });
+
+  it("um lugar que só tem foto não manda nada no link", () => {
+    // o link carrega emoji e nome; sem nenhum dos dois não há o que dizer
+    const url = buildShareUrl(
+      base({
+        endpoints: {
+          a: { emoji: "", label: "", photo: "data:image/jpeg;base64," + "A".repeat(80) },
+          b: null,
+        },
+      }),
+    );
+    const r = decodeShare(url);
+    expect(r?.endpoints).toEqual({ a: null, b: null });
+  });
+
   it("não altera o objeto original", () => {
     const original = { ...DEFAULT_SETTINGS, formatId: "webm" };
     sharedSettingsOverrides(original);

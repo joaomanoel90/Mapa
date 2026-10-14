@@ -310,6 +310,45 @@ de 1.400. As vistas de parada são limitadas a **oito** paradas por rota (numa
 rota com cinquenta, aproximar em todas dobraria a conta sem ninguém reparar nas
 do meio).
 
+### Passagens: quando a rota volta pelo mesmo caminho
+
+Uma parada é um **lugar**; até esta versão ela acontecia em **um instante** (`t`).
+Numa ida e volta pelo mesmo caminho isso ficava errado: a parada da metade do
+percurso é passada duas vezes, e a segunda não aparecia no vídeo nem na linha do
+tempo.
+
+Agora a pergunta é feita ao contrário: em vez de "quando a parada acontece",
+pergunta-se **onde a rota chega perto da parada**. A resposta são todos os trechos
+em que a rota fica a menos de **40 m** do lugar — um na ida, outro na volta.
+
+| situação | passagens |
+|---|---|
+| parada no meio da ida, volta pelo mesmo asfalto | **2** (ida e volta) |
+| mesma ida e volta, com o GPS errando 15 m | **2** (o raio não é zero por isso) |
+| parada no ponto de retorno (a rota nunca sai do raio no meio) | **1** |
+| a volta por uma rua paralela, 300 m ao lado | **1** (é outro lugar) |
+| parada marcada a 200 m da rota | **1**, no `t` em que foi criada (comportamento antigo) |
+
+O raio de 40 m é o que separa "passou de novo pelo mesmo lugar" de "passou numa
+rua paralela": ida e volta no mesmo asfalto ficam a poucos metros uma da outra.
+
+O que passa a acontecer **uma vez por passagem**:
+
+- o **círculo com a foto** (e o aviso do topo, quando não há foto) — na volta,
+  aparece de novo;
+- a **marca na linha do tempo**: duas marcas para a mesma parada, e cada uma
+  acende na sua hora;
+- a **câmera cinematográfica** acelera nas duas passagens;
+- o **contador**, que passa a contar passagens ("2/3 passagens") — quando não há
+  repetição, ele segue contando paradas como sempre.
+
+Na lista lateral, a parada passada mais de uma vez ganha um selo **×2** — é ali
+que você confere se o app entendeu a sua rota.
+
+A conta é feita **por trecho**, e não por ponto: uma rota com um ponto a cada
+100 m passa exatamente por cima da parada sem ter nenhum ponto ali, e medindo por
+ponto a parada "não existiria".
+
 ### Fotos nas paradas e na cartela
 
 Duas fotos, as duas **reduzidas a 640 px** antes de entrar no app:
@@ -317,7 +356,10 @@ Duas fotos, as duas **reduzidas a 640 px** antes de entrar no app:
 - **foto da parada** — aparece em um **círculo com o anel na cor da parada**
   quando o personagem passa por ela, e vira o próprio pino no mapa (o selo do
   pino passa a mostrar a foto, com um pontinho branco indicando que há uma);
-- **foto do projeto** — aparece em círculo no alto da cartela final.
+- **foto do projeto** — aparece em círculo no alto da cartela final;
+- **foto da partida e da chegada** — o painel "Partida e chegada" tem o mesmo
+  campo de foto das paradas; ela aparece no vídeo (círculo, na largada e na
+  chegada) e no pino A/B do mapa.
 
 **Por que reduzir.** Uma foto de celular tem 4.000 px e 4 MB. Guardada como veio,
 estouraria o `localStorage` (que tem ~5 MB para o site inteiro) e desenharia uma
@@ -357,11 +399,18 @@ ficar por baixo dela.
   viram ~70 KB de texto, e um link com isso não passa por mensageiro nenhum. Quem
   abre o link vê a mesma cena, com a foto que já tinha.
 
+**Quem tem foto não vira aviso no topo.** O círculo com a foto já anuncia o lugar
+(e o nome dele está escrito embaixo); escrever de novo no topo seria repetir a
+mesma informação. Vale para as paradas e para a partida/chegada. Uma ressalva que
+importa: se a foto foi escolhida mas **não carregou**, o aviso volta a aparecer —
+melhor repetir do que o lugar passar em branco.
+
 **Onde a foto fica guardada:** a do projeto vai para o `localStorage` com o resto
-da cartela; as das paradas vivem na sessão, como as próprias paradas (que nunca
-foram salvas). Se a foto do projeto não couber na cota, o app **grava o resto e
-avisa** na tela — em vez de perder todos os ajustes em silêncio, que era o que a
-gravação antiga fazia.
+da cartela; a da partida/chegada vai junto dos locais; as das paradas vivem na
+sessão, como as próprias paradas (que nunca foram salvas). Se uma foto não couber
+na cota, o app **grava o resto e avisa** na tela — em vez de perder todos os
+ajustes em silêncio, que era o que a gravação antiga fazia. Isso vale também para
+os locais de partida e chegada, que antes eram gravados sem plano B nenhum.
 
 ### Rotas longas: o teto de blocos de mapa
 
@@ -509,7 +558,7 @@ ou cortados.
 
 ```bash
 npm run typecheck  # tsc --noEmit
-npm test           # Vitest (454 casos)
+npm test           # Vitest (508 casos)
 npm run check:dist # o build saiu autocontido e sem /src/?
 ```
 
@@ -562,6 +611,7 @@ src/
    ├─ stats.ts              distância, elevação (com corte de ruído), tempo e cartela
    ├─ hud.ts                velocidade e relógio do HUD (com janela anti-ruído)
    ├─ duration.ts           lê o tempo digitado na cartela ('3 h 19 min', '199 min')
+   ├─ passages.ts           quantas vezes a rota passa por cada parada (ida e volta)
    ├─ photos.ts             reduz, valida e decodifica as fotos (cache com prazo)
    ├─ EndCardPanel.tsx      campos da cartela final (com teste de digitação)
    ├─ gpx.ts                importar/exportar GPX, simplificação de traçado

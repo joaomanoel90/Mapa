@@ -15,7 +15,8 @@ import { elapsedAt, formatClock, speedAt } from "./hud";
 import { cameraTarget, STOP_BOOST, type CinematicConfig } from "./camera";
 import { NEUTRAL_COLOR, type ColoredRoute } from "./coloring";
 import type { KmMark } from "./km-marks";
-import { coverSquare, type PhotoLookup } from "./photos";
+import { countPassed } from "./passages";
+import { coverSquare, type PhotoImage, type PhotoLookup } from "./photos";
 import {
   TILE_SIZE,
   boundsOf,
@@ -115,6 +116,15 @@ export type FrameState = {
   photos?: PhotoLookup | null;
   /** foto do projeto (data URL) — aparece no alto da cartela final */
   cardPhoto?: string | null;
+  /**
+   * Passagens de cada parada, por id.
+   *
+   * Uma parada pode ser passada mais de uma vez (ida e volta pelo mesmo
+   * caminho): a lista traz **todos** os instantes em que a rota chega perto
+   * dela. Sem esta informação, cada parada acontece uma vez só, no seu `t` —
+   * o comportamento antigo.
+   */
+  passages?: Record<string, number[]> | null;
 };
 
 /* ------------------------------------------------------------------ */
@@ -600,7 +610,22 @@ export class SceneRenderer {
 
     // --- pontos A/B (podem ser locais marcados) ---
     if (style.showEndpoints && track.pts.length > 1) {
-      drawPin(ctx, toXY(track.pts[0]), "A", "#22c55e", sf, input.endpoints.a);
+      /*
+       * As fotos de partida e chegada usam a mesma janela em segundos das
+       * paradas: a da largada abre o vídeo, a da chegada fecha.
+       */
+      const fotoDoLocal = (mark?: import("./endpoints").EndpointMark | null) =>
+        mark?.photo ? (input.photos?.get(mark.photo) ?? null) : null;
+      drawPin(
+        ctx,
+        toXY(track.pts[0]),
+        "A",
+        "#22c55e",
+        sf,
+        input.endpoints.a,
+        fotoDoLocal(input.endpoints.a),
+        photoWindowAlpha(t * input.duration),
+      );
       drawPin(
         ctx,
         toXY(track.pts[track.pts.length - 1]),
@@ -608,6 +633,8 @@ export class SceneRenderer {
         "#f87171",
         sf,
         input.endpoints.b,
+        fotoDoLocal(input.endpoints.b),
+        photoWindowAlpha((t - 1) * input.duration + PHOTO_HOLD_S),
       );
     }
 
@@ -669,6 +696,27 @@ function drawAttribution(
 const PHOTO_HOLD_S = 2.6;
 const PHOTO_FADE_IN_S = 0.4;
 const PHOTO_FADE_OUT_S = 0.7;
+
+/**
+ * Quanto a foto está visível, `desde` segundos depois do seu momento.
+ *
+ * A janela é medida em **segundos de vídeo**, e não em metros como o "pipoco"
+ * do pino: em metros ela ficaria ilegível justamente nas rotas longas — 1,3 km
+ * de foto numa travessia de 435 km são 0,04 s. Em segundos, a foto aparece do
+ * mesmo jeito em qualquer rota, e a pré-visualização e a gravação continuam
+ * idênticas, porque as duas usam o mesmo instante `t`.
+ */
+function photoWindowAlpha(desde: number): number {
+  if (!(desde >= 0)) return 0;
+  const entra = Math.min(1, desde / PHOTO_FADE_IN_S);
+  const sai =
+    1 -
+    Math.min(
+      1,
+      Math.max(0, (desde - (PHOTO_HOLD_S - PHOTO_FADE_OUT_S)) / PHOTO_FADE_OUT_S),
+    );
+  return Math.min(entra, sai);
+}
 
 const EMOJI_FONT =
   '"Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji","Twemoji Mozilla",sans-serif';
@@ -749,6 +797,8 @@ function drawPin(
   color: string,
   sf: number,
   mark?: import("./endpoints").EndpointMark | null,
+  foto?: PhotoImage | null,
+  fotoAlpha = 0,
 ) {
   const marked = hasMark(mark ?? null);
   const r = (marked ? 17 : 15) * sf;
@@ -768,7 +818,9 @@ function drawPin(
 
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
-  if (marked && mark!.emoji.trim()) {
+  if (foto) {
+    // a foto toma o lugar do emoji: só o aro da cor do lugar fica
+  } else if (marked && mark!.emoji.trim()) {
     ctx.font = `${Math.round(r * 1.05)}px ${EMOJI_FONT}`;
     ctx.fillText(mark!.emoji.trim(), 0, r * 0.06);
   } else {
@@ -806,6 +858,17 @@ function drawPin(
     ctx.textBaseline = "middle";
     ctx.fillText(label, 0, by + bh / 2 + 0.5 * sf);
   }
+
+  // foto do local em círculo, acima de tudo (mesma ideia da foto da parada)
+  if (foto && fotoAlpha > 0.01) {
+    const lado = 78 * sf;
+    // acima do pino e da etiqueta do nome (as duas coisas estão em y negativo)
+    const alturaRotulo = label ? r + 19 * sf + 10 * sf : r;
+    ctx.save();
+    ctx.globalAlpha = fotoAlpha;
+    drawStopCircle(ctx, foto, 0, -alturaRotulo - 6 * sf, lado, color, sf);
+    ctx.restore();
+  }
   ctx.restore();
 }
 
@@ -842,35 +905,52 @@ function drawEventToast(
   // duração do toast em metros percorridos
   const holdMeters = Math.max(90, Math.min(600, total * 0.07));
 
+  /*
+   * Quem tem foto pronta não vira toast: o círculo com a foto (e o nome embaixo
+   * dele) já anuncia o lugar, e escrever de novo no topo seria repetir a mesma
+   * informação. Se a foto foi escolhida mas **não** carregou, o toast continua
+   * aparecendo — melhor repetir do que o lugar passar em branco.
+   */
+  const anunciadoPelaFoto = (foto: string | undefined) =>
+    Boolean(foto) && Boolean(input.photos?.get(foto));
+
   const events: ToastEvent[] = [];
   // partida
-  events.push({
-    at: 0,
-    emoji: endpoints.a?.emoji.trim() || "🚩",
-    title: endpoints.a?.label.trim() || "Partida",
-    sub: "Início do percurso",
-    color: "#22c55e",
-  });
-  // paradas
-  for (const s of stops) {
-    const km = (s.t * total) / 1000;
+  if (!anunciadoPelaFoto(endpoints.a?.photo)) {
     events.push({
-      at: s.t,
-      emoji: s.emoji,
-      title: s.label.trim() || "Parada",
-      sub: `📍 ${km < 10 ? km.toFixed(2) : km.toFixed(1)} km do início`,
-      color: s.color,
+      at: 0,
+      emoji: endpoints.a?.emoji.trim() || "🚩",
+      title: endpoints.a?.label.trim() || "Partida",
+      sub: "Início do percurso",
+      color: "#22c55e",
     });
+  }
+  // paradas — uma vez para **cada passagem** (na volta, aparece de novo)
+  for (const s of stops) {
+    if (anunciadoPelaFoto(s.photo)) continue;
+    const passagens = input.passages?.[s.id] ?? [s.t];
+    for (const ts of passagens) {
+      const km = (ts * total) / 1000;
+      events.push({
+        at: ts,
+        emoji: s.emoji,
+        title: s.label.trim() || "Parada",
+        sub: `📍 ${km < 10 ? km.toFixed(2) : km.toFixed(1)} km do início`,
+        color: s.color,
+      });
+    }
   }
   // chegada (dispara um pouco antes do fim para dar tempo de ler)
   const endAt = Math.max(0, 1 - (holdMeters * 0.4) / total);
-  events.push({
-    at: endAt,
-    emoji: endpoints.b?.emoji.trim() || "🏁",
-    title: endpoints.b?.label.trim() || "Chegada",
-    sub: `Percurso completo · ${formatDistance(total)}`,
-    color: "#f87171",
-  });
+  if (!anunciadoPelaFoto(endpoints.b?.photo)) {
+    events.push({
+      at: endAt,
+      emoji: endpoints.b?.emoji.trim() || "🏁",
+      title: endpoints.b?.label.trim() || "Chegada",
+      sub: `Percurso completo · ${formatDistance(total)}`,
+      color: "#f87171",
+    });
+  }
 
   // evento ativo = o mais recente dentro da janela
   let active: ToastEvent | null = null;
@@ -982,6 +1062,23 @@ function drawStops(
   const popMeters = Math.max(28, Math.min(190, track.total * 0.014));
 
   for (const stop of stops) {
+    /*
+     * Quando a rota passa por esta parada — uma vez, ou mais (ida e volta).
+     *
+     * `ultima` é a passagem guardada pela âncora (onde o pino fica): a parada é
+     * um lugar só no mapa, então o pino é desenhado uma vez. O que acontece a
+     * cada passagem é o "pipoco", a foto e a etiqueta.
+     */
+    const passagens = input.passages?.[stop.id] ?? [stop.t];
+    const primeira = passagens[0] ?? stop.t;
+    const ultima = passagens.reduce<number | null>((acc, ts) => (t >= ts ? ts : acc), null);
+    // passagem que está pipocando agora (a mais recente dentro da janela em metros)
+    let ativa: number | null = null;
+    for (const ts of passagens) {
+      const d = (t - ts) * track.total;
+      if (d >= 0 && d <= popMeters) ativa = ts;
+    }
+
     const s = sampleTrack(track, stop.t);
     const at = toXY(s.pos); // âncora sobre a rota (gatilho)
     const off = stop.pos ? haversine(stop.pos, s.pos) : 0;
@@ -997,9 +1094,16 @@ function drawStops(
       py = at.y + Math.sin(rad) * lift;
     }
 
-    const passedM = (t - stop.t) * track.total;
-    const upcoming = passedM < 0;
-    const p = upcoming ? 0 : Math.min(1, passedM / popMeters);
+    const upcoming = ultima === null;
+    // para o pino: 0 antes da primeira passagem, animação durante o pipoco, 1 depois
+    const p =
+      ultima === null
+        ? 0
+        : ativa === null
+          ? 1
+          : Math.min(1, ((t - ativa) * track.total) / popMeters);
+    // para a etiqueta: ela nasce na primeira passagem e fica (como sempre foi)
+    const pRotulo = Math.min(1, ((t - primeira) * track.total) / popMeters);
 
     ctx.save();
 
@@ -1086,21 +1190,16 @@ function drawStops(
      * mesmo jeito em qualquer rota — e a pré-visualização e a gravação
      * continuam idênticas, porque as duas usam o mesmo `t`.
      */
-    const foto = !upcoming && stop.photo ? (input.photos?.get(stop.photo) ?? null) : null;
-    const desde = (t - stop.t) * input.duration;
-    const fotoEntra = Math.min(1, Math.max(0, desde / PHOTO_FADE_IN_S));
-    const fotoSai =
-      1 -
-      Math.min(
-        1,
-        Math.max(0, (desde - (PHOTO_HOLD_S - PHOTO_FADE_OUT_S)) / PHOTO_FADE_OUT_S),
-      );
-    const fotoAlpha = foto ? Math.min(fotoEntra, fotoSai) : 0;
+    const foto = stop.photo ? (input.photos?.get(stop.photo) ?? null) : null;
+    // a janela da foto começa na passagem mais recente: na volta, ela aparece
+    // de novo, mesmo que já tenha aparecido na ida
+    const desde = ultima === null ? -1 : (t - ultima) * input.duration;
+    const fotoAlpha = foto ? photoWindowAlpha(desde) : 0;
     const ladoFoto = 78 * sf;
     // sem foto pronta, a etiqueta não sobe: não pode ficar um buraco no lugar dela
     const alturaFoto = foto ? (ladoFoto + 10 * sf) * fotoAlpha : 0;
-    const rotuloVisivel = !upcoming && style.showStopLabels && p > 0.26;
-    const la = rotuloVisivel ? Math.min(1, (p - 0.26) / 0.38) : 0;
+    const rotuloVisivel = ultima !== null && style.showStopLabels && pRotulo > 0.26;
+    const la = rotuloVisivel ? Math.min(1, (pRotulo - 0.26) / 0.38) : 0;
     const baseRotulo = -r - 33 * sf - 8 * sf + (1 - la) * 9 * sf;
 
     if (foto && fotoAlpha > 0.01) {
@@ -1117,7 +1216,8 @@ function drawStops(
     if (rotuloVisivel) {
       ctx.globalAlpha = Math.min(1, 0.3 + p * 1.2) * la;
       const name = stop.label.trim() || "Parada";
-      const km = (stop.t * track.total) / 1000;
+      // no retorno, o km é o do momento (16,8 km), não o da primeira passagem
+      const km = ((ultima ?? stop.t) * track.total) / 1000;
       const kmTxt = `${km < 10 ? km.toFixed(2) : km.toFixed(1)} km`;
       const sub = off >= 25 ? `⤷ ${kmTxt}` : kmTxt;
       const fName = `700 ${Math.round(13.5 * sf)}px "Inter","Segoe UI",system-ui,sans-serif`;
@@ -1301,9 +1401,15 @@ function drawTitle(
   }
 
   // selos do canto superior direito: paradas alcançadas (opcional) + distância
-  const stopsTotal = style.showStopCounter ? input.stops.length : 0;
-  const stopsPassed = countStopsPassed(input.stops, t);
-  const stopTxt = `${stopsPassed}/${stopsTotal} paradas`;
+  /*
+   * O contador conta **passagens**, não paradas: numa ida e volta, passar de
+   * novo pela mesma parada conta de novo. Quando não há repetição (o caso
+   * comum), passa a ser a mesma coisa de antes — e o texto continua "paradas".
+   */
+  const contagem = countPassed(input.stops, input.passages, t);
+  const stopsTotal = style.showStopCounter ? contagem.total : 0;
+  const stopsPassed = contagem.passed;
+  const stopTxt = `${stopsPassed}/${stopsTotal} ${contagem.extras > 0 ? "passagens" : "paradas"}`;
   const dist = `${(sample.distance / 1000).toFixed(sample.distance < 10000 ? 2 : 1)} km`;
   const badgeFont = `700 ${Math.round(15 * sf)}px "Inter","Segoe UI",system-ui,sans-serif`;
   ctx.font = badgeFont;
@@ -1784,34 +1890,41 @@ function drawProgress(
   ctx.fill();
   ctx.restore();
 
-  // paradas marcadas na própria linha do tempo do vídeo
+  /*
+   * Paradas marcadas na própria linha do tempo do vídeo — **uma marca por
+   * passagem**. Numa ida e volta, a parada da metade aparece duas vezes na
+   * barra: a marca da ida acende na ida, a da volta acende na volta.
+   */
   if (style.showStops && input.stops.length > 0) {
     for (const stop of input.stops) {
-      const sx = pad + w * stop.t;
-      const cy = y + barH / 2;
-      const passed = t >= stop.t;
-      const r = (passed ? 9 : 7) * sf;
+      const passagens = input.passages?.[stop.id] ?? [stop.t];
+      for (const ts of passagens) {
+        const sx = pad + w * ts;
+        const cy = y + barH / 2;
+        const passed = t >= ts;
+        const r = (passed ? 9 : 7) * sf;
 
-      ctx.save();
-      ctx.beginPath();
-      ctx.arc(sx, cy, r, 0, Math.PI * 2);
-      ctx.fillStyle = "rgba(9,12,20,0.95)";
-      if (passed) {
-        ctx.shadowColor = stop.color;
-        ctx.shadowBlur = 10 * sf;
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(sx, cy, r, 0, Math.PI * 2);
+        ctx.fillStyle = "rgba(9,12,20,0.95)";
+        if (passed) {
+          ctx.shadowColor = stop.color;
+          ctx.shadowBlur = 10 * sf;
+        }
+        ctx.fill();
+        ctx.shadowColor = "transparent";
+        ctx.lineWidth = 1.8 * sf;
+        ctx.strokeStyle = passed ? stop.color : "rgba(255,255,255,0.35)";
+        ctx.stroke();
+
+        ctx.globalAlpha = passed ? 1 : 0.55;
+        ctx.font = `${Math.round(r * 1.15)}px ${EMOJI_FONT}`;
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText(stop.emoji, sx, cy + 0.5 * sf);
+        ctx.restore();
       }
-      ctx.fill();
-      ctx.shadowColor = "transparent";
-      ctx.lineWidth = 1.8 * sf;
-      ctx.strokeStyle = passed ? stop.color : "rgba(255,255,255,0.35)";
-      ctx.stroke();
-
-      ctx.globalAlpha = passed ? 1 : 0.55;
-      ctx.font = `${Math.round(r * 1.15)}px ${EMOJI_FONT}`;
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-      ctx.fillText(stop.emoji, sx, cy + 0.5 * sf);
-      ctx.restore();
     }
   }
 

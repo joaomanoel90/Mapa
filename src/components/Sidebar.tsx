@@ -29,6 +29,8 @@ type Props = {
   onCity: (p: Place) => void;
   /* paradas do percurso */
   pois: Poi[];
+  /** quantas vezes a rota passa por cada parada (ida e volta conta duas) */
+  passages?: Record<string, number[]> | null;
   track: Track;
   progress: number;
   selectedPoi: string | null;
@@ -88,6 +90,7 @@ function Sidebar(props: Props) {
     city,
     onCity,
     pois,
+    passages,
     track,
     cobertura,
     blocos,
@@ -337,6 +340,7 @@ function Sidebar(props: Props) {
         <div className="space-y-3">
           <StopEditor
             pois={pois}
+            passages={passages}
             track={track}
             progress={progress}
             accent={s.accent}

@@ -12,6 +12,7 @@
  * o resultado para dizer a verdade em vez de fingir que salvou.
  */
 
+import { sanitizeEndpoints, type Endpoints } from "./endpoints";
 import { sanitizeSettings, type Settings } from "./settings";
 
 export type SaveOutcome = "ok" | "sem-foto" | "falhou";
@@ -20,6 +21,7 @@ type Gravavel = { setItem(chave: string, valor: string): void };
 type Legivel = { getItem(chave: string): string | null };
 
 export const SETTINGS_KEY = "rotacast:settings";
+export const ENDPOINTS_KEY = "rotacast:endpoints";
 
 /**
  * Grava as preferências, largando a foto se for ela que não cabe.
@@ -72,5 +74,54 @@ export function loadSettings(storage: Legivel, chave = SETTINGS_KEY): Partial<Se
     return decodeSettings(storage.getItem(chave));
   } catch {
     return {};
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Partida e chegada                                                   */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Grava os locais de partida e chegada, largando as fotos se forem elas que
+ * não cabem.
+ *
+ * Mesmo plano B das preferências: aqui também há uma foto (a do A e a do B), e
+ * antes esta gravação engolia o erro de cota em silêncio — o usuário perderia
+ * emoji, nome e os dois locais sem saber por quê.
+ */
+export function saveEndpoints(
+  storage: Gravavel,
+  endpoints: Endpoints,
+  chave = ENDPOINTS_KEY,
+): SaveOutcome {
+  try {
+    storage.setItem(chave, JSON.stringify(endpoints));
+    return "ok";
+  } catch {
+    /* provavelmente cota estourada */
+  }
+  const semFotos: Endpoints = {
+    a: endpoints.a ? { emoji: endpoints.a.emoji, label: endpoints.a.label } : null,
+    b: endpoints.b ? { emoji: endpoints.b.emoji, label: endpoints.b.label } : null,
+  };
+  if (endpoints.a?.photo || endpoints.b?.photo) {
+    try {
+      storage.setItem(chave, JSON.stringify(semFotos));
+      return "sem-foto";
+    } catch {
+      /* nem sem as fotos coube */
+    }
+  }
+  return "falhou";
+}
+
+/** Lê partida e chegada guardadas, já saneadas. */
+export function loadEndpoints(storage: Legivel, chave = ENDPOINTS_KEY): Endpoints {
+  try {
+    const texto = storage.getItem(chave);
+    if (!texto) return { a: null, b: null };
+    return sanitizeEndpoints(JSON.parse(texto) as unknown);
+  } catch {
+    return { a: null, b: null };
   }
 }

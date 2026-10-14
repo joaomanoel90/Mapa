@@ -43,12 +43,18 @@ import {
   simplifyTo,
   toGpx,
 } from "./lib/gpx";
-import { DEFAULT_ENDPOINTS, type Endpoints } from "./lib/endpoints";
+import {
+  DEFAULT_ENDPOINTS,
+  hasEndpointMarks,
+  mergeSharedEndpoints,
+  type Endpoints,
+} from "./lib/endpoints";
 import { findCharacter } from "./lib/characters";
 import { SceneRenderer, tilesForAnimation, TILE_BUDGET } from "./lib/renderer";
 import { budgetAdvice, maxFollowZoom, tilesNeeded } from "./lib/map-budget";
 import { PhotoCache } from "./lib/photos";
-import { decodeSettings, saveSettings } from "./lib/persist";
+import { mapPassages, passageTimes } from "./lib/passages";
+import { decodeSettings, loadEndpoints, saveEndpoints, saveSettings } from "./lib/persist";
 import {
   availableFormats,
   CancelledError,
@@ -130,30 +136,27 @@ function App() {
   const lastKindRef = useRef("destino");
   /** partida/chegada como locais marcados (🏠 Casa → 💦 Cachoeira) */
   const [endpoints, setEndpoints] = useState<Endpoints>(() => {
-    // a partida/chegada do link vence a que estava salva
-    if (shared && (shared.endpoints.a || shared.endpoints.b)) return shared.endpoints;
-    try {
-      const raw = localStorage.getItem("rotacast:endpoints");
-      if (raw) {
-        const p = JSON.parse(raw) as Endpoints;
-        const ok = (m: unknown) =>
-          m == null ||
-          (typeof m === "object" &&
-            typeof (m as { emoji?: unknown }).emoji === "string" &&
-            typeof (m as { label?: unknown }).label === "string");
-        if (ok(p?.a) && ok(p?.b)) return { a: p.a ?? null, b: p.b ?? null };
-      }
-    } catch {
-      /* ignora */
+    const guardados = loadEndpoints(localStorage);
+    // a partida/chegada do link vence a que estava salva — mas as fotos são
+    // locais: se o lugar do link é o mesmo, a foto escolhida aqui fica
+    if (shared && (shared.endpoints.a || shared.endpoints.b)) {
+      return mergeSharedEndpoints(guardados, shared.endpoints);
     }
-    return DEFAULT_ENDPOINTS;
+    return hasEndpointMarks(guardados) ? guardados : DEFAULT_ENDPOINTS;
   });
 
   useEffect(() => {
-    try {
-      localStorage.setItem("rotacast:endpoints", JSON.stringify(endpoints));
-    } catch {
-      /* ignora */
+    // como as preferências: se as fotos do A/B não couberem na cota, grava sem
+    // elas e avisa — em vez de perder os locais em silêncio
+    const resultado = saveEndpoints(localStorage, endpoints);
+    if (resultado !== "ok") {
+      setAvisoSalvar(
+        resultado === "sem-foto"
+          ? "A foto da partida ou da chegada é grande demais para salvar. Ela continua valendo neste vídeo, mas some ao recarregar a página."
+          : "Não foi possível salvar a partida e a chegada neste navegador (armazenamento cheio ou bloqueado).",
+      );
+    } else {
+      setAvisoSalvar((atual) => (atual?.startsWith("A foto da partida") || atual?.startsWith("Não foi possível salvar a partida") ? null : atual));
     }
   }, [endpoints]);
 
@@ -357,6 +360,16 @@ function App() {
   );
 
   /**
+   * Quantas vezes a rota passa por cada parada.
+   *
+   * Uma parada é um **lugar**; o vídeo mostra quando o personagem chega nele.
+   * Numa ida e volta pelo mesmo caminho, ele chega duas vezes — e as duas
+   * precisam aparecer (foto, aviso e marca na linha do tempo). Depende da rota
+   * e das paradas, então é recalculado só quando uma das duas muda.
+   */
+  const passagens = useMemo(() => mapPassages(track, pois), [track, pois]);
+
+  /**
    * Maior zoom de acompanhamento que cabe no teto de blocos.
    *
    * Não depende do zoom escolhido — só da rota, do tamanho da tela e do mapa —
@@ -374,7 +387,7 @@ function App() {
       cinematic: {
         opening: settings.cinematic,
         stops: settings.cinematic,
-        stopTs: pois.map((p) => p.t),
+        stopTs: passageTimes(pois, passagens),
       },
     });
   }, [
@@ -384,6 +397,7 @@ function App() {
     settings.cameraMode,
     settings.cinematic,
     pois,
+    passagens,
   ]);
 
   /** Blocos que a câmera escolhida vai precisar — muda a cada passo do controle. */
@@ -394,7 +408,7 @@ function App() {
       cinematic: {
         opening: settings.cinematic,
         stops: settings.cinematic,
-        stopTs: pois.map((p) => p.t),
+        stopTs: passageTimes(pois, passagens),
       },
     };
     const needed = tilesNeeded({
@@ -902,7 +916,7 @@ function App() {
       cinematic: {
         opening: settings.cinematic,
         stops: settings.cinematic,
-        stopTs: stops.map((s) => s.t),
+        stopTs: passageTimes(stops, passagens),
       },
     };
 
@@ -927,6 +941,7 @@ function App() {
           camera,
           style,
           stops,
+          passages: passagens,
           endpoints,
           elapsed,
           duration: settings.duration,
@@ -1130,6 +1145,7 @@ function App() {
             city={city}
             onCity={pickCity}
             pois={pois}
+            passages={passagens}
             track={track}
             cobertura={cobertura}
             blocos={blocos}

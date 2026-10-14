@@ -2,6 +2,7 @@ import { useState } from "react";
 import {
   ENDPOINT_PRESETS,
   hasMark,
+  patchMark,
   type EndpointMark,
   type Endpoints,
 } from "../lib/endpoints";
@@ -19,6 +20,10 @@ export default function EndpointEditor({
 
   const set = (which: "a" | "b", mark: EndpointMark | null) =>
     onChange({ ...endpoints, [which]: mark });
+
+  /** mexe em um campo só, preservando os outros (a foto, principalmente) */
+  const patch = (which: "a" | "b", mudanca: Partial<EndpointMark>) =>
+    set(which, patchMark(endpoints[which], mudanca));
 
   const row = (which: "a" | "b") => {
     const mark = endpoints[which];
@@ -83,9 +88,7 @@ export default function EndpointEditor({
                 value={mark?.emoji ?? ""}
                 maxLength={4}
                 placeholder={which === "a" ? "A" : "B"}
-                onChange={(e) =>
-                  set(which, { emoji: e.target.value, label: mark?.label ?? "" })
-                }
+                onChange={(e) => patch(which, { emoji: e.target.value })}
                 title="Emoji do local"
                 className="w-11 shrink-0 rounded-lg border border-white/10 bg-black/40 py-1.5 text-center text-base leading-none focus:border-white/30 focus:outline-none"
               />
@@ -93,9 +96,7 @@ export default function EndpointEditor({
                 value={mark?.label ?? ""}
                 maxLength={24}
                 placeholder={which === "a" ? "Nome da partida (ex: Casa)" : "Nome da chegada (ex: Cachoeira)"}
-                onChange={(e) =>
-                  set(which, { emoji: mark?.emoji ?? "", label: e.target.value })
-                }
+                onChange={(e) => patch(which, { label: e.target.value })}
                 className="min-w-0 flex-1 rounded-lg border border-white/10 bg-black/40 px-2.5 py-1.5 text-[12px] font-semibold text-white placeholder:text-zinc-600 focus:border-white/30 focus:outline-none"
               />
             </div>
@@ -103,13 +104,7 @@ export default function EndpointEditor({
               <PhotoField
                 compacto
                 valor={mark?.photo ?? ""}
-                onValor={(v) =>
-                  set(which, {
-                    emoji: mark?.emoji ?? "",
-                    label: mark?.label ?? "",
-                    ...(v ? { photo: v } : {}),
-                  })
-                }
+                onValor={(v) => patch(which, { photo: v || undefined })}
                 ariaLabel={`Foto de ${which === "a" ? "partida" : "chegada"}`}
               />
               <span className="min-w-0 flex-1 text-[10.5px] leading-snug text-zinc-500">
@@ -123,7 +118,7 @@ export default function EndpointEditor({
                 <button
                   key={p.label}
                   type="button"
-                  onClick={() => set(which, { emoji: p.emoji, label: p.label })}
+                  onClick={() => patch(which, { emoji: p.emoji, label: p.label })}
                   className="rounded-lg border border-white/10 bg-black/30 px-1.5 py-1 text-[10.5px] font-medium text-zinc-400 transition-colors hover:border-white/30 hover:text-white"
                 >
                   {p.emoji} {p.label}

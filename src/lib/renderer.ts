@@ -612,7 +612,10 @@ export class SceneRenderer {
     if (style.showEndpoints && track.pts.length > 1) {
       /*
        * As fotos de partida e chegada usam a mesma janela em segundos das
-       * paradas: a da largada abre o vídeo, a da chegada fecha.
+       * paradas, **medida das pontas**: a da largada já está na tela no
+       * primeiro quadro e a da chegada continua na tela no último. (Medida
+       * como a das paradas — que entram e saem —, a da largada estaria
+       * invisível no quadro zero e a da chegada invisível no fim.)
        */
       const fotoDoLocal = (mark?: import("./endpoints").EndpointMark | null) =>
         mark?.photo ? (input.photos?.get(mark.photo) ?? null) : null;
@@ -624,7 +627,7 @@ export class SceneRenderer {
         sf,
         input.endpoints.a,
         fotoDoLocal(input.endpoints.a),
-        photoWindowAlpha(t * input.duration),
+        photoWindowAlpha(t * input.duration + PHOTO_FADE_IN_S),
       );
       drawPin(
         ctx,
@@ -634,7 +637,7 @@ export class SceneRenderer {
         sf,
         input.endpoints.b,
         fotoDoLocal(input.endpoints.b),
-        photoWindowAlpha((t - 1) * input.duration + PHOTO_HOLD_S),
+        photoWindowAlpha((1 - t) * input.duration + PHOTO_FADE_IN_S),
       );
     }
 

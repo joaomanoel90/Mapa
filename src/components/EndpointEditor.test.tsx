@@ -18,19 +18,31 @@ let container: HTMLDivElement;
 let root: Root;
 let atual: Endpoints;
 
+const FOTO = `data:image/jpeg;base64,${"A".repeat(40)}`;
+
 /** O mesmo vaivém do app: quem guarda o estado é o componente de cima. */
-function Painel() {
-  const [endpoints, setEndpoints] = useState<Endpoints>({ ...DEFAULT_ENDPOINTS });
+function Painel({ inicial = DEFAULT_ENDPOINTS }: { inicial?: Endpoints }) {
+  const [endpoints, setEndpoints] = useState<Endpoints>({ ...inicial });
   atual = endpoints;
   return <EndpointEditor endpoints={endpoints} onChange={setEndpoints} />;
 }
 
-beforeEach(() => {
-  atual = { ...DEFAULT_ENDPOINTS };
+/** Monta o painel do zero, com um estado inicial (o React só usa o estado
+ *  inicial ao montar: re-renderizar por cima manteria o anterior). */
+function montarCom(inicial: Endpoints = DEFAULT_ENDPOINTS) {
+  if (container) {
+    act(() => root.unmount());
+    container.remove();
+  }
+  atual = { ...inicial };
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
-  act(() => root.render(<Painel />));
+  act(() => root.render(<Painel inicial={inicial} />));
+}
+
+beforeEach(() => {
+  montarCom();
 });
 
 afterEach(() => {
@@ -107,6 +119,45 @@ describe("painel de partida e chegada", () => {
     await escolher(gigante);
     expect(container.textContent).toContain("acima do limite");
     expect(atual.b?.photo).toBeUndefined();
+  });
+
+  it("digitar o nome NÃO apaga a foto já anexada", () => {
+    // o defeito de verdade: o editor remontava o local sem o campo da foto, e
+    // a foto sumia ao escrever o nome (inclusive do pino no mapa)
+    montarCom({ a: { emoji: "🏠", label: "", photo: FOTO }, b: null });
+    abrir("a");
+    const nome = container.querySelector<HTMLInputElement>('input[maxlength="24"]');
+    expect(nome).not.toBeNull();
+    act(() => {
+      const setter = Object.getOwnPropertyDescriptor(
+        HTMLInputElement.prototype,
+        "value",
+      )?.set;
+      setter?.call(nome, "Casa da praia");
+      nome!.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    expect(atual.a?.label).toBe("Casa da praia");
+    expect(atual.a?.photo).toBe(FOTO);
+  });
+
+  it("tocar num atalho NÃO apaga a foto já anexada", () => {
+    montarCom({ a: { emoji: "🏠", label: "Casa", photo: FOTO }, b: null });
+    abrir("a");
+    const atalho = [...container.querySelectorAll("button")].find((b) =>
+      (b.textContent ?? "").includes("Cachoeira"),
+    );
+    expect(atalho).not.toBeUndefined();
+    act(() => atalho!.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+    expect(atual.a?.emoji).toBe("💦");
+    expect(atual.a?.label).toBe("Cachoeira");
+    expect(atual.a?.photo).toBe(FOTO);
+  });
+
+  it("o cabeçalho mostra a foto no círculo do A", () => {
+    montarCom({ a: { emoji: "", label: "", photo: FOTO }, b: null });
+    const imagem = container.querySelector<HTMLImageElement>("img");
+    expect(imagem).not.toBeNull();
+    expect(imagem!.src).toBe(FOTO);
   });
 
   it("escolher um arquivo inválido não apaga o local já marcado", async () => {

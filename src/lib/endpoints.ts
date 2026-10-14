@@ -56,6 +56,29 @@ export function hasText(m: EndpointMark | null): boolean {
   return !!m && (m.emoji.trim() !== "" || m.label.trim() !== "");
 }
 
+/**
+ * Atualiza um lado (emoji, nome ou foto) **sem perder o que não foi tocado**.
+ *
+ * O editor montava o local do zero a cada digitação (`{ emoji, label }`), e o
+ * campo `photo` simplesmente não entrava: escolher a foto e depois escrever o
+ * nome — ou tocar num atalho — apagava a foto, inclusive do pino no mapa.
+ * Aqui a foto só sai quando é pedida (`photo: undefined`).
+ *
+ * Devolve `null` quando o local fica vazio (nem emoji, nem nome, nem foto).
+ */
+export function patchMark(
+  atual: EndpointMark | null,
+  patch: Partial<EndpointMark>,
+): EndpointMark | null {
+  const next: EndpointMark = {
+    emoji: patch.emoji ?? atual?.emoji ?? "",
+    label: patch.label ?? atual?.label ?? "",
+  };
+  const photo = "photo" in patch ? patch.photo : atual?.photo;
+  if (photo) next.photo = photo;
+  return hasMark(next) ? next : null;
+}
+
 /** Algum dos dois lados (partida ou chegada) está marcado? */
 export function hasEndpointMarks(e: Endpoints): boolean {
   return hasMark(e.a) || hasMark(e.b);

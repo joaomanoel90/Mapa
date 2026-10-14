@@ -9,6 +9,7 @@ import {
   fitSize,
   formatBytes,
   isPhotoDataUrl,
+  photoSources,
   type PhotoImage,
 } from "./photos";
 
@@ -85,6 +86,28 @@ describe("validação do arquivo", () => {
     expect(checkImageFile({ type: "application/pdf", size: 1000 })).toContain("não é uma imagem");
     expect(checkImageFile({ type: "image/jpeg", size: 40 * 1024 * 1024 })).toContain("acima do limite");
     expect(checkImageFile({ type: "image/jpeg", size: 0 })).toContain("vazio");
+  });
+
+  it("a lista de fotos junta cartela, paradas e partida/chegada", () => {
+    // era aqui que a foto de A/B se perdia: a lista era montada à mão e elas
+    // ficavam de fora, então o desenho nunca as encontrava no cache
+    const cartela = "data:image/jpeg;base64,CARD";
+    const parada1 = "data:image/jpeg;base64,P1";
+    const partida = "data:image/jpeg;base64,A";
+    const chegada = "data:image/jpeg;base64,B";
+    const lista = photoSources(
+      [cartela],
+      [parada1, undefined, ""],
+      [partida, null],
+      [chegada],
+    );
+    expect(lista).toEqual([cartela, parada1, partida, chegada]);
+  });
+
+  it("a lista não repete a mesma foto e ignora o que não é foto", () => {
+    // a mesma foto numa parada e na partida é decodificada uma vez só
+    expect(photoSources(["x"], ["x", "y"], [null, undefined, ""])).toEqual(["x", "y"]);
+    expect(photoSources()).toEqual([]);
   });
 
   it("reconhece um data URL de imagem e recusa o resto", () => {

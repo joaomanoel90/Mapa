@@ -48,6 +48,8 @@ type Props = {
   hasRoute: boolean;
   /** zoom máximo servido pelo estilo de mapa escolhido */
   maxZoom: number;
+  /** quanto do traçado tem elevação e hora (0..1) — decide as dicas da cor */
+  cobertura: { ele: number; time: number };
   onUndo: () => void;
   onClear: () => void;
   /** reenquadra a rota (o mapa nunca se move sozinho ao marcar pontos) */
@@ -79,6 +81,7 @@ function Sidebar(props: Props) {
     onCity,
     pois,
     track,
+    cobertura,
     progress,
     selectedPoi,
     poiMode,
@@ -453,6 +456,39 @@ function Sidebar(props: Props) {
               )}
             </div>
           )}
+          <div>
+            <Label>Cor da rota</Label>
+            <Segmented
+              options={[
+                { id: "solid", label: "Sólida", title: "Uma cor só, como sempre" },
+                { id: "speed", label: "Velocidade", title: "Precisa de hora no arquivo" },
+                { id: "slope", label: "Inclinação", title: "Precisa de elevação no arquivo" },
+              ]}
+              value={s.colorBy}
+              onChange={(v) => update("colorBy", v)}
+              size="sm"
+            />
+            {(() => {
+              const dica =
+                s.colorBy === "slope"
+                  ? cobertura.ele <= 0
+                    ? "Este traçado não tem elevação — a linha sai cinza. Importe um GPX com altitudes."
+                    : cobertura.ele < 0.5
+                      ? `Só ${Math.round(cobertura.ele * 100)}% dos pontos têm elevação: o resto sai cinza.`
+                      : null
+                  : s.colorBy === "speed"
+                    ? cobertura.time <= 0
+                      ? "Este traçado não tem hora — a linha sai cinza. Importe um GPX gravado (com data em cada ponto)."
+                      : cobertura.time < 0.5
+                        ? `Só ${Math.round(cobertura.time * 100)}% dos pontos têm hora: o resto sai cinza.`
+                        : null
+                    : null;
+              return dica ? (
+                <p className="mt-1 text-[10.5px] leading-snug text-amber-300/80">{dica}</p>
+              ) : null;
+            })()}
+          </div>
+
           <div className="grid grid-cols-1 gap-1.5">
             <Toggle
               icon="📍"
@@ -484,7 +520,29 @@ function Sidebar(props: Props) {
               checked={s.endCard}
               onChange={(v) => update("endCard", v)}
             />
+            <Toggle
+              icon="🪧"
+              label="Marcas de km"
+              checked={s.showKmMarks}
+              onChange={(v) => update("showKmMarks", v)}
+            />
+            <Toggle
+              icon="🎬"
+              label="Câmera cinematográfica"
+              checked={s.cinematic}
+              onChange={(v) => update("cinematic", v)}
+            />
           </div>
+          {s.cinematic &&
+            (s.cameraMode === "follow" ? (
+              <p className="text-[11px] leading-snug text-zinc-500">
+                Abertura sobrevoando a região (~2 s) e aproximação nas paradas.
+              </p>
+            ) : (
+              <p className="text-[11px] leading-snug text-amber-300/80">
+                Só vale na câmera “Seguir”: no “Rota toda” a rota já está inteira na tela.
+              </p>
+            ))}
           <EndCardPanel resumo={resumo} cartela={cartela} settings={s} update={update} />
           <Button variant="soft" onClick={onReplay} disabled={!hasRoute} className="w-full">
             ▶︎ Pré-visualizar animação

@@ -247,6 +247,27 @@ describe("sharedSettingsOverrides", () => {
     expect("formatId" in over).toBe(false);
   });
 
+  it("leva junto a cor da rota, as marcas de km e a câmera cinematográfica", () => {
+    const over = sharedSettingsOverrides({
+      ...DEFAULT_SETTINGS,
+      colorBy: "slope",
+      showKmMarks: true,
+      cinematic: true,
+    });
+    expect(over.colorBy).toBe("slope");
+    expect(over.showKmMarks).toBe(true);
+    expect(over.cinematic).toBe(true);
+  });
+
+  it("a cor da rota sobrevive à ida e à volta pelo link", () => {
+    const url = buildShareUrl(
+      base({ settings: { ...DEFAULT_SETTINGS, colorBy: "speed", cinematic: true } }),
+    );
+    const r = decodeShare(url);
+    expect(r?.settings.colorBy).toBe("speed");
+    expect(r?.settings.cinematic).toBe(true);
+  });
+
   it("não altera o objeto original", () => {
     const original = { ...DEFAULT_SETTINGS, formatId: "webm" };
     sharedSettingsOverrides(original);

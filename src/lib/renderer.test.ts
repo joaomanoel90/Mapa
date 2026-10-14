@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { buildTrack } from "./geo";
+import { buildTrack, cumulative } from "./geo";
+import { colorizeRoute, NEUTRAL_COLOR } from "./coloring";
+import { formatClock, timesOf } from "./hud";
+import { kmMarks } from "./km-marks";
 import { findCharacter } from "./characters";
 import { SceneRenderer, type FrameState, type SceneStyle } from "./renderer";
 import { endCard, rideSummary, type EndCard } from "./stats";
@@ -17,6 +20,12 @@ function fakeCtx() {
   const textos: string[] = [];
   /** arcos desenhados: [x, y, raio, início, fim] */
   const arcos: number[][] = [];
+  /** cada `stroke()`: a cor, a espessura e quantos pontos o caminho tinha */
+  const tracos: { cor: string; largura: number; pontos: number }[] = [];
+  /** primeiro ponto de cada `moveTo` (onde o traçado caiu na tela) */
+  const movimentos: number[][] = [];
+  const props: Record<string, unknown> = {};
+  let pontos = 0;
   const make = (): unknown =>
     new Proxy(function () {} as unknown as object, {
       get(_alvo, prop) {
@@ -33,14 +42,28 @@ function fakeCtx() {
         return (...args: unknown[]) => {
           if (prop === "fillText" && typeof args[0] === "string") textos.push(args[0]);
           if (prop === "arc") arcos.push(args as number[]);
+          if (prop === "beginPath") pontos = 0;
+          if (prop === "moveTo") {
+            pontos++;
+            movimentos.push(args as number[]);
+          }
+          if (prop === "lineTo") pontos++;
+          if (prop === "stroke") {
+            tracos.push({
+              cor: String(props.strokeStyle ?? ""),
+              largura: Number(props.lineWidth ?? 0),
+              pontos,
+            });
+          }
           return make();
         };
       },
-      set() {
+      set(_alvo, prop, valor) {
+        props[String(prop)] = valor;
         return true;
       },
     });
-  return { ctx: make() as CanvasRenderingContext2D, textos, arcos };
+  return { ctx: make() as CanvasRenderingContext2D, textos, arcos, tracos, movimentos };
 }
 
 /** Desenha um quadro num renderizador novo (câmera limpa a cada caso). */
@@ -338,6 +361,56 @@ describe("HUD no vídeo", () => {
     }
   });
 
+  it("num traçado decimado, o relógio não sai do lugar", () => {
+    // GPX de 20.000 pontos: o desenho guarda 1 a cada 2. Se as horas viessem do
+    // arquivo inteiro, metade do vídeo mostraria um relógio pela metade
+    const grandes = Array.from({ length: 20_000 }, (_, i) => ({
+      lat: -23.5 + i * 0.00004,
+      lng: -48.4,
+      t: T0 + i * 1000,
+    }));
+    const t = buildTrack(grandes);
+    expect(t.pts.length).toBeLessThan(grandes.length);
+
+    // o que o app manda: as horas do traçado desenhado
+    const { ctx, textos } = fakeCtx();
+    desenhar(ctx, { ...estado(0.5, 14, null, timesOf(t.pts)), }, t);
+    const esperado = formatClock((grandes[grandes.length - 1].t - T0) / 2000);
+    expect(textos.some((x) => x.includes(esperado))).toBe(true);
+
+    // e se alguém mandar o vetor do arquivo inteiro, o HUD não inventa número:
+    // mostra "sem arquivo" em vez de um relógio cinco vezes menor
+    const { ctx: ctx2, textos: textos2 } = fakeCtx();
+    desenhar(ctx2, { ...estado(0.5, 14, null, grandes.map((p) => p.t)) }, t);
+    expect(textos2.some((x) => /\d:\d\d/.test(x))).toBe(false);
+    expect(textos2).toContain("sem arquivo");
+  });
+
+  it("a cor também não aceita faixa de outro traçado", () => {
+    // faixas do arquivo cru (20.000) contra o traçado desenhado (10.000):
+    // pintar com elas seria pintar o ponto errado
+    const cru = Array.from({ length: 20_000 }, (_, i) => ({
+      lat: -23.5 + i * 0.00004,
+      lng: -48.4,
+      ele: 700 + i * 0.1,
+    }));
+    const desalinhado = colorizeRoute({
+      pts: cru,
+      cum: cumulative(cru),
+      times: null,
+      mode: "slope",
+    })!;
+    const { ctx, tracos } = fakeCtx();
+    desenhar(
+      ctx,
+      { ...estado(0.5, 14, null, null), colored: desalinhado },
+      buildTrack(cru),
+    );
+    const cores = new Set(tracos.filter((x) => x.pontos > 0 && x.largura === 4).map((x) => x.cor));
+    // cai na linha sólida de sempre em vez de colorir errado
+    expect(cores.size).toBe(1);
+  });
+
   it("o anel fica abaixo do título, sem sobrepor a faixa do topo", () => {
     const comTitulo = { ...style, showTitle: true, title: "Pedal da manhã" };
     const { ctx, arcos } = fakeCtx();
@@ -349,5 +422,167 @@ describe("HUD no vídeo", () => {
     const andamento = arcoDoAndamento(arcos)!;
     // o topo do anel (y - r) tem que ficar abaixo da faixa pintada pelo título
     expect(andamento.y - andamento.r).toBeGreaterThan(60);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* Rota colorida, marcas de km e câmera cinematográfica                */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Perfil variado de propósito: plano, subida de 6% e descida de 4%.
+ * Uma subida constante daria **uma** cor só — e o teste não provaria nada.
+ */
+const altitudeDe = (i: number) =>
+  i < 100 ? 700 : i < 200 ? 700 + (i - 100) * 0.6 : 760 - (i - 200) * 0.4;
+
+const SUBIDA = Array.from({ length: 300 }, (_, i) => ({
+  lat: -23.5 + i * 0.000075,
+  lng: -48.4,
+  ele: altitudeDe(i),
+  t: T0 + i * 2000,
+}));
+const trackSubida = buildTrack(SUBIDA);
+const colorida = colorizeRoute({
+  pts: SUBIDA,
+  cum: cumulative(SUBIDA),
+  times: SUBIDA.map((p) => p.t),
+  mode: "slope",
+})!;
+
+describe("rota colorida por inclinação", () => {
+  it("pinta a linha em várias cores, e não numa só", () => {
+    const { ctx, tracos } = fakeCtx();
+    desenhar(ctx, { ...estado(1, 14, null, null), colored: colorida }, trackSubida);
+
+    // a espessura 4 é a linha por cima da sombra
+    const cores = new Set(tracos.filter((t) => t.pontos > 0 && t.largura === 4).map((t) => t.cor));
+    expect(cores.size).toBeGreaterThanOrEqual(3);
+    // e nenhuma delas é a cor neutra: o arquivo tem altitude do começo ao fim
+    expect(cores.has(NEUTRAL_COLOR)).toBe(false);
+  });
+
+  it("escreve a escala na tela — sem ela a cor não significa nada", () => {
+    const { ctx, textos } = fakeCtx();
+    desenhar(ctx, { ...estado(1, 14, null, null), colored: colorida }, trackSubida);
+    expect(textos).toContain("inclinação %");
+    expect(textos).toContain("-6%");
+    expect(textos).toContain("+6%");
+    expect(textos).not.toContain("sem dado");
+  });
+
+  it("avisa na legenda quando parte do arquivo não tem o dado", () => {
+    const parcial = SUBIDA.map((p, i) => ({ ...p, ele: i < 200 ? p.ele : NaN }));
+    const c = colorizeRoute({
+      pts: parcial,
+      cum: cumulative(parcial),
+      times: null,
+      mode: "slope",
+    })!;
+    const { ctx, textos, tracos } = fakeCtx();
+    desenhar(ctx, { ...estado(1, 14, null, null), colored: c }, buildTrack(parcial));
+    expect(textos).toContain("sem dado");
+    const cores = new Set(tracos.filter((t) => t.pontos > 0 && t.largura === 4).map((t) => t.cor));
+    expect(cores.has(NEUTRAL_COLOR)).toBe(true);
+  });
+
+  it("reaproveita os pontos projetados, mas nunca o quadro anterior", () => {
+    // os vetores do quadro são reaproveitados entre quadros (é o que torna as
+    // nove passadas baratas) — se ficassem velhos, a cor sairia na posição
+    // errada quando a câmera anda
+    const r = new SceneRenderer("dark");
+    const camera = { mode: "follow" as const, followZoom: 16 };
+    const a = fakeCtx();
+    r.render(a.ctx, 1280, 720, { ...estado(0.2, 14, null, null), colored: colorida, camera });
+    const b = fakeCtx();
+    r.render(b.ctx, 1280, 720, { ...estado(0.9, 14, null, null), colored: colorida, camera });
+    expect(a.movimentos.length).toBeGreaterThan(0);
+    expect(b.movimentos.length).toBeGreaterThan(0);
+    expect(b.movimentos[0][0]).not.toBeCloseTo(a.movimentos[0][0], 1);
+  });
+
+  it("sem o dado no arquivo a linha volta a ser a sólida de sempre", () => {
+    const semEle = SUBIDA.map((p) => ({ lat: p.lat, lng: p.lng, t: p.t }));
+    const t = buildTrack(semEle);
+    const nenhum = colorizeRoute({
+      pts: semEle,
+      cum: cumulative(semEle),
+      times: null,
+      mode: "slope",
+    });
+    expect(nenhum).toBeNull();
+
+    const { ctx, tracos, textos } = fakeCtx();
+    desenhar(ctx, { ...estado(1, 14, null, null), colored: nenhum }, t);
+    const cores = new Set(tracos.filter((t) => t.pontos > 0 && t.largura === 4).map((t) => t.cor));
+    expect(cores.size).toBe(1);
+    expect(textos).not.toContain("inclinação %");
+  });
+});
+
+describe("marcas de km", () => {
+  it("escreve o quilômetro ao lado da marca", () => {
+    const { ctx, textos } = fakeCtx();
+    desenhar(ctx, { ...estado(0, 14, null, null), marks: kmMarks(track.cum) });
+    expect(textos).toContain("1 km");
+    expect(textos).toContain("2 km");
+    expect(textos).toContain("3 km");
+  });
+
+  it("sem o interruptor não desenha marca nenhuma", () => {
+    const { ctx, textos } = fakeCtx();
+    desenhar(ctx, { ...estado(0, 14, null, null), marks: null });
+    expect(textos.some((t) => /^\d+ km$/.test(t))).toBe(false);
+  });
+
+  it("numa rota longa só as redondas levam número", () => {
+    const longa = Array.from({ length: 600 }, (_, i) => ({
+      lat: -23.5 + i * 0.00075,
+      lng: -48.4,
+    }));
+    const t = buildTrack(longa);
+    const marcas = kmMarks(t.cum);
+    const { ctx, textos } = fakeCtx();
+    desenhar(ctx, { ...estado(0, 14, null, null), marks: marcas }, t);
+    expect(marcas.length).toBeGreaterThan(2);
+    expect(marcas.length).toBeLessThanOrEqual(12);
+    // o número sai nas redondas; o resto é só o ponto no traçado
+    const comNumero = textos.filter((x) => /^\d+ km$/.test(x));
+    expect(comNumero.length).toBeGreaterThan(0);
+    expect(comNumero.length).toBeLessThanOrEqual(marcas.length);
+  });
+});
+
+describe("câmera cinematográfica", () => {
+  const comCine = {
+    mode: "follow" as const,
+    followZoom: 16,
+    cinematic: { opening: true, stops: false, stopTs: [] },
+  };
+
+  it("no primeiro quadro a partida aparece longe do centro (região inteira na tela)", () => {
+    const { ctx, movimentos } = fakeCtx();
+    desenhar(ctx, { ...estado(0, 14, null, null), camera: comCine });
+    const [x, y] = movimentos[0];
+    // com a câmera aberta, o começo da rota cai longe do meio do quadro
+    expect(Math.hypot(x - 640, y - 360)).toBeGreaterThan(180);
+  });
+
+  it("depois da abertura a câmera pousou e o personagem está no centro", () => {
+    const { ctx, movimentos } = fakeCtx();
+    desenhar(ctx, { ...estado(0, 14, null, null), elapsed: 6, camera: comCine });
+    const [x, y] = movimentos[0];
+    expect(Math.hypot(x - 640, y - 360)).toBeLessThan(20);
+  });
+
+  it("desligada, o traçado já começa enquadrado como sempre", () => {
+    const { ctx, movimentos } = fakeCtx();
+    desenhar(ctx, {
+      ...estado(0, 14, null, null),
+      camera: { mode: "fit", followZoom: 16 },
+    });
+    // a vista da rota toda nunca foi o problema: aqui as duas pontas aparecem
+    const xs = movimentos.map((m) => m[0]);
+    expect(Math.max(...xs) - Math.min(...xs)).toBeGreaterThan(100);
   });
 });

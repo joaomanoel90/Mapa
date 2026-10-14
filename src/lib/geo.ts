@@ -62,16 +62,28 @@ export type Track = {
  */
 const MAX_TRACK_POINTS = 12_000;
 
+/**
+ * Distância acumulada ponto a ponto (m); o primeiro é zero.
+ *
+ * Fica separado porque a rota colorida precisa medir o traçado **original**
+ * (o mesmo que o HUD e a cartela usam), e não a versão decimada para desenho:
+ * a rampa de um trecho não pode mudar por causa do arredondamento da tela.
+ */
+export function cumulative(pts: LatLng[]): number[] {
+  const cum: number[] = [0];
+  for (let i = 1; i < pts.length; i++) {
+    cum.push(cum[i - 1] + haversine(pts[i - 1], pts[i]));
+  }
+  return cum;
+}
+
 export function buildTrack(input: LatLng[]): Track {
   let pts = input;
   if (input.length > MAX_TRACK_POINTS) {
     const step = Math.ceil(input.length / MAX_TRACK_POINTS);
     pts = input.filter((_, i) => i % step === 0 || i === input.length - 1);
   }
-  const cum: number[] = [0];
-  for (let i = 1; i < pts.length; i++) {
-    cum.push(cum[i - 1] + haversine(pts[i - 1], pts[i]));
-  }
+  const cum = cumulative(pts);
   return { pts, cum, total: cum[cum.length - 1] ?? 0 };
 }
 

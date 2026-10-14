@@ -69,6 +69,27 @@ describe("sanitizeSettings", () => {
     expect(DEFAULT_SETTINGS.fastExport).toBe(true);
   });
 
+  it("só aceita os três modos de cor da rota", () => {
+    expect(sanitizeSettings(raw({ colorBy: "speed" })).colorBy).toBe("speed");
+    expect(sanitizeSettings(raw({ colorBy: "slope" })).colorBy).toBe("slope");
+    expect(sanitizeSettings(raw({ colorBy: "sólida" })).colorBy).toBeUndefined();
+    expect(sanitizeSettings(raw({ colorBy: 3 })).colorBy).toBeUndefined();
+  });
+
+  it("exige booleano nas marcas de km e na câmera cinematográfica", () => {
+    expect(sanitizeSettings(raw({ showKmMarks: "sim" })).showKmMarks).toBeUndefined();
+    expect(sanitizeSettings(raw({ cinematic: "sim" })).cinematic).toBeUndefined();
+    expect(sanitizeSettings(raw({ showKmMarks: true })).showKmMarks).toBe(true);
+    expect(sanitizeSettings(raw({ cinematic: false })).cinematic).toBe(false);
+  });
+
+  it("nasce com a linha sólida e as novidades desligadas", () => {
+    // as três são facultativas: quem não mexer no painel não vê diferença
+    expect(DEFAULT_SETTINGS.colorBy).toBe("solid");
+    expect(DEFAULT_SETTINGS.showKmMarks).toBe(false);
+    expect(DEFAULT_SETTINGS.cinematic).toBe(false);
+  });
+
   it("não deixa passar lixo vindo de JSON corrompido", () => {
     const out = sanitizeSettings(
       raw({ basemap: 7, aspect: [], duration: {}, profile: [], followZoom: "x" }),

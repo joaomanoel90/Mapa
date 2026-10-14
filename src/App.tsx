@@ -16,6 +16,8 @@ import {
 import { pinsAsDots } from "./lib/pins";
 import { endCard, rideSummary } from "./lib/stats";
 import { timesOf } from "./lib/hud";
+import { colorizeRoute, dataCoverage } from "./lib/coloring";
+import { kmMarks } from "./lib/km-marks";
 import { parseDuration } from "./lib/duration";
 import {
   buildTrack,
@@ -287,11 +289,16 @@ function App() {
   /**
    * Horas dos pontos do traçado, quando o arquivo é de GPS.
    *
-   * Calculado sobre o traçado **importado** (o mais fiel) e memoizado: o
-   * renderizador desenha ~30 quadros por segundo e não pode varrer milhares de
-   * pontos por quadro.
+   * Sai do traçado **desenhado** (`track.pts`), e não do arquivo cru: o desenho
+   * é uma redução do arquivo (teto de 12.000 pontos), e um vetor de horas maior
+   * que o traçado apontaria para pontos que não estão na tela — foi assim que o
+   * relógio do HUD chegou a ler cinco vezes menos do que devia num GPX de
+   * 50.000 pontos. `buildTrack` mantém os mesmos pontos do arquivo (com as
+   * mesmas horas), então nada se perde: só passa a bater com o que é desenhado.
+   *
+   * Memoizado porque a animação redesenha ~30 vezes por segundo.
    */
-  const horas = useMemo(() => timesOf(rawTrack ?? track.pts), [rawTrack, track]);
+  const horas = useMemo(() => timesOf(track.pts), [track]);
 
   /**
    * Tempo escrito na cartela, em segundos.
@@ -301,6 +308,36 @@ function App() {
    * duração do clipe (que é o que a barra de progresso representa).
    */
   const tempoCartela = useMemo(() => parseDuration(settings.cardTime), [settings.cardTime]);
+
+  /**
+   * Pontos do traçado que têm hora / elevação (0..1), para avisar no painel em
+   * vez de o usuário escolher "inclinação" e ver uma linha cinza sem entender.
+   */
+  const cobertura = useMemo(() => dataCoverage(track.pts), [track]);
+
+  /**
+   * Rota colorida por velocidade ou inclinação.
+   *
+   * Fora do laço de desenho de propósito: envolve médias móveis sobre o
+   * traçado inteiro, e o vídeo é redesenhado ~30 vezes por segundo.
+   */
+  const colored = useMemo(
+    () =>
+      colorizeRoute({
+        // o traçado desenhado: as faixas precisam casar com os pontos do traçado
+        pts: track.pts,
+        cum: track.cum,
+        times: horas,
+        mode: settings.colorBy,
+      }),
+    [horas, settings.colorBy, track],
+  );
+
+  /** marcas de km (o traçado inteiro já está medido em `track`) */
+  const marcas = useMemo(
+    () => (settings.showKmMarks ? kmMarks(track.cum) : null),
+    [settings.showKmMarks, track],
+  );
 
   const cartela = useMemo(
     () =>
@@ -770,7 +807,15 @@ function App() {
       subtitle: settings.subtitle,
     };
     const stops = sortPois(pois);
-    const camera = { mode: settings.cameraMode, followZoom: settings.followZoom };
+    const camera = {
+      mode: settings.cameraMode,
+      followZoom: settings.followZoom,
+      cinematic: {
+        opening: settings.cinematic,
+        stops: settings.cinematic,
+        stopTs: stops.map((s) => s.t),
+      },
+    };
 
     let paint: (t: number, elapsed: number) => void = () => undefined;
     let canvasForRecord: HTMLCanvasElement | null = null;
@@ -799,6 +844,8 @@ function App() {
           summary: cartela,
           times: horas,
           cardSeconds: tempoCartela,
+          colored,
+          marks: marcas,
         });
 
       // os servidores gratuitos pedem uso moderado
@@ -808,6 +855,7 @@ function App() {
         aspect.w,
         aspect.h,
         settings.basemap,
+        camera.cinematic,
       ).length;
       if (needed > TILE_BUDGET) {
         throw new Error(
@@ -988,6 +1036,7 @@ function App() {
             onCity={pickCity}
             pois={pois}
             track={track}
+            cobertura={cobertura}
             progress={sidebarProgress}
             selectedPoi={selectedPoi}
             poiMode={poiMode}

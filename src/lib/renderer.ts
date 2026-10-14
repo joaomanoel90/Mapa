@@ -12,6 +12,9 @@ import {
 } from "./tiles";
 import type { EndCard } from "./stats";
 import { elapsedAt, formatClock, speedAt } from "./hud";
+import { cameraTarget, STOP_BOOST, type CinematicConfig } from "./camera";
+import { NEUTRAL_COLOR, type ColoredRoute } from "./coloring";
+import type { KmMark } from "./km-marks";
 import {
   TILE_SIZE,
   boundsOf,
@@ -24,6 +27,7 @@ import {
   unproject,
   visibleRuns,
   type Bounds,
+  type IndexRange,
   type LatLng,
   type Track,
 } from "./geo";
@@ -33,6 +37,8 @@ export type CameraMode = "fit" | "follow";
 export type CameraConfig = {
   mode: CameraMode;
   followZoom: number;
+  /** abertura sobrevoando a região e aproximação nas paradas */
+  cinematic?: CinematicConfig;
 };
 
 export type SceneStyle = {
@@ -90,6 +96,14 @@ export type FrameState = {
    * barra de progresso já mostra).
    */
   cardSeconds: number | null;
+  /**
+   * Rota colorida por velocidade ou inclinação (null = linha sólida).
+   * Calculada uma vez pelo app e reaproveitada em todos os quadros: a rampa
+   * envolve médias móveis e não cabe dentro de um laço de 30 quadros/s.
+   */
+  colored?: ColoredRoute | null;
+  /** marcas de km ao longo do traçado */
+  marks?: KmMark[] | null;
 };
 
 /* ------------------------------------------------------------------ */
@@ -216,6 +230,11 @@ export type TileRef = { url: string; z: number; x: number; y: number };
  * Todos os tiles necessários para a animação inteira.
  * No modo "seguir" percorre a rota inteira (não apenas amostras esparsas),
  * para que nenhum trecho do vídeo fique sem mapa.
+ *
+ * A câmera cinematográfica entra na conta: a abertura mostra a **região toda**
+ * em zoom baixo (blocos que o percurso a pé não pediria), e a aproximação nas
+ * paradas pede blocos de um nível acima. Sem isso o começo do vídeo sairia com
+ * o mapa vazio, e as paradas com buracos em volta.
  */
 export function tilesForAnimation(
   track: Track,
@@ -223,6 +242,7 @@ export function tilesForAnimation(
   width: number,
   height: number,
   basemap: BasemapId,
+  cinematic?: CinematicConfig | null,
 ): TileRef[] {
   const bm = BASEMAPS[basemap];
   const maxZoom = bm.maxZoom;
@@ -233,10 +253,31 @@ export function tilesForAnimation(
       if (!map.has(k)) map.set(k, { url: tileUrl(bm, z, x, y), z, x, y });
     }
   };
+  const paraView = (alvo: { lat: number; lng: number; zoom: number }): View =>
+    viewFrom(alvo, alvo.zoom, width, height, maxZoom);
 
   if (camera.mode === "fit") {
     push(targetView({ track, t: 0, camera, width, height, maxZoom }));
     return Array.from(map.values());
+  }
+
+  const cine = cinematic ?? camera.cinematic ?? null;
+  if (cine?.opening) {
+    // o enquadramento da abertura é o do "Rota toda", no meio do traçado
+    push(
+      paraView(
+        cameraTarget({
+          track,
+          t: 0,
+          camera: { mode: "fit", followZoom: camera.followZoom },
+          width,
+          height,
+          maxZoom,
+          elapsed: 0,
+          duration: 1,
+        }),
+      ),
+    );
   }
 
   // amostra por distância: um tile de folga cobre o atraso da câmera suavizada
@@ -249,7 +290,28 @@ export function tilesForAnimation(
   // início e fim garantidos
   push(targetView({ track, t: 0, camera, width, height, maxZoom }));
   push(targetView({ track, t: 1, camera, width, height, maxZoom }));
+
+  if (cine?.stops && cine.stopTs.length > 0) {
+    // no máximo oito paradas: numa rota com cinquenta, o ganho de zoom em
+    // todas elas dobraria a conta dos servidores gratuitos sem que ninguém
+    // reparasse nas do meio
+    const validas = cine.stopTs.filter((ts) => Number.isFinite(ts));
+    const escolhidas = validas.length <= 8 ? validas : spread(validas, 8);
+    const zoomParada = Math.min(camera.followZoom + STOP_BOOST, maxZoom);
+    for (const ts of escolhidas) {
+      const pos = sampleTrack(track, ts).pos;
+      push(viewFrom(pos, zoomParada, width, height, maxZoom));
+    }
+  }
   return Array.from(map.values());
+}
+
+/** `n` itens igualmente espaçados de uma lista, mantendo as pontas. */
+function spread<T>(lista: T[], n: number): T[] {
+  if (lista.length <= n) return lista;
+  const out: T[] = [];
+  for (let i = 0; i < n; i++) out.push(lista[Math.round((i * (lista.length - 1)) / (n - 1))]);
+  return out;
 }
 
 /**
@@ -268,6 +330,9 @@ type Camera = { lat: number; lng: number; zoom: number };
 export class SceneRenderer {
   private cam: Camera | null = null;
   private store: TileStore;
+  /** pontos visíveis já projetados, reaproveitados entre os quadros */
+  private px = new Float64Array(0);
+  private py = new Float64Array(0);
 
   constructor(basemap: BasemapId) {
     this.store = new TileStore(basemap);
@@ -356,24 +421,26 @@ export class SceneRenderer {
     const bm = BASEMAPS[style.basemap];
     const maxZoom = bm.maxZoom;
 
-    // --- câmera (suavizada) ---
-    const target =
-      camera.mode === "follow"
-        ? { ...sampleTrack(track, t).pos, zoom: Math.min(camera.followZoom, maxZoom) }
-        : (() => {
-            const b = boundsOf(track.pts);
-            return {
-              lat: (b.north + b.south) / 2,
-              lng: (b.east + b.west) / 2,
-              zoom: Math.min(fitZoom(b, width, height, 0.16), maxZoom),
-            };
-          })();
+    // --- câmera (alvo puro + suavização) ---
+    const target = cameraTarget({
+      track,
+      t,
+      camera,
+      width,
+      height,
+      maxZoom,
+      elapsed: input.elapsed,
+      duration: input.duration,
+    });
 
-    if (!this.cam) this.cam = { ...target };
-    const k = camera.mode === "follow" ? 0.16 : 0.1;
+    if (!this.cam) this.cam = { lat: target.lat, lng: target.lng, zoom: target.zoom };
+    // durante a abertura o alvo já é uma animação pronta: suavizar de novo só
+    // atrasaria o pouso, então a câmera vai junto
+    const k =
+      target.opening < 1 ? 1 : camera.mode === "follow" ? 0.16 : 0.1;
     this.cam.lat += (target.lat - this.cam.lat) * k;
     this.cam.lng += (target.lng - this.cam.lng) * k;
-    this.cam.zoom += (target.zoom - this.cam.zoom) * 0.12;
+    this.cam.zoom += (target.zoom - this.cam.zoom) * (target.opening < 1 ? 1 : 0.12);
 
     const view = viewFrom(this.cam, this.cam.zoom, width, height, maxZoom);
     const { z, s, ox, oy } = view;
@@ -425,61 +492,94 @@ export class SceneRenderer {
 
     const sample = sampleTrack(track, t);
 
+    /** cor por velocidade/inclinação, quando o app calculou */
+    const colored =
+      input.colored && input.colored.bands.length === track.pts.length ? input.colored : null;
+    // só os trechos dentro da janela: o traçado inteiro seria projetado à toa
+    const planejados = track.pts.length > 1 ? visibleRuns(track.pts, janela) : [];
+
+    /**
+     * Pontos visíveis projetados **uma única vez**.
+     *
+     * A linha colorida é desenhada em nove passadas; se cada uma projetasse os
+     * seus pontos de novo, um percurso longo na vista da "Rota toda" faria
+     * dezoito mil projeções por quadro. Com o quadro projetado em vetores
+     * reaproveitados (sem alocar a cada quadro), as passadas só leem índices.
+     */
+    if (colored && planejados.length > 0) {
+      if (this.px.length < track.pts.length) {
+        this.px = new Float64Array(track.pts.length);
+        this.py = new Float64Array(track.pts.length);
+      }
+      for (const [ini, fim] of planejados) {
+        for (let i = ini; i <= fim; i++) {
+          const p = toXY(track.pts[i]);
+          this.px[i] = p.x;
+          this.py[i] = p.y;
+        }
+      }
+    }
+    const projetado: PontoProjetado | null =
+      colored && planejados.length > 0 ? { x: this.px, y: this.py } : null;
+
     // --- rota planejada ---
     if (style.showRoute && track.pts.length > 1) {
       ctx.save();
       ctx.lineJoin = "round";
       ctx.lineCap = "round";
-      ctx.beginPath();
-      // só os trechos dentro da janela: o traçado inteiro seria projetado à toa
-      for (const [ini, fim] of visibleRuns(track.pts, janela)) {
-        const a = toXY(track.pts[ini]);
-        ctx.moveTo(a.x, a.y);
-        for (let i = ini + 1; i <= fim; i++) {
-          const { x, y } = toXY(track.pts[i]);
-          ctx.lineTo(x, y);
-        }
-      }
+      // a sombra por baixo separa a linha do mapa nos dois casos
+      pathOf(ctx, track.pts, toXY, planejados);
       ctx.strokeStyle = onDark ? "rgba(255,255,255,0.10)" : "rgba(15,23,42,0.10)";
       ctx.lineWidth = 13 * sf;
       ctx.setLineDash([]);
       ctx.stroke();
-      ctx.strokeStyle = onDark ? "rgba(255,255,255,0.55)" : "rgba(15,23,42,0.5)";
-      ctx.lineWidth = 4 * sf;
-      ctx.setLineDash([10 * sf, 9 * sf]);
-      ctx.stroke();
+      if (colored && projetado) {
+        // o trecho que ainda não foi percorrido fica esmaecido
+        strokeColored(ctx, projetado, planejados, colored, 4 * sf, 0.52);
+      } else {
+        ctx.strokeStyle = onDark ? "rgba(255,255,255,0.55)" : "rgba(15,23,42,0.5)";
+        ctx.lineWidth = 4 * sf;
+        ctx.setLineDash([10 * sf, 9 * sf]);
+        ctx.stroke();
+      }
       ctx.restore();
     }
 
     // --- trecho percorrido ---
     if (style.showTraveled && track.pts.length > 1) {
-      ctx.save();
-      ctx.lineJoin = "round";
-      ctx.lineCap = "round";
-      ctx.beginPath();
       const upto = Math.min(sample.index + 1, track.pts.length - 1);
       // o trecho percorrido também cresce com a animação, então leva o mesmo corte
       const percorridos = visibleRuns(track.pts, janela, upto);
-      for (const [ini, fim] of percorridos) {
-        const a = toXY(track.pts[ini]);
-        ctx.moveTo(a.x, a.y);
-        for (let i = ini + 1; i <= fim; i++) {
-          const { x, y } = toXY(track.pts[i]);
-          ctx.lineTo(x, y);
-        }
-      }
       const cur = toXY(sample.pos);
-      if (percorridos.length > 0) ctx.lineTo(cur.x, cur.y);
-      else ctx.moveTo(cur.x, cur.y);
+      ctx.save();
+      ctx.lineJoin = "round";
+      ctx.lineCap = "round";
+      pathOf(ctx, track.pts, toXY, percorridos, cur);
       ctx.strokeStyle = "rgba(0,0,0,0.28)";
       ctx.lineWidth = 11 * sf;
+      ctx.setLineDash([]);
       ctx.stroke();
-      ctx.strokeStyle = style.accent;
-      ctx.lineWidth = 6 * sf;
-      ctx.shadowColor = style.accent;
-      ctx.shadowBlur = 18 * sf;
-      ctx.stroke();
+      if (colored && projetado) {
+        // a cor do último trecho continua até o personagem
+        const ultimo = Math.min(Math.max(upto - 1, 0), track.pts.length - 2);
+        strokeColored(ctx, projetado, percorridos, colored, 6 * sf, 1, {
+          x: cur.x,
+          y: cur.y,
+          band: colored.bands[ultimo],
+        });
+      } else {
+        ctx.strokeStyle = style.accent;
+        ctx.lineWidth = 6 * sf;
+        ctx.shadowColor = style.accent;
+        ctx.shadowBlur = 18 * sf;
+        ctx.stroke();
+      }
       ctx.restore();
+    }
+
+    // --- marcas de km ---
+    if (input.marks && input.marks.length > 0 && track.pts.length > 1) {
+      drawKmMarks(ctx, track.pts, toXY, input.marks, sf, width, height);
     }
 
     // --- paradas do percurso ---
@@ -514,6 +614,9 @@ export class SceneRenderer {
     // --- overlays ---
     if (style.showProgress) drawProgress(ctx, width, height, input, sf);
     if (style.showHud) drawHud(ctx, width, input, sample, sf, onDark, headerBottom);
+    if (colored && style.showRoute) {
+      drawLegend(ctx, width, height, colored, sf, style.showProgress);
+    }
     if (style.showSummary) drawSummary(ctx, width, height, input, onDark, sf);
 
     // atribuição obrigatória dos mapas gratuitos
@@ -1301,6 +1404,25 @@ function drawSummary(
  * confundia: o HUD parecia mostrar o tempo da pedalada e mostrava a duração do
  * clipe — que a barra de progresso já representa.
  */
+/**
+ * Horas do arquivo, **mas só se estiverem alinhadas ao traçado desenhado**.
+ *
+ * O traçado de desenho é uma redução do arquivo (teto de 12.000 pontos), e um
+ * GPX de 50.000 pontos vira 10.001. Se as horas viessem do arquivo inteiro, os
+ * índices apontariam para pontos que não estão na tela — medido antes da
+ * correção: o relógio lia `1:23:20` na metade de uma pedalada de 13:53:19, cinco
+ * vezes menos do que devia. Como o renderizador não tem como adivinhar de qual
+ * traçado o vetor veio, ele confere o tamanho: em vez de um número errado,
+ * mostra "sem arquivo".
+ *
+ * O app manda o vetor do traçado desenhado (mesmos pontos, com as mesmas horas).
+ */
+function horasAlinhadas(input: FrameState, track: Track): number[] | null {
+  const times = input.times;
+  if (!times || times.length !== track.pts.length) return null;
+  return times;
+}
+
 function hudClock(
   track: Track,
   t: number,
@@ -1341,7 +1463,8 @@ function drawHud(
   onDark: boolean,
   headerBottom: number,
 ) {
-  const { track, t, style, duration, times, cardSeconds } = input;
+  const { track, t, style, duration, cardSeconds } = input;
+  const times = horasAlinhadas(input, track);
   if (track.pts.length === 0) return;
 
   const relogio = hudClock(track, t, duration, times, cardSeconds);
@@ -1514,6 +1637,207 @@ function drawProgress(
   );
   ctx.textAlign = "right";
   ctx.fillText(`${Math.round(t * 100)}%`, pad + w, y - 8 * sf);
+}
+
+/* ------------------------------------------------------------------ */
+/* Traçado colorido e marcas de km                                     */
+/* ------------------------------------------------------------------ */
+
+/** Pontos visíveis já projetados na tela, em vetores reaproveitados. */
+type PontoProjetado = { x: Float64Array; y: Float64Array };
+
+/** Monta o caminho de uma lista de trechos (terminando opcionalmente em `ate`). */
+function pathOf(
+  ctx: CanvasRenderingContext2D,
+  pts: LatLng[],
+  toXY: (p: LatLng) => { x: number; y: number },
+  runs: IndexRange[],
+  ate?: { x: number; y: number },
+) {
+  ctx.beginPath();
+  let aberto = false;
+  for (const [ini, fim] of runs) {
+    const a = toXY(pts[ini]);
+    ctx.moveTo(a.x, a.y);
+    aberto = true;
+    for (let i = ini + 1; i <= fim; i++) {
+      const { x, y } = toXY(pts[i]);
+      ctx.lineTo(x, y);
+    }
+  }
+  if (ate) {
+    if (aberto) ctx.lineTo(ate.x, ate.y);
+    else ctx.moveTo(ate.x, ate.y);
+  }
+}
+
+/**
+ * Desenha o traçado colorido — **uma passada por faixa de cor**.
+ *
+ * O caminho de cada faixa é montado com os segmentos que caíram nela e vai
+ * para a tela num único `stroke()`. São nove traços (oito faixas + o cinza dos
+ * pontos sem dado) no lugar de um por segmento — a diferença entre um vídeo
+ * que grava e um que engasga.
+ */
+function strokeColored(
+  ctx: CanvasRenderingContext2D,
+  proj: PontoProjetado,
+  runs: IndexRange[],
+  colored: ColoredRoute,
+  width: number,
+  alpha: number,
+  tail?: { x: number; y: number; band: number },
+) {
+  ctx.save();
+  ctx.lineWidth = width;
+  ctx.globalAlpha = alpha;
+  for (let faixa = -1; faixa < colored.colors.length; faixa++) {
+    ctx.beginPath();
+    let caneta = false;
+    for (const [ini, fim] of runs) {
+      caneta = false;
+      for (let i = ini; i < fim; i++) {
+        const b = colored.bands[i];
+        const bate = faixa < 0 ? !Number.isFinite(b) : b === faixa;
+        if (!bate) {
+          caneta = false;
+          continue;
+        }
+        if (!caneta) {
+          ctx.moveTo(proj.x[i], proj.y[i]);
+          caneta = true;
+        }
+        ctx.lineTo(proj.x[i + 1], proj.y[i + 1]);
+      }
+    }
+    if (tail) {
+      const tb = Number.isFinite(tail.band) ? tail.band : -1;
+      if (tb === faixa && runs.length > 0) {
+        const fim = runs[runs.length - 1][1];
+        ctx.moveTo(proj.x[fim], proj.y[fim]);
+        ctx.lineTo(tail.x, tail.y);
+      }
+    }
+    ctx.strokeStyle = faixa < 0 ? NEUTRAL_COLOR : colored.colors[faixa];
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+/**
+ * Marcas de km: um ponto no traçado e, quando cabe, o número ao lado.
+ *
+ * O texto só sai nas marcas redondas (ou quando o passo já é largo): numa rota
+ * longa, um número por km seria uma fileira de etiquetas cobrindo o mapa.
+ */
+function drawKmMarks(
+  ctx: CanvasRenderingContext2D,
+  pts: LatLng[],
+  toXY: (p: LatLng) => { x: number; y: number },
+  marks: KmMark[],
+  sf: number,
+  width: number,
+  height: number,
+) {
+  const fs = Math.round(Math.max(9, 10.5 * sf));
+  for (const m of marks) {
+    const p = pts[m.index];
+    if (!p) continue;
+    const { x, y } = toXY(p);
+    if (x < -40 || y < -40 || x > width + 40 || y > height + 40) continue;
+
+    const r = (m.major ? 5.4 : 4.2) * sf;
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.fillStyle = "rgba(9,12,20,0.92)";
+    ctx.fill();
+    ctx.lineWidth = 1.7 * sf;
+    ctx.strokeStyle = m.major ? "#ffffff" : "rgba(255,255,255,0.72)";
+    ctx.stroke();
+
+    if (!m.label) continue;
+    const txt = `${m.km} km`;
+    ctx.font = `700 ${fs}px "Inter","Segoe UI",system-ui,sans-serif`;
+    const tw = ctx.measureText(txt).width;
+    const bw = tw + 10 * sf;
+    const bh = 16 * sf;
+    const bx = x + r + 4 * sf;
+    const by = y - bh / 2;
+    roundRect(ctx, bx, by, bw, bh, 8 * sf);
+    ctx.fillStyle = "rgba(9,12,20,0.86)";
+    ctx.fill();
+    ctx.fillStyle = "rgba(255,255,255,0.92)";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(txt, bx + bw / 2, y + 0.5 * sf);
+  }
+}
+
+/**
+ * Legenda do traçado colorido.
+ *
+ * Sem ela a cor não significa nada: a faixa não diz se é 12 ou 40 km/h. Fica no
+ * canto de baixo, acima da barra de progresso, com os dois extremos escritos e
+ * a faixa neutra explicada quando existe.
+ */
+function drawLegend(
+  ctx: CanvasRenderingContext2D,
+  width: number,
+  height: number,
+  colored: ColoredRoute,
+  sf: number,
+  lifted: boolean,
+) {
+  const pad = 30 * sf;
+  const chipW = 22 * sf;
+  const gap = 2 * sf;
+  const chips = colored.colors.length;
+  const innerW = chips * chipW + (chips - 1) * gap;
+  const placW = innerW + 16 * sf;
+  const placH = 44 * sf;
+  const px = pad;
+  const py = height - pad - (lifted ? 34 * sf : 0) - placH - 8 * sf;
+  if (px + placW > width) return;
+
+  ctx.save();
+  roundRect(ctx, px, py, placW, placH, 9 * sf);
+  ctx.fillStyle = "rgba(9,12,20,0.72)";
+  ctx.fill();
+
+  ctx.font = `700 ${Math.round(10 * sf)}px "Inter","Segoe UI",system-ui,sans-serif`;
+  ctx.fillStyle = "rgba(255,255,255,0.72)";
+  ctx.textAlign = "left";
+  ctx.textBaseline = "alphabetic";
+  ctx.fillText(`${colored.title} ${colored.unit}`, px + 8 * sf, py + 14 * sf);
+
+  // o cinza não é uma faixa da escala: precisa ser dito, senão parece defeito
+  if (colored.bands.some((b) => !Number.isFinite(b))) {
+    const rotulo = "sem dado";
+    ctx.font = `600 ${Math.round(9.5 * sf)}px "Inter","Segoe UI",system-ui,sans-serif`;
+    const lw = ctx.measureText(rotulo).width;
+    const cx = px + placW - 8 * sf - lw - 13 * sf;
+    roundRect(ctx, cx, py + 6 * sf, 9 * sf, 9 * sf, 2.5 * sf);
+    ctx.fillStyle = NEUTRAL_COLOR;
+    ctx.fill();
+    ctx.fillStyle = "rgba(255,255,255,0.6)";
+    ctx.fillText(rotulo, cx + 13 * sf, py + 14 * sf);
+  }
+
+  for (let i = 0; i < chips; i++) {
+    const x = px + 8 * sf + i * (chipW + gap);
+    roundRect(ctx, x, py + 19 * sf, chipW, 9 * sf, 2.5 * sf);
+    ctx.fillStyle = colored.colors[i];
+    ctx.fill();
+  }
+
+  ctx.font = `700 ${Math.round(10.5 * sf)}px "Inter","Segoe UI",system-ui,sans-serif`;
+  const fy = py + placH - 6 * sf;
+  ctx.fillStyle = "rgba(255,255,255,0.92)";
+  ctx.textAlign = "left";
+  ctx.fillText(colored.lowLabel, px + 8 * sf, fy);
+  ctx.textAlign = "right";
+  ctx.fillText(colored.highLabel, px + placW - 8 * sf, fy);
+  ctx.restore();
 }
 
 /* ------------------------------------------------------------------ */

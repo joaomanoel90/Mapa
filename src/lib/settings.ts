@@ -1,5 +1,6 @@
 import { BASEMAPS, type BasemapId } from "./tiles";
 import type { CameraMode } from "./renderer";
+import type { ColorMode } from "./coloring";
 import type { Profile } from "./routing";
 
 /**
@@ -51,6 +52,15 @@ export type Settings = {
   /** painel de números no vídeo (velocidade, andamento, distância, relógio) */
   showHud: boolean;
   /**
+   * Cor da linha: sólida (o de sempre), por velocidade ou por inclinação.
+   * Depende de o arquivo ter hora/elevação — sem o dado a linha sai cinza.
+   */
+  colorBy: ColorMode;
+  /** marcas de km ao longo do traçado */
+  showKmMarks: boolean;
+  /** abertura sobrevoando a região + aproximação nas paradas */
+  cinematic: boolean;
+  /**
    * Os números da cartela são **digitados**, não medidos.
    *
    * O arquivo de GPS é a sugestão (o painel mostra o valor do arquivo como
@@ -97,6 +107,9 @@ export const DEFAULT_SETTINGS: Settings = {
   showProgress: true,
   endCard: true,
   showHud: true,
+  colorBy: "solid",
+  showKmMarks: false,
+  cinematic: false,
   cardDistance: "",
   cardElevation: "",
   cardTime: "",
@@ -130,6 +143,11 @@ export function sanitizeSettings(raw: Partial<Settings>): Partial<Settings> {
   if (typeof out.showStopCounter !== "boolean") delete out.showStopCounter;
   if (typeof out.endCard !== "boolean") delete out.endCard;
   if (typeof out.showHud !== "boolean") delete out.showHud;
+  if (out.colorBy !== "solid" && out.colorBy !== "speed" && out.colorBy !== "slope") {
+    delete out.colorBy;
+  }
+  if (typeof out.showKmMarks !== "boolean") delete out.showKmMarks;
+  if (typeof out.cinematic !== "boolean") delete out.cinematic;
   for (const key of ["cardDistance", "cardElevation", "cardTime", "cardNote"] as const) {
     if (typeof out[key] !== "string") delete out[key];
   }

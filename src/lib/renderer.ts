@@ -13,6 +13,7 @@ import {
 import type { EndCard } from "./stats";
 import { elapsedAt, formatClock, speedAt } from "./hud";
 import { cameraTarget, STOP_BOOST, type CinematicConfig } from "./camera";
+import { routeEnd, timelineOr, type Timeline } from "./timeline";
 import { NEUTRAL_COLOR, type ColoredRoute } from "./coloring";
 import type { KmMark } from "./km-marks";
 import { countPassed } from "./passages";
@@ -78,9 +79,17 @@ export type FrameState = {
   stops: Poi[];
   /** locais marcados de partida/chegada (null = letras A/B) */
   endpoints: Endpoints;
-  /** segundos desde o início (para efeitos) */
+  /** segundos desde o início do **vídeo** (para efeitos) */
   elapsed: number;
   duration: number;
+  /**
+   * As janelas do vídeo: voo → percurso → cartela.
+   *
+   * Sem ele, o vídeo inteiro é percurso e a cartela reserva a sua fatia no fim
+   * (o comportamento antigo). Com ele, quem manda no relógio é quem exporta:
+   * `t` continua sendo o progresso do percurso, e `elapsed` o instante do vídeo.
+   */
+  timeline?: Timeline | null;
   /** cartela final (números digitados + linha de baixo) — null quando não há nada */
   summary: EndCard | null;
   /**
@@ -443,6 +452,7 @@ export class SceneRenderer {
     const maxZoom = bm.maxZoom;
 
     // --- câmera (alvo puro + suavização) ---
+    const tl = timelineOr(input.timeline, input.duration);
     const target = cameraTarget({
       track,
       t,
@@ -452,6 +462,8 @@ export class SceneRenderer {
       maxZoom,
       elapsed: input.elapsed,
       duration: input.duration,
+      routeSeconds: tl.percurso,
+      stopPos: (ts) => sampleTrack(track, ts).pos,
     });
 
     if (!this.cam) this.cam = { lat: target.lat, lng: target.lng, zoom: target.zoom };
@@ -651,7 +663,7 @@ export class SceneRenderer {
         sf,
         input.endpoints.a,
         fotoDoLocal(input.endpoints.a),
-        photoWindowAlpha(t * input.duration + PHOTO_FADE_IN_S),
+        photoWindowAlpha(input.elapsed - tl.voo + PHOTO_FADE_IN_S),
         cartao ? retanguloDaCartela(cartao) : null,
       );
       drawPin(
@@ -662,7 +674,7 @@ export class SceneRenderer {
         sf,
         input.endpoints.b,
         fotoDoLocal(input.endpoints.b),
-        photoWindowAlpha((1 - t) * input.duration + PHOTO_FADE_IN_S),
+        photoWindowAlpha(routeEnd(tl) - input.elapsed + PHOTO_FADE_IN_S),
         cartao ? retanguloDaCartela(cartao) : null,
       );
     }
@@ -1225,6 +1237,8 @@ function drawStops(
   sf: number,
 ) {
   const { track, t, stops, style } = input;
+  // a janela da foto da parada é medida em segundos de **percurso**
+  const tl = timelineOr(input.timeline, input.duration);
   const popMeters = Math.max(28, Math.min(190, track.total * 0.014));
 
   for (const stop of stops) {
@@ -1351,7 +1365,7 @@ function drawStops(
     const foto = stop.photo ? (input.photos?.get(stop.photo) ?? null) : null;
     // a janela da foto começa na passagem mais recente: na volta, ela aparece
     // de novo, mesmo que já tenha aparecido na ida
-    const desde = ultima === null ? -1 : (t - ultima) * input.duration;
+    const desde = ultima === null ? -1 : (t - ultima) * tl.percurso;
     const fotoAlpha = foto ? photoWindowAlpha(desde) : 0;
     const ladoFoto = 78 * sf;
     // sem foto pronta, a etiqueta não sobe: não pode ficar um buraco no lugar dela
@@ -1619,8 +1633,7 @@ function drawTitle(
  * Contados a partir do fim do vídeo: o personagem chega junto com a cartela
  * ficando legível, e ela continua até o último quadro.
  */
-const SUMMARY_HOLD_S = 4.2;
-const SUMMARY_FADE_S = 0.6;
+const SUMMARY_FADE_S = 0.6; // a cartela entra em meio segundo
 
 /**
  * Cartela final: distância, elevação e tempo do percurso.
@@ -1716,13 +1729,18 @@ export function summaryBox(
   const card = input.summary;
   if (!card || (card.tiles.length === 0 && !card.note)) return null;
 
-  const dur = Math.max(1, input.duration);
-  // percentual do vídeo em que a cartela começa (limitado a 45% em clipes curtos)
-  const hold = Math.min(0.45, SUMMARY_HOLD_S / dur);
-  const fade = Math.min(hold, SUMMARY_FADE_S / dur);
-  const inicio = 1 - hold;
-  if (input.t < inicio) return null;
-  const alpha = fade > 0 ? Math.min(1, Math.max(0, (input.t - inicio) / fade)) : 1;
+  /*
+   * A cartela entra quando o **percurso termina** — não a uma fatia do fim do
+   * vídeo. Antes ela começava em 79% do trajeto (4,2 s antes do fim) e cobria o
+   * fim do percurso: o usuário viu isso como "cartela aparecendo muito antes".
+   */
+  const tl = timelineOr(input.timeline, input.duration);
+  const inicio = routeEnd(tl);
+  if (input.elapsed < inicio) return null;
+  const alpha =
+    SUMMARY_FADE_S > 0
+      ? Math.min(1, Math.max(0, (input.elapsed - inicio) / SUMMARY_FADE_S))
+      : 1;
 
   const pad = 34 * sf;
   const gap = 34 * sf;

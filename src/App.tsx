@@ -18,6 +18,7 @@ import { timesOf } from "./lib/hud";
 import { colorizeRoute, dataCoverage } from "./lib/coloring";
 import { kmMarks } from "./lib/km-marks";
 import { parseDuration } from "./lib/duration";
+import { buildTimeline, routeProgress } from "./lib/timeline";
 import {
   buildTrack,
   formatDistance,
@@ -480,6 +481,22 @@ function App() {
     ],
   );
 
+  /**
+   * As janelas do vídeo: voo → percurso → cartela.
+   *
+   * O voo só existe na câmera "Seguir" (no "Rota toda" o enquadramento já é o
+   * da região) e a cartela só reserva tempo quando há números para mostrar.
+   */
+  const linhaDoTempo = useMemo(
+    () =>
+      buildTimeline(settings.duration, {
+        voo: settings.cinematic && settings.cameraMode === "follow",
+        cartela: settings.endCard && cartela !== null,
+      }),
+    [settings.duration, settings.cinematic, settings.cameraMode, settings.endCard, cartela],
+  );
+
+
   /* reinicia a animação quando a rota muda */
   /**
    * Chave estável da rota.
@@ -505,9 +522,11 @@ function App() {
     const from = progressRef.current >= 1 ? 0 : progressRef.current;
     let raf = 0;
     const tick = (now: number) => {
-      const elapsed = (now - startedAt) / 1000;
-      const t = from + elapsed / settings.duration;
-      if (t >= 1) {
+      // `progress` (e o mapa) fala em progresso do percurso; quem manda é o
+      // relógio do vídeo, porque é ele que a exportação usa
+      const seg = from * settings.duration + (now - startedAt) / 1000;
+      const t = routeProgress(linhaDoTempo, seg);
+      if (seg >= settings.duration) {
         setProgress(1);
         progressRef.current = 1;
         setPlaying(false);
@@ -519,7 +538,7 @@ function App() {
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
-  }, [playing, hasRoute, settings.duration, routeKey]);
+  }, [playing, hasRoute, settings.duration, routeKey, linhaDoTempo]);
 
   /* ---------- interações com o mapa ---------- */
 
@@ -963,6 +982,7 @@ function App() {
           endpoints,
           elapsed,
           duration: settings.duration,
+          timeline: linhaDoTempo,
           summary: cartela,
           times: horas,
           cardSeconds: tempoCartela,
@@ -1047,7 +1067,10 @@ function App() {
         shouldCancel: () => cancelRef.current,
         draw: (c: CanvasRenderingContext2D, t: number, elapsed: number) => {
           void c;
-          paint(t, elapsed);
+          // o gravador fala em tempo de vídeo; o desenho, em progresso do percurso
+          const seg = t * settings.duration;
+          void elapsed;
+          paint(routeProgress(linhaDoTempo, seg), seg);
         },
       };
 
@@ -1075,7 +1098,17 @@ function App() {
       setExportMsg(err instanceof Error ? err.message : "Erro desconhecido na gravação.");
       setPhase("error");
     }
-  }, [hasRoute, settings, track, aspect, character, activeFormat, pois, endpoints]);
+  }, [
+    hasRoute,
+    settings,
+    track,
+    aspect,
+    character,
+    activeFormat,
+    pois,
+    endpoints,
+    linhaDoTempo,
+  ]);
 
   const closeModal = useCallback(() => {
     cancelRef.current = true;

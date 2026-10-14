@@ -387,6 +387,25 @@ literal: "poderiam ficar igual os pontos de parada"). A letra A/B também passou
 usar a cor do lugar (verde na partida, vermelho na chegada), em vez de branca
 sobre um pino escuro.
 
+**O vídeo tem três tempos: voo → percurso → cartela.** Antes havia um só relógio
+(`t` era ao mesmo tempo "quanto do vídeo passou" e "quanto do percurso foi
+feito"), e disso saíam dois defeitos que o usuário viu: o personagem **corria
+durante o voo de abertura** (num vídeo de 20 s já tinha andado 13% do trajeto
+antes de a câmera pousar) e a **cartela final entrava em 79% do percurso**,
+cobrindo o fim do trajeto. Agora a câmera sobrevoa e **pousa na partida** com o
+personagem parado (`routeProgress` só sai de zero no fim do voo), o percurso
+ocupa o meio do vídeo e a cartela entra quando o percurso **termina**. O percurso
+fica com pelo menos 40% do vídeo: em clipe curto, voo e cartela encolhem juntos.
+(`src/lib/timeline.ts`)
+
+**Nas paradas, a câmera vai até a parada.** No quadro estreito (9:16) a parada
+saía pela borda: a câmera acompanhava o personagem e a parada ficava deslocada
+(um zoom de aproximação só piorava, porque o quadro já é apertado). Agora, na
+janela da parada (~1,6 s de percurso de cada lado, a mesma da foto), a câmera
+**desloca até a parada** e volta — mais o zoom de ênfase. Medido em 9:16
+(720×1280, zoom 17) no momento da passagem: o pino da parada fica a **53 px** do
+centro, contra 135 px antes.
+
 **O pino com foto mostra a foto dentro dele o trajeto inteiro.** A regra antiga
 dizia que "a foto ocupa o lugar do emoji" — mas a foto grande é desenhada
 **acima** do pino, e só nos segundos da largada e da chegada: no resto do vídeo o
@@ -601,7 +620,7 @@ ou cortados.
 
 ```bash
 npm run typecheck  # tsc --noEmit
-npm test           # Vitest (536 casos)
+npm test           # Vitest (550 casos)
 npm run check:dist # o build saiu autocontido e sem /src/?
 ```
 

@@ -218,6 +218,29 @@ function liberar(f: Fonte) {
   }
 }
 
+/**
+ * Todas as fotos que o vídeo pode desenhar, sem repetição.
+ *
+ * Existe porque essa lista já foi montada à mão no app, e a mão esqueceu as
+ * fotos de partida e chegada: elas ficavam fora do cache, o desenho pedia a
+ * imagem, recebia `null` — e a foto nunca aparecia no vídeo, enquanto as das
+ * paradas apareciam normalmente. Uma função só, testada, evita o esquecimento.
+ */
+export function photoSources(
+  ...listas: (string | null | undefined)[][]
+): string[] {
+  const vistas = new Set<string>();
+  const out: string[] = [];
+  for (const lista of listas) {
+    for (const src of lista) {
+      if (!src || vistas.has(src)) continue;
+      vistas.add(src);
+      out.push(src);
+    }
+  }
+  return out;
+}
+
 /* ------------------------------------------------------------------ */
 /* Cache de fotos prontas                                              */
 /* ------------------------------------------------------------------ */

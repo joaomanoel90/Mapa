@@ -978,6 +978,40 @@ describe("foto da partida e da chegada", () => {
     expect(fim.imagens.length).toBe(1);
   });
 
+  it("a foto da partida já está na tela no primeiro quadro", () => {
+    // a janela das paradas (que entram e saem) deixaria a largada invisível no
+    // quadro zero — justamente o quadro que abre o vídeo
+    const { ctx, imagens } = fakeCtx();
+    desenhar(ctx, {
+      ...estado(0, 14, null),
+      endpoints: { a: LOCAL, b: null },
+      photos: cacheComFoto,
+    });
+    expect(imagens.length).toBe(1);
+    expect(imagens[0].alpha).toBeCloseTo(1, 2);
+  });
+
+  it("a foto da chegada continua na tela no último quadro", () => {
+    const { ctx, imagens } = fakeCtx();
+    desenhar(ctx, {
+      ...estado(1, 14, null),
+      endpoints: { a: null, b: LOCAL },
+      photos: cacheComFoto,
+    });
+    expect(imagens.length).toBe(1);
+    expect(imagens[0].alpha).toBeCloseTo(1, 2);
+  });
+
+  it("a foto da partida sai depois de alguns segundos (não fica o vídeo todo)", () => {
+    const { ctx, imagens } = fakeCtx();
+    desenhar(ctx, {
+      ...estado(0.4, 14, null),
+      endpoints: { a: LOCAL, b: null },
+      photos: cacheComFoto,
+    });
+    expect(imagens.length).toBe(0);
+  });
+
   it("partida com foto não vira aviso no topo", () => {
     const { ctx, textos } = fakeCtx();
     desenhar(ctx, {

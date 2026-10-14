@@ -4,9 +4,11 @@ import {
   hasEndpointMarks,
   hasMark,
   hasText,
+  patchMark,
   mergeSharedEndpoints,
   sanitizeEndpoints,
   sanitizeMark,
+  type EndpointMark,
   type Endpoints,
 } from "./endpoints";
 
@@ -64,6 +66,64 @@ describe("sanear partida e chegada", () => {
     });
     expect(hasEndpointMarks(DEFAULT_ENDPOINTS)).toBe(false);
     expect(hasEndpointMarks({ a: { emoji: "🏠", label: "" }, b: null })).toBe(true);
+  });
+});
+
+describe("mexer em um campo sem perder os outros", () => {
+  it("digitar o nome de um local com foto NÃO apaga a foto", () => {
+    // este era o defeito: o editor remontava o local só com emoji e nome, e o
+    // campo da foto ficava de fora — a foto sumia ao digitar
+    const comFoto: EndpointMark = { emoji: "🏠", label: "Casa", photo: FOTO };
+    expect(patchMark(comFoto, { label: "Casa da praia" })).toEqual({
+      emoji: "🏠",
+      label: "Casa da praia",
+      photo: FOTO,
+    });
+    expect(patchMark(comFoto, { emoji: "🚩" })).toEqual({
+      emoji: "🚩",
+      label: "Casa",
+      photo: FOTO,
+    });
+  });
+
+  it("tocar num atalho troca emoji e nome e mantém a foto", () => {
+    const comFoto: EndpointMark = { emoji: "🏠", label: "Casa", photo: FOTO };
+    expect(patchMark(comFoto, { emoji: "💦", label: "Cachoeira" })).toEqual({
+      emoji: "💦",
+      label: "Cachoeira",
+      photo: FOTO,
+    });
+  });
+
+  it("a foto só sai quando é pedida", () => {
+    const comFoto: EndpointMark = { emoji: "🏠", label: "Casa", photo: FOTO };
+    expect(patchMark(comFoto, { photo: undefined })).toEqual({
+      emoji: "🏠",
+      label: "Casa",
+    });
+  });
+
+  it("um lugar que só tem foto sobrevive a uma mudança de nome", () => {
+    const soFoto: EndpointMark = { emoji: "", label: "", photo: FOTO };
+    expect(patchMark(soFoto, { label: "Casa" })).toEqual({
+      emoji: "",
+      label: "Casa",
+      photo: FOTO,
+    });
+  });
+
+  it("limpar um campo só não apaga o outro", () => {
+    // apagar o nome de um local ainda marcado com 🏠 mantém o emoji
+    expect(patchMark({ emoji: "🏠", label: "Casa" }, { label: "" })).toEqual({
+      emoji: "🏠",
+      label: "",
+    });
+  });
+
+  it("apagar tudo devolve vazio (para o pino voltar a ser A/B)", () => {
+    expect(patchMark({ emoji: "🏠", label: "Casa" }, { emoji: "", label: "" })).toBeNull();
+    expect(patchMark({ emoji: "", label: "", photo: FOTO }, { photo: undefined })).toBeNull();
+    expect(patchMark(null, { label: "Casa" })).toEqual({ emoji: "", label: "Casa" });
   });
 });
 

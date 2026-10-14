@@ -52,7 +52,7 @@ import {
 import { findCharacter } from "./lib/characters";
 import { SceneRenderer, tilesForAnimation, TILE_BUDGET } from "./lib/renderer";
 import { budgetAdvice, maxFollowZoom, tilesNeeded } from "./lib/map-budget";
-import { PhotoCache } from "./lib/photos";
+import { PhotoCache, photoSources } from "./lib/photos";
 import { mapPassages, passageTimes } from "./lib/passages";
 import { decodeSettings, loadEndpoints, saveEndpoints, saveSettings } from "./lib/persist";
 import {
@@ -368,6 +368,24 @@ function App() {
    * e das paradas, então é recalculado só quando uma das duas muda.
    */
   const passagens = useMemo(() => mapPassages(track, pois), [track, pois]);
+
+  /*
+   * Prepara as fotos assim que elas mudam.
+   *
+   * O desenho do vídeo é síncrono e só consulta o cache; sem esta preparação,
+   * a primeira imagem só ficaria pronta dentro da exportação (e a foto
+   * escolhida agora demoraria a aparecer). Também é aqui que as fotos de
+   * partida e chegada entram no cache — antes elas nunca entravam.
+   */
+  useEffect(() => {
+    void fotos.ready(
+      photoSources(
+        [settings.cardPhoto],
+        pois.map((p) => p.photo),
+        [endpoints.a?.photo, endpoints.b?.photo],
+      ),
+    );
+  }, [fotos, settings.cardPhoto, pois, endpoints]);
 
   /**
    * Maior zoom de acompanhamento que cabe no teto de blocos.
@@ -971,8 +989,17 @@ function App() {
        * As fotos são decodificadas antes do primeiro quadro: o desenho é
        * síncrono, e uma foto que chegasse no meio da gravação apareceria de
        * repente. Com prazo — foto corrompida não pode travar a exportação.
+       *
+       * A lista sai de `photoSources` (cartela + paradas + partida/chegada):
+       * montada à mão, ela já esqueceu as fotos de A e B uma vez.
        */
-      await fotos.ready([settings.cardPhoto, ...stops.map((p) => p.photo)]);
+      await fotos.ready(
+        photoSources(
+          [settings.cardPhoto],
+          stops.map((p) => p.photo),
+          [endpoints.a?.photo, endpoints.b?.photo],
+        ),
+      );
 
       // mostra o mapa carregando no canvas (não fica uma tela preta)
       paint(0, 0);

@@ -380,6 +380,11 @@ própria foto, e o quadrado parecia um papel colado no mapa. Virou **círculo**,
 com o anel na cor da parada e um contorno escuro fino para não sumir no mapa
 claro — a mesma ideia do pino e do avatar da cartela, que já eram redondos.
 
+**A foto da partida e a da chegada ficam nas pontas.** A da largada já está na
+tela no primeiro quadro e a da chegada continua no último — a janela das
+paradas, que entram e depois saem, deixaria as duas invisíveis justamente ali,
+nos quadros que abrem e fecham o vídeo.
+
 **O recorte continua quadrado e centralizado** nas duas: uma foto deitada perde
 as laterais (não vira um retângulo de altura estranha no meio do mapa) e o
 assunto fica no meio. A etiqueta do nome **sobe** para dar lugar à foto em vez de
@@ -398,6 +403,16 @@ ficar por baixo dela.
 - **A foto não entra no link compartilhado**, e o link **não apaga** a sua: 640 px
   viram ~70 KB de texto, e um link com isso não passa por mensageiro nenhum. Quem
   abre o link vê a mesma cena, com a foto que já tinha.
+- **As fotos são carregadas por uma lista só** (`photoSources`), que junta
+  cartela, paradas e partida/chegada. Montada à mão, essa lista já esqueceu as
+  fotos de A e B: elas ficavam fora do cache, o desenho recebia `null` e a foto
+  **nunca** aparecia no vídeo — enquanto as das paradas apareciam normalmente. É
+  o tipo de defeito que só se vê com duas telas lado a lado, então o remédio é
+  não ter duas listas.
+- **Mexer no emoji ou no nome não apaga a foto.** O editor de partida/chegada
+  remontava o local só com emoji e nome, e escrever o nome (ou tocar num atalho)
+  apagava a foto escolhida, inclusive do pino no mapa. Agora toda mudança passa
+  por `patchMark`, que só troca o campo pedido.
 
 **Quem tem foto não vira aviso no topo.** O círculo com a foto já anuncia o lugar
 (e o nome dele está escrito embaixo); escrever de novo no topo seria repetir a
@@ -558,7 +573,7 @@ ou cortados.
 
 ```bash
 npm run typecheck  # tsc --noEmit
-npm test           # Vitest (508 casos)
+npm test           # Vitest (522 casos)
 npm run check:dist # o build saiu autocontido e sem /src/?
 ```
 

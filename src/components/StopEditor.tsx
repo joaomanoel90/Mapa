@@ -10,6 +10,7 @@ import {
 } from "../lib/pois";
 import { formatCoords, formatDistance, type Track } from "../lib/geo";
 import { cn } from "../utils/cn";
+import PhotoField from "./PhotoField";
 
 const SWATCHES = [
   "#fde047",
@@ -388,6 +389,12 @@ export default function StopEditor({
                 </div>
 
                 <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                  <PhotoField
+                    compacto
+                    valor={p.photo ?? ""}
+                    onValor={(v) => onUpdate(p.id, { photo: v || undefined })}
+                    ariaLabel={`Foto de ${p.label || "parada"}`}
+                  />
                   {SWATCHES.map((c) => (
                     <button
                       key={c}

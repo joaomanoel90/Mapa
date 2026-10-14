@@ -90,6 +90,20 @@ describe("sanitizeSettings", () => {
     expect(DEFAULT_SETTINGS.cinematic).toBe(false);
   });
 
+  it("só aceita foto do projeto como data URL de imagem dentro do teto", () => {
+    const foto = "data:image/jpeg;base64,AAAA";
+    expect(sanitizeSettings(raw({ cardPhoto: foto })).cardPhoto).toBe(foto);
+    // URL externa, svg e texto não passam: a foto é desenhada no canvas e
+    // guardada no localStorage, e nenhum dos dois aceita qualquer coisa
+    expect(sanitizeSettings(raw({ cardPhoto: "https://x.com/a.jpg" })).cardPhoto).toBeUndefined();
+    expect(sanitizeSettings(raw({ cardPhoto: "data:image/svg+xml;base64,AA" })).cardPhoto).toBeUndefined();
+    expect(sanitizeSettings(raw({ cardPhoto: 42 })).cardPhoto).toBeUndefined();
+  });
+
+  it("nasce sem foto do projeto", () => {
+    expect(DEFAULT_SETTINGS.cardPhoto).toBe("");
+  });
+
   it("não deixa passar lixo vindo de JSON corrompido", () => {
     const out = sanitizeSettings(
       raw({ basemap: 7, aspect: [], duration: {}, profile: [], followZoom: "x" }),

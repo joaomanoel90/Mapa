@@ -15,6 +15,7 @@ import { elapsedAt, formatClock, speedAt } from "./hud";
 import { cameraTarget, STOP_BOOST, type CinematicConfig } from "./camera";
 import { NEUTRAL_COLOR, type ColoredRoute } from "./coloring";
 import type { KmMark } from "./km-marks";
+import { coverSquare, type PhotoLookup } from "./photos";
 import {
   TILE_SIZE,
   boundsOf,
@@ -104,6 +105,16 @@ export type FrameState = {
   colored?: ColoredRoute | null;
   /** marcas de km ao longo do traçado */
   marks?: KmMark[] | null;
+  /**
+   * Fotos já decodificadas (paradas e cartela).
+   *
+   * O desenho é síncrono e roda 30 vezes por segundo, então ele só **consulta**:
+   * foto que ainda não ficou pronta não aparece naquele quadro, e o quadro
+   * seguinte a mostra. Nada de esperar imagem dentro do laço.
+   */
+  photos?: PhotoLookup | null;
+  /** foto do projeto (data URL) — aparece no alto da cartela final */
+  cardPhoto?: string | null;
 };
 
 /* ------------------------------------------------------------------ */
@@ -654,6 +665,11 @@ function drawAttribution(
 /* Desenhos                                                            */
 /* ------------------------------------------------------------------ */
 
+/** Quanto tempo (em segundos de vídeo) a foto da parada fica na tela. */
+const PHOTO_HOLD_S = 2.6;
+const PHOTO_FADE_IN_S = 0.4;
+const PHOTO_FADE_OUT_S = 0.7;
+
 const EMOJI_FONT =
   '"Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji","Twemoji Mozilla",sans-serif';
 
@@ -1060,9 +1076,45 @@ function drawStops(
     ctx.textBaseline = "middle";
     ctx.fillText(stop.emoji, 0, r * 0.05);
 
+    /*
+     * Foto da parada (polaroide) e etiqueta com o nome.
+     *
+     * A foto entra junto com o "pipoco" do pino e sai depois de um tempo —
+     * medida em **segundos de vídeo**, e não em metros como o pino. Em metros
+     * ela ficaria ilegível justamente nas rotas longas: 1,3 km de foto numa
+     * travessia de 435 km são 0,04 s de vídeo. Em segundos, a foto aparece do
+     * mesmo jeito em qualquer rota — e a pré-visualização e a gravação
+     * continuam idênticas, porque as duas usam o mesmo `t`.
+     */
+    const foto = !upcoming && stop.photo ? (input.photos?.get(stop.photo) ?? null) : null;
+    const desde = (t - stop.t) * input.duration;
+    const fotoEntra = Math.min(1, Math.max(0, desde / PHOTO_FADE_IN_S));
+    const fotoSai =
+      1 -
+      Math.min(
+        1,
+        Math.max(0, (desde - (PHOTO_HOLD_S - PHOTO_FADE_OUT_S)) / PHOTO_FADE_OUT_S),
+      );
+    const fotoAlpha = foto ? Math.min(fotoEntra, fotoSai) : 0;
+    const ladoFoto = 78 * sf;
+    // sem foto pronta, a etiqueta não sobe: não pode ficar um buraco no lugar dela
+    const alturaFoto = foto ? (ladoFoto + 10 * sf) * fotoAlpha : 0;
+    const rotuloVisivel = !upcoming && style.showStopLabels && p > 0.26;
+    const la = rotuloVisivel ? Math.min(1, (p - 0.26) / 0.38) : 0;
+    const baseRotulo = -r - 33 * sf - 8 * sf + (1 - la) * 9 * sf;
+
+    if (foto && fotoAlpha > 0.01) {
+      // o alfa é calculado, e não lido do contexto: ler `ctx.globalAlpha` de
+      // volta devolveria o valor do pino em vez do que está valendo de fato
+      const alfaPino = Math.min(1, 0.3 + p * 1.2);
+      ctx.save();
+      ctx.globalAlpha = alfaPino * fotoAlpha;
+      drawPolaroid(ctx, foto, 0, baseRotulo - alturaFoto - 6 * sf, ladoFoto, stop.color, sf);
+      ctx.restore();
+    }
+
     // etiqueta com nome + distância desde a partida
-    if (!upcoming && style.showStopLabels && p > 0.26) {
-      const la = Math.min(1, (p - 0.26) / 0.38);
+    if (rotuloVisivel) {
       ctx.globalAlpha = Math.min(1, 0.3 + p * 1.2) * la;
       const name = stop.label.trim() || "Parada";
       const km = (stop.t * track.total) / 1000;
@@ -1076,7 +1128,7 @@ function drawStops(
       const sw = ctx.measureText(sub).width;
       const bw = Math.max(nw, sw) + 20 * sf;
       const bh = 33 * sf;
-      const by = -r - bh - 8 * sf + (1 - la) * 9 * sf;
+      const by = baseRotulo - alturaFoto;
 
       roundRect(ctx, -bw / 2, by, bw, bh, 9 * sf);
       ctx.fillStyle = "rgba(9,12,20,0.92)";
@@ -1107,6 +1159,61 @@ function drawStops(
 
     ctx.restore();
   }
+}
+
+/**
+ * Foto da parada em polaroide: quadrado com moldura clara, leve rotação e a
+ * borda na cor da parada — a mesma cor do pino e da etiqueta.
+ *
+ * O recorte é quadrado e centralizado (`coverSquare`): a foto preenche o
+ * quadrado sem esticar, e uma foto deitada perde as pontas laterais em vez de
+ * virar um retângulo de altura estranha no meio do mapa.
+ */
+function drawPolaroid(
+  ctx: CanvasRenderingContext2D,
+  img: { width: number; height: number } & CanvasImageSource,
+  cx: number,
+  bottomY: number,
+  lado: number,
+  color: string,
+  sf: number,
+) {
+  const moldura = 5 * sf;
+  const w = lado + moldura * 2;
+  const h = lado + moldura * 2;
+  const top = bottomY - h;
+
+  ctx.save();
+  ctx.translate(cx, top + h / 2);
+  ctx.rotate(-3 * (Math.PI / 180));
+
+  ctx.shadowColor = "rgba(0,0,0,0.5)";
+  ctx.shadowBlur = 14 * sf;
+  ctx.shadowOffsetY = 4 * sf;
+  roundRect(ctx, -w / 2, -h / 2, w, h, 3 * sf);
+  ctx.fillStyle = "#ffffff";
+  ctx.fill();
+  ctx.shadowColor = "transparent";
+  ctx.shadowOffsetY = 0;
+
+  const { sx, sy, size } = coverSquare(img.width, img.height);
+  ctx.drawImage(
+    img as CanvasImageSource,
+    sx,
+    sy,
+    size,
+    size,
+    -lado / 2,
+    -h / 2 + moldura,
+    lado,
+    lado,
+  );
+
+  ctx.lineWidth = 1.8 * sf;
+  ctx.strokeStyle = color;
+  roundRect(ctx, -w / 2, -h / 2, w, h, 3 * sf);
+  ctx.stroke();
+  ctx.restore();
 }
 
 function drawTitle(
@@ -1248,6 +1355,47 @@ const SUMMARY_FADE_S = 0.6;
  * textos vêm de um campo livre, então o corpo da letra encolhe antes de o
  * excesso virar "…", e o texto nunca vaza da tela em retrato.
  */
+/**
+ * Foto do projeto em círculo, com um aro claro em volta.
+ *
+ * O recorte é quadrado e centralizado (o mesmo `coverSquare` da polaroide da
+ * parada), então uma foto deitada não vira um oval achatado: perde as laterais
+ * e mantém o assunto no meio.
+ */
+function drawAvatar(
+  ctx: CanvasRenderingContext2D,
+  img: { width: number; height: number } & CanvasImageSource,
+  cx: number,
+  cy: number,
+  raio: number,
+  onDark: boolean,
+  sf: number,
+) {
+  ctx.save();
+  // aro
+  ctx.beginPath();
+  ctx.arc(cx, cy, raio + 3 * sf, 0, Math.PI * 2);
+  ctx.fillStyle = onDark ? "rgba(255,255,255,0.14)" : "rgba(15,23,42,0.12)";
+  ctx.fill();
+
+  ctx.beginPath();
+  ctx.arc(cx, cy, raio, 0, Math.PI * 2);
+  ctx.clip();
+  const { sx, sy, size } = coverSquare(img.width, img.height);
+  ctx.drawImage(
+    img as CanvasImageSource,
+    sx,
+    sy,
+    size,
+    size,
+    cx - raio,
+    cy - raio,
+    raio * 2,
+    raio * 2,
+  );
+  ctx.restore();
+}
+
 function drawSummary(
   ctx: CanvasRenderingContext2D,
   width: number,
@@ -1338,8 +1486,20 @@ function drawSummary(
   ctx.font = fLabel(noteFs);
   const notaW = nota ? ctx.measureText(nota).width : 0;
 
+  /*
+   * Foto do projeto no alto da cartela, em círculo.
+   *
+   * O tamanho dela entra na conta da altura da caixa: sem isso o avatar
+   * empurraria os números para fora do painel.
+   */
+  const avatar =
+    input.cardPhoto && input.photos ? input.photos.get(input.cardPhoto) : null;
+  const ladoAvatar = Math.round(78 * sf);
+  const alturaAvatar = avatar ? ladoAvatar + 14 * sf : 0;
+
   const boxW = Math.min(maxW, Math.max(totalW, notaW) + pad * 2);
   const altura =
+    alturaAvatar +
     (colunas.length > 0 ? valorFs * 1.15 + labelFs * 1.35 : 0) +
     (nota ? noteFs * 1.5 : 0) +
     pad * 1.6;
@@ -1363,9 +1523,21 @@ function drawSummary(
   ctx.strokeStyle = onDark ? "rgba(255,255,255,0.14)" : "rgba(15,23,42,0.12)";
   ctx.stroke();
 
+  if (avatar) {
+    drawAvatar(
+      ctx,
+      avatar,
+      boxX + boxW / 2,
+      boxY + pad * 0.55 + ladoAvatar / 2,
+      ladoAvatar / 2,
+      onDark,
+      sf,
+    );
+  }
+
   ctx.textAlign = "center";
   ctx.textBaseline = "alphabetic";
-  let base = boxY + pad * 0.8 + valorFs * 0.85;
+  let base = boxY + pad * 0.8 + alturaAvatar + valorFs * 0.85;
 
   if (colunas.length > 0) {
     let x = boxX + (boxW - totalW) / 2;

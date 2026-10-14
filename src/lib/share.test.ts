@@ -268,6 +268,38 @@ describe("sharedSettingsOverrides", () => {
     expect(r?.settings.cinematic).toBe(true);
   });
 
+  it("as fotos NÃO entram no link (nem a da cartela, nem a das paradas)", () => {
+    // uma foto de 640 px vira ~70 KB de texto: o link deixaria de passar por
+    // mensageiro, então ele descreve a cena e as fotos ficam de fora
+    const foto = "data:image/jpeg;base64," + "A".repeat(400);
+    const url = buildShareUrl(
+      base({
+        settings: { ...DEFAULT_SETTINGS, cardPhoto: foto },
+        pois: [
+          {
+            id: "p1",
+            emoji: "🌉",
+            label: "Ponte",
+            color: "#38bdf8",
+            t: 0.4,
+            photo: foto,
+          },
+        ],
+      }),
+    );
+    expect(url).not.toContain("data:image");
+    const r = decodeShare(url);
+    expect(r).not.toBeNull();
+    // o que vem do link é o padrão (nada), e o app não deixa isso sobrescrever
+    // a foto de quem abre a página
+    expect(r?.settings.cardPhoto).toBe("");
+    expect(sharedSettingsOverrides(r?.settings as never).cardPhoto).toBeUndefined();
+    expect(r?.pois[0].photo).toBeUndefined();
+    // e a parada em si continua indo, com o resto das informações
+    expect(r?.pois[0].label).toBe("Ponte");
+    expect(r?.pois[0].t).toBeCloseTo(0.4, 3);
+  });
+
   it("não altera o objeto original", () => {
     const original = { ...DEFAULT_SETTINGS, formatId: "webm" };
     sharedSettingsOverrides(original);

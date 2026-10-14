@@ -274,6 +274,25 @@ body {
     0 4px 14px rgba(0, 0, 0, 0.6),
     0 0 18px -2px var(--c, #fde047);
 }
+/* parada com foto: o selo vira a foto, recortada no círculo */
+.poi-badge.has-photo {
+  background-size: cover;
+  background-position: center;
+  font-size: 0;
+}
+/* marca de que há foto, mesmo de longe */
+.poi-badge.has-photo::after {
+  content: "";
+  position: absolute;
+  right: -2px;
+  bottom: -2px;
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
+  background: #ffffff;
+  border: 1.5px solid rgba(9, 12, 20, 0.9);
+}
+
 .poi-pin.is-idle .poi-badge {
   filter: grayscale(0.55);
   box-shadow: 0 3px 10px rgba(0, 0, 0, 0.5);

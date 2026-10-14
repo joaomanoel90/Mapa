@@ -448,7 +448,9 @@ export default function MapView(props: Props) {
         html: `<div class="poi-pin ${live ? "is-live" : "is-idle"}${sel ? " is-sel" : ""}${
           off > 12 ? " is-off" : ""
         }" style="--c:${p.color}">
-                 <div class="poi-badge">${p.emoji}</div>
+                 <div class="poi-badge${p.photo ? " has-photo" : ""}"${
+                   p.photo ? ` style="background-image:url(${p.photo})"` : ""
+                 }>${p.photo ? "" : p.emoji}</div>
                  <div class="poi-tag">${escapeHtml(p.label)}${offTxt}</div>
                </div>`,
         iconSize: [42, 42],

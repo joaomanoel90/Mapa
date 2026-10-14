@@ -1,6 +1,7 @@
 import { BASEMAPS, type BasemapId } from "./tiles";
 import type { CameraMode } from "./renderer";
 import type { ColorMode } from "./coloring";
+import { PHOTO_MAX_CHARS, isPhotoDataUrl } from "./photos";
 import type { Profile } from "./routing";
 
 /**
@@ -72,6 +73,14 @@ export type Settings = {
   cardTime: string;
   /** linha de baixo; vazia mostra a data do percurso, quando o arquivo tem */
   cardNote: string;
+  /**
+   * Foto do projeto (data URL já reduzida), que aparece no alto da cartela.
+   *
+   * Fica nas preferências como o resto da cartela, mas **não** entra no link
+   * compartilhado: 640 px de foto viram ~70 KB de texto, e um link com isso não
+   * passa por mensageiro nenhum.
+   */
+  cardPhoto: string;
   title: string;
   subtitle: string;
   aspect: AspectId;
@@ -114,6 +123,7 @@ export const DEFAULT_SETTINGS: Settings = {
   cardElevation: "",
   cardTime: "",
   cardNote: "",
+  cardPhoto: "",
   title: "Minha rota",
   subtitle: "",
   aspect: "16:9",
@@ -150,6 +160,12 @@ export function sanitizeSettings(raw: Partial<Settings>): Partial<Settings> {
   if (typeof out.cinematic !== "boolean") delete out.cinematic;
   for (const key of ["cardDistance", "cardElevation", "cardTime", "cardNote"] as const) {
     if (typeof out[key] !== "string") delete out[key];
+  }
+  // a foto guardada precisa ser um data URL de imagem dentro do teto: qualquer
+  // outra coisa (URL externa, texto, base64 gigante) é descartada aqui
+  if (out.cardPhoto !== undefined && !isPhotoDataUrl(out.cardPhoto)) delete out.cardPhoto;
+  if (typeof out.cardPhoto === "string" && out.cardPhoto.length > PHOTO_MAX_CHARS) {
+    delete out.cardPhoto;
   }
   if (typeof out.fastExport !== "boolean") delete out.fastExport;
   const profiles = ["car", "bike", "foot", "straight"];

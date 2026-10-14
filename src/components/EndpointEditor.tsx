@@ -6,6 +6,7 @@ import {
   type Endpoints,
 } from "../lib/endpoints";
 import { cn } from "../utils/cn";
+import PhotoField from "./PhotoField";
 
 export default function EndpointEditor({
   endpoints,
@@ -39,10 +40,12 @@ export default function EndpointEditor({
           className="flex w-full items-center gap-2 px-2.5 py-2 text-left"
         >
           <span
-            className="grid h-7 w-7 shrink-0 place-items-center rounded-full border-2 bg-zinc-950 text-[12px] font-black"
+            className="grid h-7 w-7 shrink-0 place-items-center overflow-hidden rounded-full border-2 bg-zinc-950 text-[12px] font-black"
             style={{ borderColor: color }}
           >
-            {marked && mark!.emoji.trim() ? (
+            {mark?.photo ? (
+              <img src={mark.photo} alt="" className="h-full w-full object-cover" />
+            ) : marked && mark!.emoji.trim() ? (
               <span className="text-[13px]">{mark!.emoji.trim()}</span>
             ) : (
               <span style={{ color }}>{which.toUpperCase()}</span>
@@ -95,6 +98,25 @@ export default function EndpointEditor({
                 }
                 className="min-w-0 flex-1 rounded-lg border border-white/10 bg-black/40 px-2.5 py-1.5 text-[12px] font-semibold text-white placeholder:text-zinc-600 focus:border-white/30 focus:outline-none"
               />
+            </div>
+            <div className="flex items-center gap-2 rounded-xl border border-white/10 bg-black/20 px-2.5 py-2">
+              <PhotoField
+                compacto
+                valor={mark?.photo ?? ""}
+                onValor={(v) =>
+                  set(which, {
+                    emoji: mark?.emoji ?? "",
+                    label: mark?.label ?? "",
+                    ...(v ? { photo: v } : {}),
+                  })
+                }
+                ariaLabel={`Foto de ${which === "a" ? "partida" : "chegada"}`}
+              />
+              <span className="min-w-0 flex-1 text-[10.5px] leading-snug text-zinc-500">
+                {mark?.photo
+                  ? "Na largada, o pino e o vídeo mostram esta foto."
+                  : "Foto do local (opcional): aparece no vídeo e no pino."}
+              </span>
             </div>
             <div className="flex flex-wrap gap-1">
               {ENDPOINT_PRESETS.map((p) => (

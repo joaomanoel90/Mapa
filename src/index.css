@@ -136,6 +136,12 @@ body {
   transition: transform 0.12s ease;
   user-select: none;
 }
+/* partida/chegada com foto: o pino vira a foto, recortada no círculo */
+.wp-pin.wp-photo {
+  background-size: cover;
+  background-position: center;
+}
+
 .wp-pin:hover {
   transform: scale(1.14);
 }

@@ -47,6 +47,8 @@ type Props = {
   onSnapToRoute: (id: string) => void;
   /** aproxima o mapa da parada */
   onZoomTo: (id: string) => void;
+  /** quantas vezes a rota passa por cada parada (ida e volta conta duas) */
+  passages?: Record<string, number[]> | null;
 };
 
 export default function StopEditor({
@@ -61,12 +63,15 @@ export default function StopEditor({
   onAdd,
   onUpdate,
   onRemove,
+  passages,
   onClear,
   onNudge,
   onSnapToRoute,
   onZoomTo,
 }: Props) {
   const sorted = useMemo(() => sortPois(pois), [pois]);
+  /** quantas vezes a rota passa pela parada (1 = só na ida) */
+  const passagensDaParada = (p: Poi) => (passages?.[p.id] ?? [p.t]).length;
   const [group, setGroup] = useState<(typeof POI_GROUPS)[number] | "Todos">("Natureza");
   const [query, setQuery] = useState("");
   const [step, setStep] = useState(5);
@@ -408,6 +413,14 @@ export default function StopEditor({
                       style={{ background: c }}
                     />
                   ))}
+                  {passagensDaParada(p) > 1 && (
+                    <span
+                      title={`A rota passa ${passagensDaParada(p)} vezes por esta parada — o vídeo mostra todas`}
+                      className="rounded-md border border-violet-400/40 bg-violet-500/10 px-1.5 py-0.5 text-[9.5px] font-bold uppercase tracking-wider text-violet-200"
+                    >
+                      ×{passagensDaParada(p)}
+                    </span>
+                  )}
                   <span
                     className={cn(
                       "ml-auto rounded-md border px-1.5 py-0.5 text-[9.5px] font-bold uppercase tracking-wider",

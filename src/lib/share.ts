@@ -170,6 +170,7 @@ type Payload = {
 };
 
 function markPayload(m: { emoji: string; label: string } | null): [string, string] | null {
+  // a foto não entra no link; um lugar que só tem foto não tem o que mandar
   if (!m || (!m.emoji.trim() && !m.label.trim())) return null;
   return [m.emoji, m.label];
 }

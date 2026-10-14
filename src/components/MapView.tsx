@@ -259,15 +259,21 @@ export default function MapView(props: Props) {
       // partida/chegada podem ser locais marcados (emoji + nome)
       const mark = first ? endpoints.a : last ? endpoints.b : null;
       const marked = (first || last) && hasMark(mark);
-      const inner = marked && mark!.emoji.trim()
-        ? `<span class="wp-emoji">${escapeHtml(mark!.emoji.trim())}</span>`
-        : first ? "A" : last ? "B" : String(i + 1);
+      // lugar marcado com foto: o pino mostra a foto (como o selo das paradas)
+      const foto = marked ? mark!.photo : undefined;
+      const inner = foto
+        ? ""
+        : marked && mark!.emoji.trim()
+          ? `<span class="wp-emoji">${escapeHtml(mark!.emoji.trim())}</span>`
+          : first ? "A" : last ? "B" : String(i + 1);
       const tag = marked && mark!.label.trim()
         ? `<span class="wp-name">${escapeHtml(mark!.label.trim())}</span>`
         : "";
+      const classes = `wp-pin${marked ? " wp-marked" : ""}${foto ? " wp-photo" : ""}`;
+      const fundo = foto ? ` background-image:url(${foto});` : "";
       const icon = L.divIcon({
         className: "wp-icon",
-        html: `<div class="wp-pin${marked ? " wp-marked" : ""}" style="--pin:${color}" title="Clique para remover · arraste para mover">${inner}${tag}</div>`,
+        html: `<div class="${classes}" style="--pin:${color};${fundo}" title="Clique para remover · arraste para mover">${inner}${tag}</div>`,
         iconSize: [30, 30],
         iconAnchor: [15, 15],
       });

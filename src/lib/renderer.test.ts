@@ -30,6 +30,8 @@ function fakeCtx() {
   const imagens: { args: number[]; alpha: number }[] = [];
   /** o y de cada `fillText`, na mesma ordem de `textos` */
   const textosY: number[] = [];
+  /** posição de cada texto (para achar as marcas da linha do tempo) */
+  const textosPos: { s: string; x: number; y: number }[] = [];
   /** primeiro ponto de cada `moveTo` (onde o traçado caiu na tela) */
   const movimentos: number[][] = [];
   const props: Record<string, unknown> = {};
@@ -51,6 +53,11 @@ function fakeCtx() {
           if (prop === "fillText" && typeof args[0] === "string") {
             textos.push(args[0]);
             textosY.push(Number(args[2] ?? args[1] ?? 0));
+            textosPos.push({
+              s: args[0],
+              x: Number(args[1] ?? 0),
+              y: Number(args[2] ?? 0),
+            });
           }
           if (prop === "drawImage") {
             imagens.push({
@@ -88,6 +95,7 @@ function fakeCtx() {
     ctx: make() as CanvasRenderingContext2D,
     textos,
     textosY,
+    textosPos,
     arcos,
     tracos,
     movimentos,
@@ -816,5 +824,177 @@ describe("foto do projeto na cartela", () => {
     const { ctx, imagens } = fakeCtx();
     desenhar(ctx, { ...estado(1, 14, cartela), photos: cacheComFoto });
     expect(imagens.length).toBe(0);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* Passagens: ida e volta pelo mesmo caminho                           */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Uma parada passada duas vezes: na ida (t = 0,5) e na volta (t = 0,8).
+ * Antes, a parada era um instante só e a volta não aparecia no vídeo.
+ */
+const DUAS_VEZES = { p1: [0.5, 0.8] };
+const comVolta = (extra: Partial<Poi> = {}) => ({
+  stops: [parada(extra)],
+  passages: DUAS_VEZES,
+});
+
+/** Quantos avisos do topo ("📍 … km do início") foram escritos no quadro. */
+const avisos = (textos: string[]) => textos.filter((s) => s.includes("km do início")).length;
+
+describe("parada passada duas vezes", () => {
+  it("a foto aparece na ida, some, e aparece de novo na volta", () => {
+    const ida = fakeCtx();
+    const meio = fakeCtx();
+    const volta = fakeCtx();
+    const comum = { ...comVolta({ photo: SRC }), photos: cacheComFoto };
+    desenhar(ida.ctx, { ...estado(0.5 + 1.4 / 14, 14, null), ...comum });
+    // entre as duas passagens a janela de 2,6 s já fechou: a foto não está na tela
+    // (a janela fecha em 0,5 + 2,6/14 = 0,686)
+    desenhar(meio.ctx, { ...estado(0.7, 14, null), ...comum });
+    desenhar(volta.ctx, { ...estado(0.8 + 1.4 / 14, 14, null), ...comum });
+    expect(ida.imagens.length).toBe(1);
+    expect(meio.imagens.length).toBe(0);
+    expect(volta.imagens.length).toBe(1);
+  });
+
+  it("o aviso do topo aparece nas duas pontas, com o km de cada passagem", () => {
+    // o km do aviso é o **do momento**: na ida, 1,51 km; na volta, 2,41 km
+    const kmDe = (ts: number) => `📍 ${((ts * track.total) / 1000).toFixed(2)} km do início`;
+    const ida = fakeCtx();
+    const volta = fakeCtx();
+    const comum = comVolta();
+    desenhar(ida.ctx, { ...estado(0.51, 14, null), ...comum });
+    desenhar(volta.ctx, { ...estado(0.81, 14, null), ...comum });
+    expect(avisos(ida.textos)).toBe(1);
+    expect(avisos(volta.textos)).toBe(1);
+    expect(ida.textos).toContain(kmDe(0.5));
+    expect(ida.textos).not.toContain(kmDe(0.8));
+    expect(volta.textos).toContain(kmDe(0.8));
+    expect(volta.textos).not.toContain(kmDe(0.5));
+  });
+
+  it("quem tem foto não vira aviso no topo", () => {
+    const { ctx, textos } = fakeCtx();
+    desenhar(ctx, {
+      ...estado(0.51, 14, null),
+      ...comVolta({ photo: SRC }),
+      photos: cacheComFoto,
+    });
+    expect(avisos(textos)).toBe(0);
+  });
+
+  it("foto escolhida mas não carregada: o aviso volta (o lugar não passa em branco)", () => {
+    const { ctx, textos } = fakeCtx();
+    desenhar(ctx, {
+      ...estado(0.51, 14, null),
+      ...comVolta({ photo: SRC }),
+      photos: cacheVazio,
+    });
+    expect(avisos(textos)).toBe(1);
+  });
+
+  it("a linha do tempo ganha uma marca por passagem", () => {
+    // sem as passagens, a parada da volta ficaria sem marca nenhuma na barra
+    const { ctx, textosPos } = fakeCtx();
+    desenhar(ctx, {
+      ...estado(0.9, 14, null),
+      ...comVolta(),
+      style: { ...style, showProgress: true },
+    });
+    const marcas = textosPos.filter((x) => x.s === "🌉");
+    const porLinha = new Map<number, number[]>();
+    for (const m of marcas) {
+      const xs = porLinha.get(m.y) ?? [];
+      xs.push(m.x);
+      porLinha.set(m.y, xs);
+    }
+    const naBarra = [...porLinha.values()].filter((xs) => xs.length > 1);
+    expect(naBarra.length).toBe(1);
+    expect(naBarra[0].length).toBe(2);
+    expect(naBarra[0][0]).not.toBeCloseTo(naBarra[0][1], 0);
+  });
+
+  it("com uma passagem só, a linha do tempo tem uma marca (como sempre foi)", () => {
+    const { ctx, textosPos } = fakeCtx();
+    desenhar(ctx, {
+      ...estado(0.9, 14, null),
+      stops: [parada()],
+      style: { ...style, showProgress: true },
+    });
+    const marcas = textosPos.filter((x) => x.s === "🌉");
+    const porLinha = new Map<number, number[]>();
+    for (const m of marcas) {
+      const xs = porLinha.get(m.y) ?? [];
+      xs.push(m.x);
+      porLinha.set(m.y, xs);
+    }
+    expect([...porLinha.values()].every((xs) => xs.length === 1)).toBe(true);
+  });
+
+  it("o contador do cabeçalho conta passagens quando a rota repete", () => {
+    // o contador fica nos selos do cabeçalho: só aparece com o título ligado
+    const comTitulo = { ...style, showTitle: true, title: "Pedal" };
+    const { ctx, textos } = fakeCtx();
+    desenhar(ctx, { ...estado(0.6, 14, null), ...comVolta(), style: comTitulo });
+    expect(textos).toContain("1/2 passagens");
+    const fim = fakeCtx();
+    desenhar(fim.ctx, { ...estado(0.95, 14, null), ...comVolta(), style: comTitulo });
+    expect(fim.textos).toContain("2/2 passagens");
+  });
+
+  it("sem repetição, o contador continua falando em paradas", () => {
+    const comTitulo = { ...style, showTitle: true, title: "Pedal" };
+    const { ctx, textos } = fakeCtx();
+    desenhar(ctx, { ...estado(0.95, 14, null), stops: [parada()], style: comTitulo });
+    expect(textos).toContain("1/1 paradas");
+  });
+});
+
+describe("foto da partida e da chegada", () => {
+  const LOCAL = { emoji: "🏠", label: "Casa", photo: SRC };
+
+  it("a foto da partida aparece no começo do vídeo", () => {
+    const { ctx, imagens } = fakeCtx();
+    desenhar(ctx, {
+      ...estado(1.4 / 14, 14, null),
+      endpoints: { a: LOCAL, b: null },
+      photos: cacheComFoto,
+    });
+    expect(imagens.length).toBe(1);
+    const [, , , size] = imagens[0].args;
+    expect(size).toBe(400); // recorte quadrado da foto deitada
+  });
+
+  it("a foto da chegada aparece no fim do vídeo", () => {
+    const cedo = fakeCtx();
+    const fim = fakeCtx();
+    const comum = { endpoints: { a: null, b: LOCAL }, photos: cacheComFoto };
+    desenhar(cedo.ctx, { ...estado(0.5, 14, null), ...comum });
+    desenhar(fim.ctx, { ...estado(1 - 1.4 / 14, 14, null), ...comum });
+    expect(cedo.imagens.length).toBe(0);
+    expect(fim.imagens.length).toBe(1);
+  });
+
+  it("partida com foto não vira aviso no topo", () => {
+    const { ctx, textos } = fakeCtx();
+    desenhar(ctx, {
+      ...estado(0.05, 14, null),
+      endpoints: { a: LOCAL, b: null },
+      photos: cacheComFoto,
+    });
+    expect(textos.some((s) => s.includes("Início do percurso"))).toBe(false);
+  });
+
+  it("partida sem foto continua avisando no topo", () => {
+    const { ctx, textos } = fakeCtx();
+    desenhar(ctx, {
+      ...estado(0.05, 14, null),
+      endpoints: { a: { emoji: "🏠", label: "Casa" }, b: null },
+      photos: cacheComFoto,
+    });
+    expect(textos.some((s) => s.includes("Início do percurso"))).toBe(true);
   });
 });

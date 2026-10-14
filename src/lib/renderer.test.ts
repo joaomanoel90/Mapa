@@ -24,6 +24,8 @@ function fakeCtx() {
   const arcos: number[][] = [];
   /** cada `stroke()`: a cor, a espessura e quantos pontos o caminho tinha */
   const tracos: { cor: string; largura: number; pontos: number }[] = [];
+  /** cada `fill()`: a cor de preenchimento em vigor (a polaroide branca era um fill) */
+  const pinturas: string[] = [];
   /** cada `drawImage`: os argumentos e o alfa em vigor no momento */
   const imagens: { args: number[]; alpha: number }[] = [];
   /** o y de cada `fillText`, na mesma ordem de `textos` */
@@ -57,6 +59,10 @@ function fakeCtx() {
             });
           }
           if (prop === "arc") arcos.push(args as number[]);
+          // só a cor em texto: alguns lugares passam um gradiente (objeto) aqui
+          if (prop === "fill" && typeof props.fillStyle === "string") {
+            pinturas.push(props.fillStyle);
+          }
           if (prop === "beginPath") pontos = 0;
           if (prop === "moveTo") {
             pontos++;
@@ -86,6 +92,7 @@ function fakeCtx() {
     tracos,
     movimentos,
     imagens,
+    pinturas,
   };
 }
 
@@ -726,6 +733,36 @@ describe("foto da parada no vídeo", () => {
       photos: cacheComFoto,
     });
     expect(imagens.length).toBe(0);
+  });
+
+  it("a foto sai em círculo, com o anel na cor da parada", () => {
+    const { ctx, arcos, tracos } = fakeCtx();
+    desenhar(ctx, {
+      ...estado(0.6, 14, null),
+      stops: [parada({ photo: SRC })],
+      photos: cacheComFoto,
+    });
+    // dois círculos inteiros: o aro de fundo e o anel da cor da parada
+    const inteiros = arcos.filter((a) => Math.abs(a[4] - a[3]) > Math.PI * 2 - 1e-6);
+    expect(inteiros.length).toBeGreaterThanOrEqual(2);
+    const raios = inteiros.map((a) => a[2]);
+    expect(new Set(raios).size).toBeGreaterThanOrEqual(2);
+    // e o anel é traçado na cor da parada
+    expect(tracos.some((t) => t.cor === "#38bdf8")).toBe(true);
+  });
+
+  it("não sobra nenhum branco chapado no lugar da foto", () => {
+    // a polaroide (quadrado branco com moldura) chamava mais atenção do que a
+    // foto e parecia um papel colado no mapa — este teste trava a troca: o
+    // branco era um **preenchimento**, e é ele que não pode voltar
+    const { ctx, pinturas } = fakeCtx();
+    desenhar(ctx, {
+      ...estado(0.6, 14, null),
+      stops: [parada({ photo: SRC })],
+      photos: cacheComFoto,
+    });
+    expect(pinturas).not.toContain("#ffffff");
+    expect(pinturas).not.toContain("rgba(255,255,255,1)");
   });
 
   it("a etiqueta sobe para dar lugar à foto", () => {

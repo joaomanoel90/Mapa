@@ -832,6 +832,8 @@ function drawPinBadge(
   r: number,
   color: string,
   sf: number,
+  /** o que vai **dentro** do selo (foto, emoji ou letra) */
+  conteudo?: () => void,
 ) {
   ctx.beginPath();
   ctx.arc(0, 0, r, 0, Math.PI * 2);
@@ -842,6 +844,12 @@ function drawPinBadge(
   ctx.fill();
   ctx.shadowColor = "transparent";
   ctx.shadowOffsetY = 0;
+
+  // o miolo entra antes do aro: assim o aro (e o brilho) ficam por cima da foto
+  conteudo?.();
+
+  ctx.beginPath();
+  ctx.arc(0, 0, r, 0, Math.PI * 2);
   ctx.lineWidth = 2.6 * sf;
   ctx.strokeStyle = color;
   ctx.stroke();
@@ -872,6 +880,40 @@ export function overlapsCard(
     at.y + r > card.y &&
     at.y - r < card.y + card.h
   );
+}
+
+/**
+ * Foto dentro do selo do pino.
+ *
+ * É o que impede o pino de ficar **oco**: a foto grande (a que aparece quando o
+ * personagem passa) é desenhada **acima** do pino, não dentro dele — então
+ * esconder o emoji "para a foto ocupar o lugar" deixava o selo vazio durante o
+ * trajeto inteiro.
+ */
+function drawPhotoInsidePin(
+  ctx: CanvasRenderingContext2D,
+  img: PhotoImage,
+  r: number,
+  sf: number,
+) {
+  const raio = Math.max(1, r - 2.6 * sf);
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(0, 0, raio, 0, Math.PI * 2);
+  ctx.clip();
+  const { sx, sy, size } = coverSquare(img.width, img.height);
+  ctx.drawImage(
+    img as CanvasImageSource,
+    sx,
+    sy,
+    size,
+    size,
+    -raio,
+    -raio,
+    raio * 2,
+    raio * 2,
+  );
+  ctx.restore();
 }
 
 /** Quanto um pino precisa subir para não ficar debaixo da cartela final. */
@@ -923,20 +965,33 @@ function drawPin(
 
   drawPinBadge(ctx, r, color, sf);
 
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-  if (foto) {
-    // a foto ocupa o lugar do emoji/letra; o aro da cor do lugar fica por cima
-  } else if (marked && mark!.emoji.trim()) {
-    ctx.font = `${Math.round(r * 1.05)}px ${EMOJI_FONT}`;
-    ctx.fillText(mark!.emoji.trim(), 0, r * 0.06);
-  } else {
+  /*
+   * O miolo do pino **nunca fica vazio**: a foto do lugar (quando existe),
+   * senão o emoji, senão a letra A/B na cor do lugar.
+   *
+   * A regra antiga ("a foto ocupa o lugar do emoji") deixava o pino oco o
+   * trajeto inteiro, porque a foto grande aparece acima do pino — e só nos
+   * segundos da largada/chegada.
+   */
+  const conteudo = () => {
+    if (foto) {
+      drawPhotoInsidePin(ctx, foto, r, sf);
+      return;
+    }
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    if (marked && mark!.emoji.trim()) {
+      ctx.font = `${Math.round(r * 1.05)}px ${EMOJI_FONT}`;
+      ctx.fillText(mark!.emoji.trim(), 0, r * 0.06);
+      return;
+    }
     ctx.font = `800 ${Math.round(r * 1.1)}px "Inter","Segoe UI",system-ui,sans-serif`;
     // a letra ganha a cor do lugar (verde na partida, vermelho na chegada):
     // era branca sobre um pino escuro, e o usuário viu o par como "escuro"
     ctx.fillStyle = color;
     ctx.fillText(fallback, 0, r * 0.06);
-  }
+  };
+  drawPinBadge(ctx, r, color, sf, conteudo);
 
   // etiqueta com o nome do local marcado
   const label = marked ? mark!.label.trim() : "";
@@ -1268,12 +1323,20 @@ function drawStops(
     ctx.scale(scale, scale);
 
     const r = 17 * sf;
-    drawPinBadge(ctx, r, stop.color, sf);
-
-    ctx.font = `${Math.round(r * 1.08)}px ${EMOJI_FONT}`;
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    ctx.fillText(stop.emoji, 0, r * 0.05);
+    // mesma regra dos pinos A/B: com foto, o miolo mostra a foto (o trajeto
+    // inteiro); sem foto, o emoji. Assim os dois continuam idênticos
+    const fotoDoPino = stop.photo ? (input.photos?.get(stop.photo) ?? null) : null;
+    const miolo = () => {
+      if (fotoDoPino) {
+        drawPhotoInsidePin(ctx, fotoDoPino, r, sf);
+        return;
+      }
+      ctx.font = `${Math.round(r * 1.08)}px ${EMOJI_FONT}`;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(stop.emoji, 0, r * 0.05);
+    };
+    drawPinBadge(ctx, r, stop.color, sf, miolo);
 
     /*
      * Foto da parada (polaroide) e etiqueta com o nome.

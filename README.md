@@ -387,6 +387,15 @@ literal: "poderiam ficar igual os pontos de parada"). A letra A/B também passou
 usar a cor do lugar (verde na partida, vermelho na chegada), em vez de branca
 sobre um pino escuro.
 
+**O pino com foto mostra a foto dentro dele o trajeto inteiro.** A regra antiga
+dizia que "a foto ocupa o lugar do emoji" — mas a foto grande é desenhada
+**acima** do pino, e só nos segundos da largada e da chegada: no resto do vídeo o
+selo ficava **oco**. Agora o miolo do pino é a foto (recortada em círculo, como o
+próprio app já faz no pino do mapa), e a foto grande continua aparecendo por cima
+no momento. Sem foto, o miolo é o emoji (ou a letra A/B, na cor do lugar) — nunca
+vazio. Vale para os pinos de partida/chegada **e** para os das paradas: uma regra
+só, e foi assim que os dois ficaram idênticos.
+
 **O personagem não cobre a partida nem a chegada.** No primeiro quadro o
 personagem está exatamente em cima da partida, e no último em cima da chegada:
 desenhados antes dele, o pino, o nome e a foto ficavam escondidos atrás do
@@ -592,7 +601,7 @@ ou cortados.
 
 ```bash
 npm run typecheck  # tsc --noEmit
-npm test           # Vitest (531 casos)
+npm test           # Vitest (536 casos)
 npm run check:dist # o build saiu autocontido e sem /src/?
 ```
 

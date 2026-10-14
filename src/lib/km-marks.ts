@@ -16,9 +16,11 @@ export type KmMark = {
   /**
    * Leva o número escrito ao lado.
    *
-   * Até o passo de 5 km **toda** marca é numerada — sem isso o usuário veria
-   * pontos mudos no mapa. Em passos maiores (rota longa) só as redondas levam
-   * número, senão as etiquetas cobrem o traçado.
+   * **Toda** marca é numerada. Cheguei a numerar só as redondas em passos
+   * grandes (rota longa) para não poluir, e o resultado era o oposto: numa
+   * rota de 435 km, o passo vira 50 km e só as marcas de 250 em 250 km levavam
+   * número — sete pontos mudos e um número na tela. Marca sem número não
+   * significa nada, e são no máximo doze etiquetas: não há poluição possível.
    */
   label: boolean;
 };
@@ -61,12 +63,11 @@ export function kmMarks(cum: number[], maxMarks = 12, step?: number): KmMark[] {
   const aCada = passo * 5;
   const out: KmMark[] = [];
   for (let km = passo; km * 1000 <= total; km += passo) {
-    const redonda = km % aCada === 0;
     out.push({
       index: indexAtDistance(cum, km * 1000),
       km,
-      major: redonda,
-      label: passo <= 5 || redonda,
+      major: km % aCada === 0,
+      label: true,
     });
   }
   return out;

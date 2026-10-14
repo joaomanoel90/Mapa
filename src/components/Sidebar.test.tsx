@@ -29,9 +29,11 @@ const TRACK = buildTrack([
 function Painel({
   inicial,
   cobertura = { ele: 0, time: 0 },
+  blocos = { needed: 300, fits: true, sugestao: null },
 }: {
   inicial?: Partial<Settings>;
   cobertura?: { ele: number; time: number };
+  blocos?: { needed: number; fits: boolean; sugestao: number | null };
 }) {
   const [settings, setSettings] = useState<Settings>({ ...DEFAULT_SETTINGS, ...inicial });
   const update = <K extends keyof Settings>(key: K, value: Settings[K]) =>
@@ -49,6 +51,8 @@ function Painel({
       pois={[]}
       track={TRACK}
       cobertura={cobertura}
+      blocos={blocos}
+      onUseZoom={(z) => update("followZoom", z)}
       progress={0}
       selectedPoi={null}
       poiMode={false}
@@ -160,6 +164,27 @@ describe("painel: marcas de km e câmera cinematográfica", () => {
     expect(botao("Câmera cinematográfica").getAttribute("aria-checked")).toBe("false");
     clicar(botao("Câmera cinematográfica"));
     expect(botao("Câmera cinematográfica").getAttribute("aria-checked")).toBe("true");
+  });
+
+  it("mostra quantos blocos de mapa a rota precisa", () => {
+    montar(<Painel blocos={{ needed: 924, fits: true, sugestao: null }} />);
+    expect(container.textContent ?? "").toContain("≈ 924 blocos de mapa");
+  });
+
+  it("avisa e oferece o zoom que cabe quando a rota é longa demais", () => {
+    montar(<Painel blocos={{ needed: 7237, fits: false, sugestao: 13.5 }} />);
+    const texto = container.textContent ?? "";
+    expect(texto).toContain("7237 blocos");
+    expect(texto).toContain("acima do limite");
+    clicar(botao("Usar zoom"));
+    // o botão aplica o zoom no mesmo estado que alimenta o controle
+    expect(container.textContent ?? "").toContain("zoom 13.5");
+  });
+
+  it("quando nem o zoom mínimo cabe, manda para a câmera “Rota toda”", () => {
+    montar(<Painel blocos={{ needed: 9000, fits: false, sugestao: null }} />);
+    expect(container.textContent ?? "").toContain("Nem no zoom mínimo cabe");
+    expect(container.textContent ?? "").toContain("Rota toda");
   });
 
   it("explica o que a câmera faz, e que no “Rota toda” ela não vale", () => {

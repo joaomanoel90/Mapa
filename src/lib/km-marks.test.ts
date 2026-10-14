@@ -51,22 +51,20 @@ describe("marcas ao longo do traçado", () => {
     expect(marcas.every((m) => m.label)).toBe(true);
   });
 
-  it("na rota longa (passo grande) só as marcas redondas levam número", () => {
+  it("na rota longa as marcas são redondas de 5 em 5 passos", () => {
     const marcas = kmMarks(cumLinear(200_000, 20_000));
     expect(marcas.length).toBe(10);
-    expect(marcas.some((m) => m.label)).toBe(true);
-    expect(marcas.some((m) => !m.label)).toBe(true);
     // num passo de 20 km, a redonda é de 100 em 100 km
-    expect(marcas.find((m) => m.km === 100)!.label).toBe(true);
     expect(marcas.find((m) => m.km === 100)!.major).toBe(true);
-    expect(marcas.find((m) => m.km === 20)!.label).toBe(false);
     expect(marcas.find((m) => m.km === 20)!.major).toBe(false);
   });
 
-  it("até o passo de 5 km nenhuma marca fica muda", () => {
-    // uma marca sem número é um ponto sem significado no meio do mapa
-    for (const total of [12_000, 49_000, 60_000]) {
-      const marcas = kmMarks(cumLinear(total, 1_000));
+  it("nenhuma marca fica muda, seja qual for o tamanho da rota", () => {
+    // uma marca sem número é um ponto sem significado no meio do mapa: numa
+    // rota de 435 km haviam sete pontos mudos e um único número
+    for (const total of [3_400, 12_000, 49_000, 60_000, 200_000, 435_000, 700_000]) {
+      const marcas = kmMarks(cumLinear(total, 2_000));
+      expect(marcas.length).toBeGreaterThan(0);
       expect(marcas.every((m) => m.label)).toBe(true);
     }
   });

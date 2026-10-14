@@ -310,6 +310,53 @@ de 1.400. As vistas de parada são limitadas a **oito** paradas por rota (numa
 rota com cinquenta, aproximar em todas dobraria a conta sem ninguém reparar nas
 do meio).
 
+### Fotos nas paradas e na cartela
+
+Duas fotos, as duas **reduzidas a 640 px** antes de entrar no app:
+
+- **foto da parada** — aparece em uma polaroide no vídeo quando o personagem
+  passa por ela, e vira o próprio pino no mapa (o selo do pino passa a mostrar a
+  foto, com um pontinho branco indicando que há uma);
+- **foto do projeto** — aparece em círculo no alto da cartela final.
+
+**Por que reduzir.** Uma foto de celular tem 4.000 px e 4 MB. Guardada como veio,
+estouraria o `localStorage` (que tem ~5 MB para o site inteiro) e desenharia uma
+imagem gigante reduzida em cada um dos ~30 quadros por segundo. A versão guardada
+é um JPEG de 640 px (~45 KB): suficiente para o pino, a polaroide e o avatar, que
+são pequenos na tela.
+
+**A janela da foto é medida em segundos de vídeo** (2,6 s, com 0,4 s de entrada e
+0,7 s de saída), e não em metros como o "pipoco" do pino. Cheguei a usar metros,
+e a foto ficaria ilegível justamente nas rotas longas: 1,3 km de foto numa
+travessia de 435 km são **0,04 s** de vídeo. Em segundos, a foto aparece do mesmo
+jeito em qualquer rota — e a pré-visualização e a gravação continuam idênticas,
+porque as duas usam o mesmo instante `t`.
+
+**O recorte é quadrado e centralizado** nas duas: uma foto deitada perde as
+laterais (não vira um retângulo de altura estranha no meio do mapa) e o assunto
+fica no meio. A etiqueta do nome **sobe** para dar lugar à polaroide em vez de
+ficar por baixo dela.
+
+**Três cuidados que vieram de medir:**
+
+- **O desenho não espera foto.** O laço do vídeo é síncrono e roda 30 vezes por
+  segundo; ele só *consulta* o cache. Foto que ainda não ficou pronta não aparece
+  naquele quadro — e, principalmente, **não deixa buraco**: sem a foto pronta, a
+  etiqueta fica na altura de sempre (a primeira versão subia a etiqueta mesmo sem
+  foto, deixando um vazio no lugar dela).
+- **A exportação espera, mas com prazo.** As fotos são decodificadas antes do
+  primeiro quadro (5 s de prazo): sem esperar, a foto "pipocaria" no meio da
+  gravação; sem prazo, uma foto corrompida travaria a exportação em silêncio.
+- **A foto não entra no link compartilhado**, e o link **não apaga** a sua: 640 px
+  viram ~70 KB de texto, e um link com isso não passa por mensageiro nenhum. Quem
+  abre o link vê a mesma cena, com a foto que já tinha.
+
+**Onde a foto fica guardada:** a do projeto vai para o `localStorage` com o resto
+da cartela; as das paradas vivem na sessão, como as próprias paradas (que nunca
+foram salvas). Se a foto do projeto não couber na cota, o app **grava o resto e
+avisa** na tela — em vez de perder todos os ajustes em silêncio, que era o que a
+gravação antiga fazia.
+
 ### Rotas longas: o teto de blocos de mapa
 
 Cada bloco de mapa é um pedido a um servidor comunitário (OSM, CyclOSM,
@@ -456,7 +503,7 @@ ou cortados.
 
 ```bash
 npm run typecheck  # tsc --noEmit
-npm test           # Vitest (406 casos)
+npm test           # Vitest (452 casos)
 npm run check:dist # o build saiu autocontido e sem /src/?
 ```
 
@@ -493,6 +540,7 @@ src/
 │  ├─ Sidebar.tsx           painel de controle em 6 passos
 │  ├─ CitySearch.tsx        busca de cidades (Nominatim)
 │  ├─ StopEditor.tsx        catálogo e edição das paradas
+│  ├─ PhotoField.tsx        escolher/trocar a foto (reduz a 640 px antes de entrar)
 │  ├─ EndpointEditor.tsx    partida e chegada como locais marcados
 │  ├─ Timeline.tsx          linha do tempo da pré-visualização
 │  └─ ExportModal.tsx       gravação e download do vídeo
@@ -508,8 +556,10 @@ src/
    ├─ stats.ts              distância, elevação (com corte de ruído), tempo e cartela
    ├─ hud.ts                velocidade e relógio do HUD (com janela anti-ruído)
    ├─ duration.ts           lê o tempo digitado na cartela ('3 h 19 min', '199 min')
+   ├─ photos.ts             reduz, valida e decodifica as fotos (cache com prazo)
    ├─ EndCardPanel.tsx      campos da cartela final (com teste de digitação)
    ├─ gpx.ts                importar/exportar GPX, simplificação de traçado
    ├─ share.ts              permalink da rota (codifica/valida o #r=…)
+   ├─ persist.ts            localStorage com plano B (guarda tudo menos a foto, se faltar cota)
    └─ geocode.ts            busca de cidades
 ```

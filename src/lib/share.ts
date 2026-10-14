@@ -375,7 +375,15 @@ export function decodeShare(hash: string): ShareData | null {
  */
 export function sharedSettingsOverrides(settings: Settings): Partial<Settings> {
   const out: Partial<Settings> = { ...settings };
+  // o codec é decidido pelo navegador de quem abre, não por quem compartilha
   delete out.formatId;
+  /*
+   * A foto da cartela também não vem do link (são ~70 KB de texto que nenhum
+   * mensageiro carrega). E, como ela não vem, o link **não pode** mexer na
+   * foto de quem abre: sem esta linha, abrir um link apagava a foto que a
+   * pessoa tinha escolhido.
+   */
+  delete out.cardPhoto;
   return out;
 }
 

@@ -160,6 +160,41 @@ describe("campos da cartela", () => {
   });
 });
 
+describe("foto do projeto", () => {
+  const arquivo = (nome: string, tipo: string, conteudo = "x") =>
+    new File([conteudo], nome, { type: tipo });
+
+  /** Entrega um arquivo ao campo de foto, como o seletor do sistema faria. */
+  const escolher = async (file: File) => {
+    const input = container.querySelector<HTMLInputElement>('input[type="file"]');
+    if (!input) throw new Error("campo de foto não encontrado");
+    Object.defineProperty(input, "files", { value: [file], configurable: true });
+    await act(async () => {
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+  };
+
+  it("o campo existe e diz onde a foto aparece", () => {
+    expect(container.textContent).toContain("Foto do projeto");
+    expect(container.textContent).toContain("cartela final");
+    // e avisa que ela não vai no link: melhor dizer onde se escolhe
+    expect(container.textContent).toContain("não vai no link");
+  });
+
+  it("recusa um arquivo que não é imagem, explicando por quê", async () => {
+    // caminho que não depende de canvas: a recusa acontece antes de processar
+    await escolher(arquivo("nota.txt", "text/plain"));
+    expect(container.textContent).toContain("não é uma imagem");
+  });
+
+  it("recusa imagem grande demais antes de tentar abrir", async () => {
+    const gigante = new File([new Uint8Array(1)], "grande.jpg", { type: "image/jpeg" });
+    Object.defineProperty(gigante, "size", { value: 40 * 1024 * 1024 });
+    await escolher(gigante);
+    expect(container.textContent).toContain("acima do limite");
+  });
+});
+
 /** Escreve o valor de uma vez, como o `digitar` faz caractere a caractere. */
 function setter(el: HTMLInputElement, texto: string) {
   const descritor = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!;

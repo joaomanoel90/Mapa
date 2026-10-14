@@ -30,10 +30,12 @@ function Painel({
   inicial,
   cobertura = { ele: 0, time: 0 },
   blocos = { needed: 300, fits: true, sugestao: null },
+  avisoSalvar = null,
 }: {
   inicial?: Partial<Settings>;
   cobertura?: { ele: number; time: number };
   blocos?: { needed: number; fits: boolean; sugestao: number | null };
+  avisoSalvar?: string | null;
 }) {
   const [settings, setSettings] = useState<Settings>({ ...DEFAULT_SETTINGS, ...inicial });
   const update = <K extends keyof Settings>(key: K, value: Settings[K]) =>
@@ -80,6 +82,7 @@ function Painel({
       onImportGpx={nada}
       onExportGpx={nada}
       gpxMsg={null}
+      avisoSalvar={avisoSalvar}
       resumo={{ distanceM: TRACK.total, elevation: null, time: null, points: TRACK.pts.length }}
       cartela={null}
     />
@@ -152,6 +155,18 @@ describe("painel: cor da rota", () => {
     container.remove();
     montar(<Painel inicial={{ colorBy: "slope" }} cobertura={{ ele: 0.3, time: 1 }} />);
     expect(container.textContent ?? "").toContain("30% dos pontos têm elevação");
+  });
+});
+
+describe("painel: aviso de gravação das preferências", () => {
+  it("avisa quando a foto não pôde ser salva, sem esconder o porquê", () => {
+    montar(<Painel avisoSalvar="A foto é grande demais para salvar as preferências." />);
+    expect(container.textContent ?? "").toContain("A foto é grande demais");
+  });
+
+  it("sem problema, não mostra aviso nenhum", () => {
+    montar(<Painel />);
+    expect(container.textContent ?? "").not.toContain("grande demais");
   });
 });
 

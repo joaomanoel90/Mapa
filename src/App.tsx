@@ -10,7 +10,6 @@ import {
   DEFAULT_SETTINGS,
   MAX_WAYPOINTS,
   maxZoomFor,
-  sanitizeSettings,
   type Settings,
 } from "./lib/settings";
 import { pinsAsDots } from "./lib/pins";
@@ -48,6 +47,8 @@ import { DEFAULT_ENDPOINTS, type Endpoints } from "./lib/endpoints";
 import { findCharacter } from "./lib/characters";
 import { SceneRenderer, tilesForAnimation, TILE_BUDGET } from "./lib/renderer";
 import { budgetAdvice, maxFollowZoom, tilesNeeded } from "./lib/map-budget";
+import { PhotoCache } from "./lib/photos";
+import { decodeSettings, saveSettings } from "./lib/persist";
 import {
   availableFormats,
   CancelledError,
@@ -71,6 +72,19 @@ function App() {
   const [rawTrack, setRawTrack] = useState<LatLng[] | null>(null);
   /** Retorno da importação: erro ou resumo do que entrou. */
   const [gpxMsg, setGpxMsg] = useState<{ tipo: "erro" | "info"; texto: string } | null>(null);
+  /** aviso de gravação das preferências (foto grande demais, cota estourada) */
+  const [avisoSalvar, setAvisoSalvar] = useState<string | null>(null);
+
+  /**
+   * Fotos já decodificadas, compartilhadas entre a prévia e a exportação.
+   *
+   * Fica num `ref` porque não é estado de tela: quem consulta é o desenho do
+   * vídeo, 30 vezes por segundo, e uma decodificação por exportação seria
+   * trabalho repetido à toa.
+   */
+  const fotosRef = useRef<PhotoCache | null>(null);
+  if (!fotosRef.current) fotosRef.current = new PhotoCache();
+  const fotos = fotosRef.current;
 
   const [settings, setSettings] = useState<Settings>(() => {
     const f = availableFormats();
@@ -78,10 +92,9 @@ function App() {
 
     let salvos: Partial<Settings> = {};
     try {
-      const saved = localStorage.getItem("rotacast:settings");
-      if (saved) salvos = sanitizeSettings(JSON.parse(saved) as Partial<Settings>);
+      salvos = decodeSettings(localStorage.getItem("rotacast:settings"));
     } catch {
-      /* ignora */
+      /* armazenamento indisponível (aba privada, por exemplo) */
     }
 
     // o link descreve uma cena específica, então vence o que estava salvo
@@ -205,10 +218,19 @@ function App() {
   }, []);
 
   useEffect(() => {
+    // a gravação conta o que aconteceu: com uma foto grande, o `localStorage`
+    // pode estourar a cota, e perder tudo em silêncio seria o pior desfecho
     try {
-      localStorage.setItem("rotacast:settings", JSON.stringify(settings));
+      const resultado = saveSettings(localStorage, settings);
+      setAvisoSalvar(
+        resultado === "ok"
+          ? null
+          : resultado === "sem-foto"
+            ? "A foto é grande demais para salvar as preferências. Ela continua valendo neste vídeo, mas some ao recarregar a página."
+            : "Não foi possível salvar as preferências neste navegador (armazenamento cheio ou bloqueado).",
+      );
     } catch {
-      /* ignora */
+      setAvisoSalvar("Não foi possível salvar as preferências neste navegador.");
     }
   }, [settings]);
 
@@ -913,6 +935,8 @@ function App() {
           cardSeconds: tempoCartela,
           colored,
           marks: marcas,
+          photos: fotos,
+          cardPhoto: settings.cardPhoto,
         });
 
       // os servidores gratuitos pedem uso moderado
@@ -927,6 +951,13 @@ function App() {
       if (needed > TILE_BUDGET) {
         throw new Error(budgetAdvice(needed, sugestaoZoom, camera.mode));
       }
+
+      /*
+       * As fotos são decodificadas antes do primeiro quadro: o desenho é
+       * síncrono, e uma foto que chegasse no meio da gravação apareceria de
+       * repente. Com prazo — foto corrompida não pode travar a exportação.
+       */
+      await fotos.ready([settings.cardPhoto, ...stops.map((p) => p.photo)]);
 
       // mostra o mapa carregando no canvas (não fica uma tela preta)
       paint(0, 0);
@@ -1132,6 +1163,7 @@ function App() {
             onImportGpx={importarGpx}
             onExportGpx={exportarGpx}
             gpxMsg={gpxMsg}
+            avisoSalvar={avisoSalvar}
           />
         </aside>
 

@@ -69,6 +69,8 @@ type Props = {
   onExportGpx: () => void;
   /** retorno da importação, para mostrar erro ou resumo */
   gpxMsg: { tipo: "erro" | "info"; texto: string } | null;
+  /** aviso de gravação das preferências (foto grande, armazenamento cheio) */
+  avisoSalvar?: string | null;
   /** o que o arquivo mediu (sugestões e contagem) */
   resumo: RideSummary;
   /** a cartela montada com o que foi digitado — null quando não há nada */
@@ -119,6 +121,7 @@ function Sidebar(props: Props) {
     onImportGpx,
     onExportGpx,
     gpxMsg,
+    avisoSalvar,
   } = props;
 
   const gpxInput = useRef<HTMLInputElement | null>(null);
@@ -222,6 +225,11 @@ function Sidebar(props: Props) {
                 e.target.value = "";
               }}
             />
+            {avisoSalvar && (
+              <div className="mb-2 rounded-xl border border-amber-400/30 bg-amber-500/10 px-3 py-2 text-[11px] leading-snug text-amber-100">
+                {avisoSalvar}
+              </div>
+            )}
             {gpxMsg ? (
               <p
                 role="status"

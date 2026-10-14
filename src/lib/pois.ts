@@ -119,6 +119,13 @@ export type Poi = {
    * Presente = marcada fora da rota (com precisão de metros).
    */
   pos?: LatLng;
+  /**
+   * Foto da parada (data URL já reduzida), que aparece no vídeo em uma
+   * polaroide quando o personagem passa por ela.
+   *
+   * Não vai para o link compartilhado: ver `photos.ts`.
+   */
+  photo?: string;
 };
 
 /** Coordenada geográfica efetiva da parada. */

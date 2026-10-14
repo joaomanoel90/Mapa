@@ -1,4 +1,5 @@
 import { TextInput } from "./ui";
+import PhotoField from "./PhotoField";
 import {
   cardSuggestions,
   type CardFields,
@@ -94,6 +95,15 @@ export default function EndCardPanel({
         </span>
       </div>
 
+      <div className="mt-2.5">
+        <PhotoField
+          valor={s.cardPhoto}
+          onValor={(v) => update("cardPhoto", v)}
+          rotulo="Foto do projeto"
+          ariaLabel="Foto do projeto"
+        />
+      </div>
+
       <div className="mt-2 flex flex-col gap-1.5">
         {campo("cardDistance", "Distância", sugestao.distance, "ex.: 49 km")}
         {campo("cardElevation", "Elevação", sugestao.elevation, "ex.: +1.676 m")}
@@ -139,6 +149,12 @@ export default function EndCardPanel({
             <p className="mt-1 text-center text-[10.5px] text-zinc-400">{cartela.note}</p>
           )}
         </div>
+      )}
+
+      {s.cardPhoto && cartela && (
+        <p className="mt-2 text-[10.5px] leading-snug text-zinc-500">
+          A foto do projeto vai no alto da cartela — a prévia acima não a mostra.
+        </p>
       )}
 
       {!resumo.elevation && !resumo.time && (

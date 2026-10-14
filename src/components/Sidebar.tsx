@@ -12,6 +12,8 @@ import { ASPECTS, MAX_WAYPOINTS, type AspectId, type Settings } from "../lib/set
 import type { EndCard, RideSummary } from "../lib/stats";
 import { PROFILES, PRESETS, type Profile, type Preset } from "../lib/routing";
 import { BASEMAPS, BASEMAP_ORDER } from "../lib/tiles";
+import { TILE_BUDGET } from "../lib/map-budget";
+import { cn } from "../utils/cn";
 import { findCharacter } from "../lib/characters";
 import { formatDistance, formatSpeed, type LatLng, type Track } from "../lib/geo";
 import type { VideoFormat } from "../lib/recorder";
@@ -50,6 +52,10 @@ type Props = {
   maxZoom: number;
   /** quanto do traçado tem elevação e hora (0..1) — decide as dicas da cor */
   cobertura: { ele: number; time: number };
+  /** blocos de mapa que a câmera vai precisar (o teto dos servidores gratuitos) */
+  blocos: { needed: number; fits: boolean; sugestao: number | null };
+  /** aplica o zoom sugerido quando a rota não cabe */
+  onUseZoom: (z: number) => void;
   onUndo: () => void;
   onClear: () => void;
   /** reenquadra a rota (o mapa nunca se move sozinho ao marcar pontos) */
@@ -82,6 +88,8 @@ function Sidebar(props: Props) {
     pois,
     track,
     cobertura,
+    blocos,
+    onUseZoom,
     progress,
     selectedPoi,
     poiMode,
@@ -453,6 +461,39 @@ function Sidebar(props: Props) {
                 <p className="mt-1 text-[10.5px] text-zinc-500">
                   O mapa “{BASEMAPS[s.basemap].name}” é gratuito até o zoom {maxZoom}.
                 </p>
+              )}
+              {/*
+                Contador de blocos: a rota longa não cabe no teto dos servidores
+                gratuitos, e a exportação era recusada só no fim, sem dizer até
+                onde diminuir o zoom. Aqui o número aparece antes, e o botão
+                resolve com um clique.
+              */}
+              <p
+                className={cn(
+                  "mt-1 text-[10.5px]",
+                  blocos.fits ? "text-zinc-500" : "font-semibold text-amber-300",
+                )}
+              >
+                {blocos.fits
+                  ? `≈ ${blocos.needed} blocos de mapa`
+                  : `≈ ${blocos.needed} blocos — acima do limite dos mapas gratuitos (${TILE_BUDGET})`}
+              </p>
+              {!blocos.fits && (
+                <div className="mt-1.5">
+                  {blocos.sugestao !== null ? (
+                    <Button
+                      variant="soft"
+                      className="w-full"
+                      onClick={() => onUseZoom(blocos.sugestao as number)}
+                    >
+                      Usar zoom {blocos.sugestao}
+                    </Button>
+                  ) : (
+                    <p className="text-[10.5px] leading-snug text-amber-300/90">
+                      Nem no zoom mínimo cabe: use a câmera “Rota toda”.
+                    </p>
+                  )}
+                </div>
               )}
             </div>
           )}

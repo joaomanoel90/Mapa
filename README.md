@@ -1,6 +1,6 @@
 # 🧭 RotaCast
 
-Trace uma rota no mapa, escolha o personagem, marque as paradas e exporte tudo em vídeo — **100% no navegador**, sem servidor próprio e sem chave de API.
+Trace uma rota no mapa, escolha o personagem (são **61**), marque as paradas e exporte tudo em vídeo — **100% no navegador**, sem servidor próprio e sem chave de API.
 
 ---
 
@@ -273,12 +273,15 @@ Um ponto no traçado e, ao lado, quantos quilômetros. O passo acompanha o
 tamanho da rota (1, 2, 5, 10, 20, 25, 50 ou 100 km), limitado a **12 marcas** —
 numa travessia de 400 km, uma marca por km seriam 400 números empilhados.
 
-- até o passo de **5 km**, *toda* marca leva número (marca muda é um ponto sem
-  significado no meio do mapa);
-- em passos maiores só as redondas levam, senão as etiquetas cobrem o traçado.
+- **toda** marca leva número. Cheguei a numerar só as redondas em passos grandes,
+  para "não poluir", e o resultado era o oposto: numa rota de 435 km o passo
+  vira 50 km e só as marcas de 250 em 250 levavam número — sete pontos mudos e um
+  número na tela. Marca sem número não significa nada, e são no máximo doze
+  etiquetas: não há poluição possível.
 
 Rota de 55 km: passo 5 → 11 marcas, de 5 a 55. Rota de 3 km: passo 1 → 3 marcas.
 Abaixo de 1 km não há marca nenhuma (não existe km redondo para marcar).
+Rota de 435 km: passo 50 → 9 marcas, de 50 a 450, todas numeradas.
 
 ### Câmera cinematográfica
 
@@ -306,6 +309,42 @@ Sem isso o começo do vídeo sairia com o mapa vazio. Custo medido numa rota de
 de 1.400. As vistas de parada são limitadas a **oito** paradas por rota (numa
 rota com cinquenta, aproximar em todas dobraria a conta sem ninguém reparar nas
 do meio).
+
+### Rotas longas: o teto de blocos de mapa
+
+Cada bloco de mapa é um pedido a um servidor comunitário (OSM, CyclOSM,
+OpenTopoMap), e o app recusa a exportação acima de **1.400 blocos**. Acontece que
+a câmera "Seguir" no zoom padrão (16) mostra ~2,4 km de largura — então precisa
+de um bloco a cada ~1,4 km de rota. Medido, em 1280×720:
+
+| rota (seguir, zoom 16) | blocos | |
+|---|---|---|
+| 50 km | 924 | ✓ |
+| 75 km | 1.349 | ✓ |
+| 80 km | 1.439 | ✗ recusa |
+| 200 km | 3.473 | ✗ |
+| 435 km (São Paulo → Curitiba) | 7.237 | ✗ |
+
+Ou seja: **toda rota acima de ~80 km era recusada** — e a mensagem mandava
+"diminuir a aproximação" sem dizer até onde. Numa rota interestadual, o zoom que
+cabe é 13,5, e ninguém adivinha isso arrastando um controle.
+
+Agora o painel mostra o número antes (**"≈ 7.237 blocos"**, em âmbar quando passa
+do teto) com um botão **"Usar zoom 13,5"** que resolve com um clique, e a
+mensagem de erro diz qual zoom cabe. O cálculo é local — `maxFollowZoom` faz uma
+busca binária entre os zooms que o controle oferece (de 0,5 em 0,5), e cada
+medição percorre a rota inteira com a mesma função que conta os blocos.
+
+| rota | zoom sugerido | blocos |
+|---|---|---|
+| 435 km | 13,5 | 810 |
+| 700 km | 12,5 | 666 |
+| 1.966 km (São Paulo → Salvador) | 11,5 | 888 |
+| 3.100 km (São Paulo → Fortaleza) | 11,5 | 1.353 |
+
+A câmera **"Rota toda"** cabe sempre: 30 a 48 blocos em qualquer dessas rotas.
+Quando nem o zoom mínimo cabe (acima de ~3.500 km), o painel diz isso e manda
+para a "Rota toda", em vez de oferecer um botão que não resolveria.
 
 ### Quantos pontos sobrevivem
 
@@ -417,7 +456,7 @@ ou cortados.
 
 ```bash
 npm run typecheck  # tsc --noEmit
-npm test           # Vitest (381 casos)
+npm test           # Vitest (406 casos)
 npm run check:dist # o build saiu autocontido e sem /src/?
 ```
 

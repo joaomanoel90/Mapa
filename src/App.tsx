@@ -47,6 +47,7 @@ import {
 import { DEFAULT_ENDPOINTS, type Endpoints } from "./lib/endpoints";
 import { findCharacter } from "./lib/characters";
 import { SceneRenderer, tilesForAnimation, TILE_BUDGET } from "./lib/renderer";
+import { budgetAdvice, maxFollowZoom, tilesNeeded } from "./lib/map-budget";
 import {
   availableFormats,
   CancelledError,
@@ -332,6 +333,72 @@ function App() {
       }),
     [horas, settings.colorBy, track],
   );
+
+  /**
+   * Maior zoom de acompanhamento que cabe no teto de blocos.
+   *
+   * Não depende do zoom escolhido — só da rota, do tamanho da tela e do mapa —
+   * então fica memoizado à parte: arrastar o controle de zoom não refaz a
+   * busca (que percorre a rota inteira algumas vezes).
+   */
+  const sugestaoZoom = useMemo(() => {
+    if (settings.cameraMode !== "follow") return null;
+    return maxFollowZoom({
+      track,
+      width: aspect.w,
+      height: aspect.h,
+      basemap: settings.basemap,
+      maxZoom: maxZoomFor(settings.basemap),
+      cinematic: {
+        opening: settings.cinematic,
+        stops: settings.cinematic,
+        stopTs: pois.map((p) => p.t),
+      },
+    });
+  }, [
+    track,
+    aspect,
+    settings.basemap,
+    settings.cameraMode,
+    settings.cinematic,
+    pois,
+  ]);
+
+  /** Blocos que a câmera escolhida vai precisar — muda a cada passo do controle. */
+  const blocos = useMemo(() => {
+    const camera = {
+      mode: settings.cameraMode,
+      followZoom: settings.followZoom,
+      cinematic: {
+        opening: settings.cinematic,
+        stops: settings.cinematic,
+        stopTs: pois.map((p) => p.t),
+      },
+    };
+    const needed = tilesNeeded({
+      track,
+      width: aspect.w,
+      height: aspect.h,
+      basemap: settings.basemap,
+      maxZoom: maxZoomFor(settings.basemap),
+      camera,
+    });
+    return {
+      needed,
+      fits: needed <= TILE_BUDGET,
+      // a sugestão só faz sentido quando a câmera é a "Seguir" e a rota não cabe
+      sugestao: settings.cameraMode === "follow" ? sugestaoZoom : null,
+    };
+  }, [
+    track,
+    aspect,
+    settings.basemap,
+    settings.cameraMode,
+    settings.followZoom,
+    settings.cinematic,
+    pois,
+    sugestaoZoom,
+  ]);
 
   /** marcas de km (o traçado inteiro já está medido em `track`) */
   const marcas = useMemo(
@@ -858,10 +925,7 @@ function App() {
         camera.cinematic,
       ).length;
       if (needed > TILE_BUDGET) {
-        throw new Error(
-          `Esta rota precisaria de ${needed} blocos de mapa — demais para os servidores ` +
-            `gratuitos. Diminua a “Aproximação da câmera” ou use a câmera “Rota toda”.`,
-        );
+        throw new Error(budgetAdvice(needed, sugestaoZoom, camera.mode));
       }
 
       // mostra o mapa carregando no canvas (não fica uma tela preta)
@@ -1037,6 +1101,8 @@ function App() {
             pois={pois}
             track={track}
             cobertura={cobertura}
+            blocos={blocos}
+            onUseZoom={(z) => update("followZoom", z)}
             progress={sidebarProgress}
             selectedPoi={selectedPoi}
             poiMode={poiMode}

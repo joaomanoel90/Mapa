@@ -380,6 +380,25 @@ própria foto, e o quadrado parecia um papel colado no mapa. Virou **círculo**,
 com o anel na cor da parada e um contorno escuro fino para não sumir no mapa
 claro — a mesma ideia do pino e do avatar da cartela, que já eram redondos.
 
+**O pino da partida e da chegada é o mesmo pino das paradas** — mesmo aro
+colorido, mesmo fundo, mesmo brilho. Antes ele tinha o seu próprio desenho, mais
+achatado e escuro, e o par ficava "apagado" durante o trajeto (o pedido foi
+literal: "poderiam ficar igual os pontos de parada"). A letra A/B também passou a
+usar a cor do lugar (verde na partida, vermelho na chegada), em vez de branca
+sobre um pino escuro.
+
+**O personagem não cobre a partida nem a chegada.** No primeiro quadro o
+personagem está exatamente em cima da partida, e no último em cima da chegada:
+desenhados antes dele, o pino, o nome e a foto ficavam escondidos atrás do
+personagem. Agora os dois são desenhados **depois** dele.
+
+**A cartela final não cobre a chegada.** A cartela é medida antes do desenho, e o
+pino que ela alcançaria sobe o suficiente para ficar acima dela — subindo junto
+com a entrada da cartela, sem pulo. A verificação é de **interseção de
+retângulos**, e não só vertical: olhando só a vertical, um pino que estava
+*abaixo* da cartela subia 314 px para "escapar" de uma cartela que não estava em
+cima dele (defeito encontrado medindo, e que virou teste).
+
 **A foto da partida e a da chegada ficam nas pontas.** A da largada já está na
 tela no primeiro quadro e a da chegada continua no último — a janela das
 paradas, que entram e depois saem, deixaria as duas invisíveis justamente ali,
@@ -573,7 +592,7 @@ ou cortados.
 
 ```bash
 npm run typecheck  # tsc --noEmit
-npm test           # Vitest (522 casos)
+npm test           # Vitest (531 casos)
 npm run check:dist # o build saiu autocontido e sem /src/?
 ```
 

@@ -6,7 +6,14 @@ import { type PhotoImage, type PhotoLookup } from "./photos";
 import type { Poi } from "./pois";
 import { kmMarks } from "./km-marks";
 import { findCharacter } from "./characters";
-import { SceneRenderer, type FrameState, type SceneStyle } from "./renderer";
+import {
+  SceneRenderer,
+  liftToClear,
+  overlapsCard,
+  summaryBox,
+  type FrameState,
+  type SceneStyle,
+} from "./renderer";
 import { endCard, rideSummary, type EndCard } from "./stats";
 
 /**
@@ -30,12 +37,26 @@ function fakeCtx() {
   const imagens: { args: number[]; alpha: number }[] = [];
   /** o y de cada `fillText`, na mesma ordem de `textos` */
   const textosY: number[] = [];
+  /**
+   * Posição **absoluta** de cada texto, na ordem de `textos`: soma o
+   * deslocamento em vigor. É o que importa quando um pino é empurrado para fora
+   * da cartela — o `textosY` sozinho é a posição dentro do `translate`.
+   */
+  const textosYAbs: number[] = [];
+  /** cor em vigor em cada texto (na ordem de `textos`) */
+  const textosCor: string[] = [];
+  /** o que foi desenhado, na ordem: "texto:…" ou "imagem" */
+  const ordem: string[] = [];
   /** posição de cada texto (para achar as marcas da linha do tempo) */
   const textosPos: { s: string; x: number; y: number }[] = [];
   /** primeiro ponto de cada `moveTo` (onde o traçado caiu na tela) */
   const movimentos: number[][] = [];
   const props: Record<string, unknown> = {};
   let pontos = 0;
+  // deslocamento em vigor (segue `save`/`restore`/`translate`)
+  let tx = 0;
+  let ty = 0;
+  const pilha: [number, number][] = [];
   const make = (): unknown =>
     new Proxy(function () {} as unknown as object, {
       get(_alvo, prop) {
@@ -50,6 +71,18 @@ function fakeCtx() {
         }
         if (typeof prop === "symbol") return undefined;
         return (...args: unknown[]) => {
+          if (prop === "save") pilha.push([tx, ty]);
+          if (prop === "restore") {
+            const p = pilha.pop();
+            if (p) {
+              tx = p[0];
+              ty = p[1];
+            }
+          }
+          if (prop === "translate") {
+            tx += Number(args[0] ?? 0);
+            ty += Number(args[1] ?? 0);
+          }
           if (prop === "fillText" && typeof args[0] === "string") {
             textos.push(args[0]);
             textosY.push(Number(args[2] ?? args[1] ?? 0));
@@ -58,8 +91,12 @@ function fakeCtx() {
               x: Number(args[1] ?? 0),
               y: Number(args[2] ?? 0),
             });
+            textosYAbs.push(ty + Number(args[2] ?? args[1] ?? 0));
+            textosCor.push(String(props.fillStyle ?? ""));
+            ordem.push(`texto:${args[0]}`);
           }
           if (prop === "drawImage") {
+            ordem.push("imagem");
             imagens.push({
               args: args.slice(1).map((a) => Number(a)),
               alpha: Number(props.globalAlpha ?? 1),
@@ -95,7 +132,10 @@ function fakeCtx() {
     ctx: make() as CanvasRenderingContext2D,
     textos,
     textosY,
+    textosYAbs,
     textosPos,
+    textosCor,
+    ordem,
     arcos,
     tracos,
     movimentos,
@@ -1030,5 +1070,167 @@ describe("foto da partida e da chegada", () => {
       photos: cacheComFoto,
     });
     expect(textos.some((s) => s.includes("Início do percurso"))).toBe(true);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* Partida e chegada: sobreposição e estilo                            */
+/* ------------------------------------------------------------------ */
+
+const LOCAL_A = { emoji: "🏠", label: "Casa", photo: SRC };
+const LOCAL_B = { emoji: "💦", label: "Cachoeira", photo: SRC };
+const PERSONAGEM = findCharacter("car").emoji;
+const yAbsDe = (f: ReturnType<typeof fakeCtx>, txt: string) =>
+  f.textosYAbs[f.textos.indexOf(txt)];
+
+describe("partida e chegada no vídeo", () => {
+  it("o personagem não cobre a partida", () => {
+    // no primeiro quadro o personagem está exatamente em cima da partida;
+    // desenhado antes, ele escondia o pino, o nome e a foto
+    const { ctx, ordem } = fakeCtx();
+    desenhar(ctx, {
+      ...estado(0, 14, null),
+      endpoints: { a: LOCAL_A, b: null },
+      photos: cacheComFoto,
+    });
+    const carro = ordem.indexOf(`texto:${PERSONAGEM}`);
+    const nomeA = ordem.indexOf("texto:Casa");
+    expect(carro).toBeGreaterThanOrEqual(0);
+    expect(nomeA).toBeGreaterThan(carro);
+  });
+
+  it("o personagem não cobre a chegada", () => {
+    const { ctx, ordem } = fakeCtx();
+    desenhar(ctx, {
+      ...estado(1, 14, null),
+      endpoints: { a: null, b: LOCAL_B },
+      photos: cacheComFoto,
+    });
+    const carro = ordem.indexOf(`texto:${PERSONAGEM}`);
+    const nomeB = ordem.indexOf("texto:Cachoeira");
+    expect(nomeB).toBeGreaterThan(carro);
+  });
+
+  it("o pino A/B é o mesmo pino das paradas (fundo e brilho)", () => {
+    // antes o A/B tinha o seu próprio desenho — mais escuro, sem sombra nem
+    // brilho — e o usuário viu o par como "apagado" durante o trajeto
+    const daParada = fakeCtx();
+    desenhar(daParada.ctx, { ...estado(0.6, 14, null), stops: [parada()] });
+    const doLocal = fakeCtx();
+    desenhar(doLocal.ctx, {
+      ...estado(0, 14, null),
+      endpoints: { a: { emoji: "", label: "Casa" }, b: null },
+      photos: cacheVazio,
+    });
+    expect(daParada.pinturas).toContain("rgba(9,12,20,0.94)");
+    expect(doLocal.pinturas).toContain("rgba(9,12,20,0.94)");
+    expect(daParada.tracos.some((t) => t.cor === "rgba(255,255,255,0.2)")).toBe(true);
+    expect(doLocal.tracos.some((t) => t.cor === "rgba(255,255,255,0.2)")).toBe(true);
+  });
+
+  it("a letra A/B ganha a cor do lugar (não é branca no escuro)", () => {
+    const { ctx, textos, textosCor } = fakeCtx();
+    desenhar(ctx, {
+      ...estado(0, 14, null),
+      endpoints: { a: { emoji: "", label: "Casa" }, b: null },
+      photos: cacheVazio,
+    });
+    expect(textosCor[textos.indexOf("A")]).toBe("#22c55e");
+    expect(textosCor[textos.indexOf("B")]).toBe("#f87171");
+  });
+
+  it("a foto da partida é menor que a foto de uma parada", () => {
+    const daParada = fakeCtx();
+    desenhar(daParada.ctx, {
+      ...estado(0.51, 14, null),
+      stops: [parada({ photo: SRC })],
+      photos: cacheComFoto,
+    });
+    const doLocal = fakeCtx();
+    desenhar(doLocal.ctx, {
+      ...estado(0, 14, null),
+      endpoints: { a: LOCAL_A, b: null },
+      photos: cacheComFoto,
+    });
+    // args = [sx, sy, size, dx, dy, dw, dh]: dw é o lado desenhado na tela
+    const ladoParada = daParada.imagens[0].args[6];
+    const ladoLocal = doLocal.imagens[0].args[6];
+    expect(ladoLocal).toBeLessThan(ladoParada);
+    expect(ladoLocal).toBeCloseTo(56, 0);
+    expect(ladoParada).toBeCloseTo(78, 0);
+  });
+
+  it("a cartela final não cobre a chegada", () => {
+    // com a câmera que acompanha o personagem, a chegada cai no meio da tela —
+    // exatamente onde a cartela aparece (é o caso do vídeo do usuário)
+    const seguir = { camera: { mode: "follow" as const, followZoom: 16 } };
+    const com = fakeCtx();
+    desenhar(com.ctx, {
+      ...estado(1, 14, cartela),
+      ...seguir,
+      endpoints: { a: null, b: LOCAL_B },
+      photos: cacheComFoto,
+    });
+    const caixa = summaryBox(com.ctx, 1280, 720, { ...estado(1, 14, cartela), ...seguir }, 1);
+    expect(caixa).not.toBeNull();
+
+    const sem = fakeCtx();
+    desenhar(sem.ctx, {
+      ...estado(1, 14, null),
+      ...seguir,
+      endpoints: { a: null, b: LOCAL_B },
+      photos: cacheComFoto,
+    });
+    // o nome da chegada sobe para ficar acima da cartela — e sem cartela fica onde sempre ficou
+    expect(yAbsDe(com, "Cachoeira")).toBeLessThan(yAbsDe(sem, "Cachoeira"));
+    expect(yAbsDe(com, "Cachoeira")).toBeLessThan(caixa!.boxY);
+  });
+
+  it("pino acima ou abaixo da cartela não se mexe (só quem ela alcança desvia)", () => {
+    // o desvio é cirúrgico. Com a câmera de rota toda, a partida cai **acima**
+    // da cartela e a chegada **abaixo** — e nenhuma das duas é alcançada. Uma
+    // checagem só vertical (em vez de interseção de retângulos) subia 282 px a
+    // chegada para "escapar" de uma cartela que estava acima dela.
+    const marcas = { a: { emoji: "", label: "Casa" }, b: { emoji: "", label: "Cachoeira" } };
+    const comCartela = fakeCtx();
+    desenhar(comCartela.ctx, {
+      ...estado(1, 14, cartela),
+      endpoints: marcas,
+      photos: cacheVazio,
+    });
+    const semCartela = fakeCtx();
+    desenhar(semCartela.ctx, {
+      ...estado(1, 14, null),
+      endpoints: marcas,
+      photos: cacheVazio,
+    });
+    expect(yAbsDe(comCartela, "Casa")).toBeCloseTo(yAbsDe(semCartela, "Casa"), 6);
+    expect(yAbsDe(comCartela, "Cachoeira")).toBeCloseTo(yAbsDe(semCartela, "Cachoeira"), 6);
+
+    // e as duas estão mesmo fora da caixa da cartela (o cenário é o que penso)
+    const caixa = summaryBox(comCartela.ctx, 1280, 720, estado(1, 14, cartela), 1);
+    expect(caixa).not.toBeNull();
+    const fora = (y: number) => y < caixa!.boxY || y > caixa!.boxY + caixa!.boxH;
+    expect(fora(yAbsDe(semCartela, "Casa"))).toBe(true);
+    expect(fora(yAbsDe(semCartela, "Cachoeira"))).toBe(true);
+  });
+
+  it("pino abaixo (ou ao lado) da cartela não é alcançado por ela", () => {
+    // olhando só a vertical, um pino 314 px abaixo da cartela subia para
+    // "escapar" de uma cartela que nem estava em cima dele
+    const caixa = { x: 400, y: 200, w: 480, h: 160 };
+    expect(overlapsCard({ x: 640, y: 500 }, 17, caixa)).toBe(false); // abaixo
+    expect(overlapsCard({ x: 640, y: 280 }, 17, caixa)).toBe(true); // dentro
+    expect(overlapsCard({ x: 100, y: 280 }, 17, caixa)).toBe(false); // à esquerda
+    expect(overlapsCard({ x: 1100, y: 280 }, 17, caixa)).toBe(false); // à direita
+    expect(overlapsCard({ x: 640, y: 210 }, 17, caixa)).toBe(true); // encostando por cima
+    expect(overlapsCard({ x: 640, y: 100 }, 17, caixa)).toBe(false); // acima, sem encostar
+  });
+
+  it("`liftToClear` sobe só o necessário, e só quando há sobreposição", () => {
+    expect(liftToClear(400, 300, 1, 10)).toBeCloseTo(110);
+    expect(liftToClear(300, 400, 1, 10)).toBe(0);
+    expect(liftToClear(400, 300, 0.5, 10)).toBeCloseTo(55);
+    expect(liftToClear(400, 300, 0, 10)).toBe(0);
   });
 });

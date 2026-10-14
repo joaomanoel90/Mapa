@@ -513,6 +513,22 @@ export class SceneRenderer {
 
     const sample = sampleTrack(track, t);
 
+  /*
+   * A cartela final é **medida** antes de qualquer desenho: o pino da chegada
+   * precisa saber onde ela vai cair para sair de baixo. Antes ela era desenhada
+   * por último (por cima) e cobria o pino B, o nome e a foto da chegada.
+   */
+  const cartao = style.showSummary
+    ? summaryBox(ctx, width, height, input, sf)
+    : null;
+  const retanguloDaCartela = (L: SummaryLayout) => ({
+    x: L.boxX,
+    y: L.boxY,
+    w: L.boxW,
+    h: L.boxH,
+    forca: L.alpha,
+  });
+
     /** cor por velocidade/inclinação, quando o app calculou */
     const colored =
       input.colored && input.colored.bands.length === track.pts.length ? input.colored : null;
@@ -608,15 +624,23 @@ export class SceneRenderer {
       drawStops(ctx, input, toXY, sf);
     }
 
-    // --- pontos A/B (podem ser locais marcados) ---
+    // --- personagem ---
+    drawCharacter(ctx, toXY(sample.pos), sample.heading, input, sf);
+
+    /*
+     * --- pontos de partida e chegada ---
+     *
+     * Desenhados **depois do personagem**: no primeiro quadro o personagem está
+     * exatamente em cima da partida, e no último em cima da chegada — desenhados
+     * antes, o pino, o nome e a foto ficavam escondidos atrás dele.
+     *
+     * A foto das duas usa a mesma janela em segundos das paradas, **medida das
+     * pontas**: a da largada já está na tela no primeiro quadro e a da chegada
+     * continua no último. Uma foto **menor** que a das paradas, porque as duas
+     * ficam nos extremos do trajeto, onde o personagem e a cartela final
+     * disputam o mesmo lugar.
+     */
     if (style.showEndpoints && track.pts.length > 1) {
-      /*
-       * As fotos de partida e chegada usam a mesma janela em segundos das
-       * paradas, **medida das pontas**: a da largada já está na tela no
-       * primeiro quadro e a da chegada continua na tela no último. (Medida
-       * como a das paradas — que entram e saem —, a da largada estaria
-       * invisível no quadro zero e a da chegada invisível no fim.)
-       */
       const fotoDoLocal = (mark?: import("./endpoints").EndpointMark | null) =>
         mark?.photo ? (input.photos?.get(mark.photo) ?? null) : null;
       drawPin(
@@ -628,6 +652,7 @@ export class SceneRenderer {
         input.endpoints.a,
         fotoDoLocal(input.endpoints.a),
         photoWindowAlpha(t * input.duration + PHOTO_FADE_IN_S),
+        cartao ? retanguloDaCartela(cartao) : null,
       );
       drawPin(
         ctx,
@@ -638,11 +663,9 @@ export class SceneRenderer {
         input.endpoints.b,
         fotoDoLocal(input.endpoints.b),
         photoWindowAlpha((1 - t) * input.duration + PHOTO_FADE_IN_S),
+        cartao ? retanguloDaCartela(cartao) : null,
       );
     }
-
-    // --- personagem ---
-    drawCharacter(ctx, toXY(sample.pos), sample.heading, input, sf);
 
     const headerBottom = style.showTitle
       ? drawTitle(ctx, width, input, sample, onDark, sf)
@@ -658,7 +681,7 @@ export class SceneRenderer {
     if (colored && style.showRoute) {
       drawLegend(ctx, width, height, colored, sf, style.showProgress);
     }
-    if (style.showSummary) drawSummary(ctx, width, height, input, onDark, sf);
+    if (cartao) drawSummary(ctx, width, height, cartao, onDark, sf);
 
     // atribuição obrigatória dos mapas gratuitos
     drawAttribution(ctx, width, height, bm.attribution, style.showProgress, sf);
@@ -793,6 +816,76 @@ function drawCharacter(
   ctx.restore();
 }
 
+/**
+ * O pino redondo de um ponto no mapa — o mesmo desenho para as paradas e para
+ * a partida/chegada.
+ *
+ * Antes cada um tinha o seu, e o A/B saiu achatado e escuro em comparação: sem
+ * a sombra e sem o brilho do aro que as paradas têm. Uma função só mantém os
+ * dois iguais (e é o que o usuário pediu: "poderiam ficar igual os pontos de
+ * parada").
+ *
+ * Desenha na origem — quem chama já transladou para o ponto.
+ */
+function drawPinBadge(
+  ctx: CanvasRenderingContext2D,
+  r: number,
+  color: string,
+  sf: number,
+) {
+  ctx.beginPath();
+  ctx.arc(0, 0, r, 0, Math.PI * 2);
+  ctx.fillStyle = "rgba(9,12,20,0.94)";
+  ctx.shadowColor = "rgba(0,0,0,0.55)";
+  ctx.shadowBlur = 12 * sf;
+  ctx.shadowOffsetY = 3 * sf;
+  ctx.fill();
+  ctx.shadowColor = "transparent";
+  ctx.shadowOffsetY = 0;
+  ctx.lineWidth = 2.6 * sf;
+  ctx.strokeStyle = color;
+  ctx.stroke();
+
+  // brilho do aro (a "luz" que dá volume ao pino)
+  ctx.beginPath();
+  ctx.arc(0, 0, r - 2.6 * sf, Math.PI * 0.92, Math.PI * 1.85);
+  ctx.strokeStyle = "rgba(255,255,255,0.2)";
+  ctx.lineWidth = 1.6 * sf;
+  ctx.stroke();
+}
+
+/**
+ * O pino encosta na cartela?
+ *
+ * Interseção de retângulos — **não** basta olhar a vertical: um pino que está
+ * abaixo da cartela não é alcançado por ela (e, olhando só a vertical, ele
+ * subia 314 px para "escapar" de uma cartela que estava acima dele).
+ */
+export function overlapsCard(
+  at: { x: number; y: number },
+  r: number,
+  card: { x: number; y: number; w: number; h: number },
+): boolean {
+  return (
+    at.x + r > card.x &&
+    at.x - r < card.x + card.w &&
+    at.y + r > card.y &&
+    at.y - r < card.y + card.h
+  );
+}
+
+/** Quanto um pino precisa subir para não ficar debaixo da cartela final. */
+export function liftToClear(
+  bottomY: number,
+  topY: number,
+  forca: number,
+  margem: number,
+): number {
+  if (!(forca > 0)) return 0;
+  const sobra = bottomY - (topY - margem);
+  return sobra > 0 ? sobra * Math.min(1, forca) : 0;
+}
+
 function drawPin(
   ctx: CanvasRenderingContext2D,
   at: { x: number; y: number },
@@ -802,33 +895,46 @@ function drawPin(
   mark?: import("./endpoints").EndpointMark | null,
   foto?: PhotoImage | null,
   fotoAlpha = 0,
+  /** retângulo que o pino não pode invadir (a cartela final, no fim do vídeo) */
+  esquiva?: { x: number; y: number; w: number; h: number; forca: number } | null,
 ) {
   const marked = hasMark(mark ?? null);
-  const r = (marked ? 17 : 15) * sf;
+  // mesmo tamanho do pino das paradas — a ideia é que os dois sejam o mesmo pino
+  const r = 17 * sf;
 
   ctx.save();
   ctx.translate(at.x, at.y);
-  ctx.beginPath();
-  ctx.arc(0, 0, r, 0, Math.PI * 2);
-  ctx.fillStyle = "rgba(15,18,28,0.9)";
-  ctx.shadowColor = "rgba(0,0,0,0.5)";
-  ctx.shadowBlur = 10 * sf;
-  ctx.fill();
-  ctx.shadowColor = "transparent";
-  ctx.lineWidth = 2.5 * sf;
-  ctx.strokeStyle = color;
-  ctx.stroke();
+
+  /*
+   * A cartela final cobre o meio da tela no fim do vídeo — e a chegada está
+   * justamente ali. Sem isto, o pino, o nome e a foto da chegada ficavam
+   * atravessados pela cartela.
+   *
+   * Só sobe quem a cartela **alcança**: a interseção é de retângulos, e não só
+   * vertical. (Olhando só a vertical, um pino que estava **abaixo** da cartela
+   * subia 314 px para "escapar" dela.) E sobe junto com a entrada da cartela,
+   * sem pulo seco.
+   */
+  const alcancado = !!esquiva && overlapsCard(at, r, esquiva);
+  const subida = alcancado
+    ? liftToClear(at.y + r, esquiva!.y, esquiva!.forca, 10 * sf)
+    : 0;
+  if (subida > 0) ctx.translate(0, -subida);
+
+  drawPinBadge(ctx, r, color, sf);
 
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   if (foto) {
-    // a foto toma o lugar do emoji: só o aro da cor do lugar fica
+    // a foto ocupa o lugar do emoji/letra; o aro da cor do lugar fica por cima
   } else if (marked && mark!.emoji.trim()) {
     ctx.font = `${Math.round(r * 1.05)}px ${EMOJI_FONT}`;
     ctx.fillText(mark!.emoji.trim(), 0, r * 0.06);
   } else {
     ctx.font = `800 ${Math.round(r * 1.1)}px "Inter","Segoe UI",system-ui,sans-serif`;
-    ctx.fillStyle = "#ffffff";
+    // a letra ganha a cor do lugar (verde na partida, vermelho na chegada):
+    // era branca sobre um pino escuro, e o usuário viu o par como "escuro"
+    ctx.fillStyle = color;
     ctx.fillText(fallback, 0, r * 0.06);
   }
 
@@ -862,9 +968,11 @@ function drawPin(
     ctx.fillText(label, 0, by + bh / 2 + 0.5 * sf);
   }
 
-  // foto do local em círculo, acima de tudo (mesma ideia da foto da parada)
+  // foto do local em círculo, acima do nome — **menor** que a das paradas: as
+  // duas ficam nos extremos do trajeto, onde o personagem e a cartela final
+  // disputam o mesmo lugar
   if (foto && fotoAlpha > 0.01) {
-    const lado = 78 * sf;
+    const lado = 56 * sf;
     // acima do pino e da etiqueta do nome (as duas coisas estão em y negativo)
     const alturaRotulo = label ? r + 19 * sf + 10 * sf : r;
     ctx.save();
@@ -1160,23 +1268,7 @@ function drawStops(
     ctx.scale(scale, scale);
 
     const r = 17 * sf;
-    ctx.beginPath();
-    ctx.arc(0, 0, r, 0, Math.PI * 2);
-    ctx.fillStyle = "rgba(9,12,20,0.94)";
-    ctx.shadowColor = "rgba(0,0,0,0.55)";
-    ctx.shadowBlur = 12 * sf;
-    ctx.shadowOffsetY = 3 * sf;
-    ctx.fill();
-    ctx.shadowColor = "transparent";
-    ctx.lineWidth = 2.6 * sf;
-    ctx.strokeStyle = stop.color;
-    ctx.stroke();
-
-    ctx.beginPath();
-    ctx.arc(0, 0, r - 2.6 * sf, Math.PI * 0.92, Math.PI * 1.85);
-    ctx.strokeStyle = "rgba(255,255,255,0.2)";
-    ctx.lineWidth = 1.6 * sf;
-    ctx.stroke();
+    drawPinBadge(ctx, r, stop.color, sf);
 
     ctx.font = `${Math.round(r * 1.08)}px ${EMOJI_FONT}`;
     ctx.textAlign = "center";
@@ -1523,26 +1615,52 @@ function drawAvatar(
   ctx.restore();
 }
 
-function drawSummary(
+/**
+ * Onde a cartela final fica e quanto ela está visível.
+ *
+ * A medida é separada do desenho por um motivo prático: o pino da chegada
+ * precisa saber **onde a cartela vai cair** para sair de baixo dela. Antes, a
+ * cartela era desenhada por último e simplesmente cobria o pino B, o nome e a
+ * foto da chegada.
+ */
+export type SummaryLayout = {
+  /** quanto da cartela está visível (a entrada é suave) */
+  alpha: number;
+  pad: number;
+  gap: number;
+  valorFs: number;
+  labelFs: number;
+  noteFs: number;
+  colunas: { label: string; value: string; w: number }[];
+  nota: string | null;
+  totalW: number;
+  avatar: PhotoImage | null;
+  ladoAvatar: number;
+  alturaAvatar: number;
+  boxX: number;
+  boxY: number;
+  boxW: number;
+  boxH: number;
+};
+
+export function summaryBox(
   ctx: CanvasRenderingContext2D,
   width: number,
   height: number,
   input: FrameState,
-  onDark: boolean,
   sf: number,
-) {
+): SummaryLayout | null {
   const card = input.summary;
-  if (!card || (card.tiles.length === 0 && !card.note)) return;
+  if (!card || (card.tiles.length === 0 && !card.note)) return null;
 
   const dur = Math.max(1, input.duration);
   // percentual do vídeo em que a cartela começa (limitado a 45% em clipes curtos)
   const hold = Math.min(0.45, SUMMARY_HOLD_S / dur);
   const fade = Math.min(hold, SUMMARY_FADE_S / dur);
   const inicio = 1 - hold;
-  if (input.t < inicio) return;
+  if (input.t < inicio) return null;
   const alpha = fade > 0 ? Math.min(1, Math.max(0, (input.t - inicio) / fade)) : 1;
 
-  const claro = !onDark;
   const pad = 34 * sf;
   const gap = 34 * sf;
   const maxW = width * 0.92;
@@ -1632,6 +1750,60 @@ function drawSummary(
     pad * 1.6;
   const boxX = (width - boxW) / 2;
   const boxY = (height - altura) / 2;
+
+
+  return {
+    alpha,
+    pad,
+    gap,
+    valorFs,
+    labelFs,
+    noteFs,
+    colunas,
+    nota,
+    totalW,
+    avatar,
+    ladoAvatar,
+    alturaAvatar,
+    boxX,
+    boxY,
+    boxW,
+    boxH: altura,
+  };
+}
+
+/** Desenha a cartela já medida por `summaryBox`. */
+function drawSummary(
+  ctx: CanvasRenderingContext2D,
+  width: number,
+  height: number,
+  L: SummaryLayout,
+  onDark: boolean,
+  sf: number,
+) {
+  const {
+    alpha,
+    pad,
+    gap,
+    valorFs,
+    labelFs,
+    noteFs,
+    colunas,
+    nota,
+    totalW,
+    avatar,
+    ladoAvatar,
+    alturaAvatar,
+    boxX,
+    boxY,
+    boxW,
+    boxH: altura,
+  } = L;
+  const claro = !onDark;
+  const fValor = (px: number) =>
+    `800 ${Math.round(px)}px "Inter","Segoe UI",system-ui,sans-serif`;
+  const fLabel = (px: number) =>
+    `600 ${Math.round(px)}px "Inter","Segoe UI",system-ui,sans-serif`;
 
   ctx.save();
   ctx.globalAlpha = alpha;

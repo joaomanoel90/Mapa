@@ -159,32 +159,74 @@ nada aparece no vídeo sem alguém ter pedido.
 #### A distância medida do arquivo (e o ritmo)
 
 Somar a distância ponto a ponto **sempre infla**: o vaivém do GPS faz o caminho
-parecer mais longo. Numa corrida de 21 km isso é ~2% — e como o ritmo é tempo ÷
-distância, o HUD saía ~2% rápido (4:56 em vez de 5:02 num percurso de 21,37 km
-em 1h47m34s). Medido numa reta de 21,4 km com 1 ponto a cada 5 m:
+parecer mais longo. Medido num arquivo real de prova de rua (5.704 pontos, um a
+cada 3,6 m): somando cru dá **21,717 km**, e o Strava marca **21,370**. Como o
+ritmo é tempo ÷ distância, o HUD de 1h47 saía **4:58** onde o certo era **5:02** —
+e o erro era todo da régua, não do relógio (esse arquivo nem tem `<time>`; o
+tempo que o HUD usa é o que está escrito na cartela).
+
+A régua é uma **média móvel de ±50 m de caminho**, em duas passadas, com três
+cuidados, os três aprendidos medindo:
+
+1. **a janela é medida em metros**, não em quantidade de pontos — o arquivo de
+   1 Hz e o de 10 Hz do mesmo percurso medem o mesmo (0,002% de diferença);
+2. **ponto de curva fechada fica exatamente onde está** — mais de 30° de giro num
+   trecho de 40 m é esquina, não ruído. Era esse o defeito do limiar antigo de
+   50°: a esquina arredondada de raio 25 m dá 46° no meio (protegida) e só 20-40°
+   na entrada e na saída, e a média entrava justamente ali. Medido numa volta de
+   quadra limpa, a régua antiga comia 0,8% de distância;
+3. **a janela não atravessa esses pontos** — perto de uma esquina, a média só
+   enxerga o lado do caminho em que o ponto está. Sem isso, a média pegava pontos
+   dos dois lados da curva e o traçado "estourava" ali: numa rua de cidade limpa
+   a janela de 32 m inventava **+2,5%** de distância, sem uma curva a mais para
+   justificar.
+
+O giro é medido de **40 m antes até 40 m depois**, e não entre pontos vizinhos:
+com ruído, um ponto jogado 3 m para o lado "vira" 50° sozinho, e aí o filtro
+preserva tudo e não filtra nada (foi o primeiro defeito que apareceu, medindo). O
+span também separa vaivém de curva quando os dois têm o mesmo tamanho aparente: o
+erro do rumo **cai** com a distância, o giro de uma curva de verdade **não**. Numa
+reta densa com ruído branco de ±2,5 m, o giro medido tem mediana de 23° num span
+de 20 m e de 13° num span de 40 m.
+
+Reta de 21,37 km com um ponto a cada 5 m (ruído correlacionado, que é o do GPS de
+verdade):
 
 | ruído do GPS | somando cru | com o filtro |
 |---|---|---|
-| ±1,5 m | +1,4% | +0,3% |
-| ±2,0 m | +2,5% | **+0,4%** |
-| ±2,5 m | +3,9% | +0,7% |
-| ±3,0 m | +5,7% | +1,0% |
+| ±1,5 m | +1,4% | +0,01% |
+| ±2,0 m | +2,5% | +0,02% |
+| ±2,5 m | +3,9% | +0,03% |
+| ±3,0 m | +5,7% | +0,07% |
 
-O filtro é uma **média móvel de ±8 m de caminho**, em duas passadas — e a janela
-é medida em **metros**, não em quantidade de pontos, para o arquivo de 1 Hz e o
-de 10 Hz medirem o mesmo. Os pontos de **curva fechada** (mais de 50° num trecho
-de 20 m) ficam como estão: esquina de rua é caminho, não ruído. E medir a curva
-em 20 m, em vez de entre pontos vizinhos, é essencial — com ruído, um ponto
-jogado 3 m para o lado "vira" 50° sozinho, e aí o filtro preservaria tudo e não
-filtraria nada (foi o primeiro defeito que apareceu, medindo).
-
-A geometria de verdade não é comida:
+E a geometria de verdade não é comida:
 
 | percurso | somando cru | com o filtro |
 |---|---|---|
-| rua de cidade com curvas de 90° (limpa) | 0% | **0,000%** |
-| curva suave (30 m a cada 400 m, limpa) | 0% | −0,04% |
-| a mesma rua de cidade com ruído de ±2,5 m | +3,9% | +1,1% |
+| reta limpa | 0% | **0,000%** |
+| rua de cidade com esquina arredondada de raio 25 m (limpa) | 0% | **0,000%** |
+| meia-volta de serra com 20 m de raio (limpa) | 0% | **0,000%** |
+| volta de quadra de 0,9 km (limpa) | 0% | −0,11% |
+| percurso de 34,7 km com esquinas e curvas de raio 150 m | 0% | −0,25% |
+| a mesma rua de cidade com ruído de ±2,5 m | +4,1% | +1,3% |
+| serpentina longa (30 m de amplitude a cada 400 m) | 0% | −1,5% |
+
+A última linha é o preço da janela larga, e está aí de propósito: com a janela
+antiga de ±8 m o erro dessa serpentina era −0,04%, mas o vaivém do GPS ficava no
+meio — 0,76% de distância no arquivo real. Numa estrada sinuosa dessas, 1,5% uma
+vez a menos vale menos do que 0,76% em **todo** percurso de rua. Esquina de rua,
+curva de serra, rotatória e volta de quadra continuam inteiras.
+
+Antes e depois, nos mesmos casos (o arquivo real é o que manda):
+
+| caso | régua antiga (±8 m, 50°, 20 m) | régua atual (±50 m, 30°, 40 m) |
+|---|---|---|
+| **arquivo real (o Strava marca 21,370 km)** | 21,531 km (**+0,76%**) | **21,387 km (+0,08%)** |
+| percurso de 34,7 km com curvas (limpo) | −0,40% | −0,25% |
+| o mesmo com ruído | −0,27% | −0,08% |
+| volta de quadra de 0,9 km (limpa) | −0,76% | −0,11% |
+| reta densa com ruído correlacionado de ±2,5 m | +1,00% | −0,06% |
+| reta densa com ruído branco de ±2,5 m | +36,0% | +1,4% |
 
 Numa reta limpa o filtro é inofensivo por construção: a média de pontos alinhados
 cai na própria reta. O **desenho** continua sendo o arquivo, ponto a ponto; quem
@@ -675,7 +717,7 @@ ou cortados.
 
 ```bash
 npm run typecheck  # tsc --noEmit
-npm test           # Vitest (579 casos)
+npm test           # Vitest (582 casos)
 npm run check:dist # o build saiu autocontido e sem /src/?
 ```
 

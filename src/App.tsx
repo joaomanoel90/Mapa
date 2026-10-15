@@ -19,7 +19,6 @@ import { colorizeRoute, dataCoverage } from "./lib/coloring";
 import { kmMarks } from "./lib/km-marks";
 import { parseDuration } from "./lib/duration";
 import { buildTimeline, routeProgress } from "./lib/timeline";
-import { curvaDePacing } from "./lib/pacing";
 import {
   buildTrack,
   formatDistance,
@@ -502,36 +501,18 @@ function App() {
   );
 
   /**
-   * A desaceleração nos pontos — **uma** curva para a prévia e para o vídeo.
-   *
-   * O pedido: "quando ele passar por pontos, dar uma desacelerada e focar no
-   * ponto". A curva anda com o mesmo relógio do vídeo (`routeProgress`) e a
-   * posição visual passa a ser `posicao(t)`: perto de cada parada o passo
-   * diminui, e entre elas o caminhar acelera o quanto precisa para o percurso
-   * inteiro caber na mesma duração.
-   *
-   * Vem junto com a chave da câmera cinematográfica: é o mesmo "modo" — o foco
-   * do zoom é dela, e a freada é o que dá tempo de ver o foco. Desligada, a
-   * posição é a de sempre (a curva sem paradas é a identidade).
-   */
-  const pacing = useMemo(
-    () =>
-      curvaDePacing(
-        settings.cinematic ? passageTimes(pois, passagens) : [],
-        linhaDoTempo.percurso,
-      ),
-    [settings.cinematic, pois, passagens, linhaDoTempo.percurso],
-  );
-
-  /**
    * Onde a personagem está **na rota** no instante atual (0..1).
    *
-   * `progress` é a fração do **vídeo** (é o que a barra da linha do tempo
-   * mostra); tudo o que fala da rota — o mapa, o "já passou por aqui" do
-   * painel, a distância percorrida — usa esta posição, que é a mesma do
-   * desenho. Sem a desaceleração as duas são a mesma coisa.
+   * É o que a barra da linha do tempo mostra, e tudo o que fala da rota — o
+   * mapa, o "já passou por aqui" do painel, a distância percorrida — usa esta
+   * mesma posição: a do desenho, e a do vídeo.
+   *
+   * Era aqui que entrava a **freada** nas paradas (uma curva que esticava o
+   * relógio perto de cada ponto). O usuário pediu para tirar: "quero sem a
+   * pausa nos pontos, só um zoom e focar no ícone do ponto" — a posição é a de
+   * sempre, e a câmera é quem faz a ênfase.
    */
-  const rotaDoVideo = pacing.posicao(progress);
+  const rotaDoVideo = progress;
 
   /**
    * Posição na rota em passos de 1%, para o painel lateral.
@@ -1112,8 +1093,9 @@ function App() {
           // o gravador fala em tempo de vídeo; o desenho, em progresso do percurso
           const seg = t * settings.duration;
           void elapsed;
-          // a freada entra aqui: o vídeo desenha a **posição**, não a fração do vídeo
-          paint(pacing.posicao(routeProgress(linhaDoTempo, seg)), seg);
+          // o vídeo desenha a **posição** no percurso, não a fração do vídeo
+          // (era aqui que a freada das paradas entrava)
+          paint(routeProgress(linhaDoTempo, seg), seg);
         },
       };
 
@@ -1432,7 +1414,6 @@ function App() {
           <Timeline
             progress={progress}
             rota={rotaDoVideo}
-            tempoDoPonto={pacing.tempoDe}
             playing={playing}
             duration={settings.duration}
             track={track}

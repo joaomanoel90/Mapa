@@ -883,13 +883,6 @@ const SRC = "data:image/jpeg;base64,AAAA";
 /** Um "cache" de fotos que já tem tudo pronto (o desenho só consulta). */
 const cacheComFoto: PhotoLookup = { get: (src) => (src ? FOTO : null) };
 const cacheVazio: PhotoLookup = { get: () => null };
-/**
- * A foto foi escolhida e o carregamento **falhou** (já tentou, não tem).
- * É o caso em que o aviso do lugar volta.
- */
-const cacheQueFalhou: PhotoLookup = { get: () => null, has: () => true };
-/** A foto ainda está chegando (nem tentou): não é falha, é espera. */
-const cacheCarregando: PhotoLookup = { get: () => null, has: () => false };
 
 const parada = (extra: Partial<Poi> = {}): Poi => ({
   id: "p1",
@@ -1104,9 +1097,10 @@ describe("a parada perto do fim do vídeo", () => {
     /*
      * O defeito que o usuário viu ("no ponto de parada perto do final, ele
      * aparece como toast, como ele ficou em baixo da tela"): a etiqueta era
-     * medida em **metros**, como o pino, e a desaceleração da parada faz os
-     * últimos metros durarem muito tempo de vídeo. Numa parada perto do fim ela
-     * nascia depois de o vídeo acabar — e o que sobrava era só o aviso do topo.
+     * medida em **metros**, como o pino. Numa rota em que o vídeo anda poucos
+     * metros por segundo os últimos metros duram muito tempo de vídeo, e a
+     * parada perto do fim só se anunciava depois de o vídeo acabar. Em segundos
+     * de vídeo a etiqueta entra igual em qualquer percurso — de 2 km a 60 km.
      *
      * Aqui: 0,4 s de vídeo depois da passagem, a etiqueta está na tela.
      */
@@ -1344,9 +1338,6 @@ const comVolta = (extra: Partial<Poi> = {}) => ({
   passages: DUAS_VEZES,
 });
 
-/** Quantos avisos do topo ("📍 … km do início") foram escritos no quadro. */
-const avisos = (textos: string[]) => textos.filter((s) => s.includes("km do início")).length;
-
 describe("parada passada duas vezes", () => {
   it("a foto aparece na ida, some, e aparece de novo na volta", () => {
     const ida = fakeCtx();
@@ -1361,54 +1352,6 @@ describe("parada passada duas vezes", () => {
     expect(fotosGrandes(ida).length).toBe(1);
     expect(fotosGrandes(meio).length).toBe(0);
     expect(fotosGrandes(volta).length).toBe(1);
-  });
-
-  it("o aviso do topo aparece nas duas pontas, com o km de cada passagem", () => {
-    // o km do aviso é o **do momento**: na ida, 1,51 km; na volta, 2,41 km
-    const kmDe = (ts: number) => `📍 ${((ts * track.total) / 1000).toFixed(2)} km do início`;
-    const ida = fakeCtx();
-    const volta = fakeCtx();
-    const comum = comVolta();
-    desenhar(ida.ctx, { ...estado(0.51, 14, null), ...comum });
-    desenhar(volta.ctx, { ...estado(0.81, 14, null), ...comum });
-    expect(avisos(ida.textos)).toBe(1);
-    expect(avisos(volta.textos)).toBe(1);
-    expect(ida.textos).toContain(kmDe(0.5));
-    expect(ida.textos).not.toContain(kmDe(0.8));
-    expect(volta.textos).toContain(kmDe(0.8));
-    expect(volta.textos).not.toContain(kmDe(0.5));
-  });
-
-  it("quem tem foto não vira aviso no topo", () => {
-    const { ctx, textos } = fakeCtx();
-    desenhar(ctx, {
-      ...estado(0.51, 14, null),
-      ...comVolta({ photo: SRC }),
-      photos: cacheComFoto,
-    });
-    expect(avisos(textos)).toBe(0);
-  });
-
-  it("foto escolhida mas que FALHOU: o aviso volta (o lugar não passa em branco)", () => {
-    const { ctx, textos } = fakeCtx();
-    desenhar(ctx, {
-      ...estado(0.51, 14, null),
-      ...comVolta({ photo: SRC }),
-      photos: cacheQueFalhou,
-    });
-    expect(avisos(textos)).toBe(1);
-  });
-
-  it("foto escolhida e ainda carregando: o aviso não apareceu (é espera, não falha)", () => {
-    // o aviso voltava no meio do caminho, com a foto ainda chegando: quem
-    // mandou tirar o aviso escolheu a foto — o aviso só volta se ela falhar
-    const { ctx, textos } = fakeCtx();
-    desenhar(ctx, {
-      ...estado(0.51, 14, null),
-      ...comVolta({ photo: SRC }),
-      photos: cacheCarregando,
-    });
-    expect(avisos(textos)).toBe(0);
   });
 
   it("a linha do tempo ganha uma marca por passagem", () => {
@@ -1527,25 +1470,6 @@ describe("foto da partida e da chegada", () => {
     expect(fotosGrandes({ imagens } as never).length).toBe(0);
   });
 
-  it("partida com foto não vira aviso no topo", () => {
-    const { ctx, textos } = fakeCtx();
-    desenhar(ctx, {
-      ...estado(0.05, 14, null),
-      endpoints: { a: LOCAL, b: null },
-      photos: cacheComFoto,
-    });
-    expect(textos.some((s) => s.includes("Início do percurso"))).toBe(false);
-  });
-
-  it("partida sem foto continua avisando no topo", () => {
-    const { ctx, textos } = fakeCtx();
-    desenhar(ctx, {
-      ...estado(0.05, 14, null),
-      endpoints: { a: { emoji: "🏠", label: "Casa" }, b: null },
-      photos: cacheComFoto,
-    });
-    expect(textos.some((s) => s.includes("Início do percurso"))).toBe(true);
-  });
 });
 
 /* ------------------------------------------------------------------ */
@@ -2404,97 +2328,27 @@ describe("a virada nas curvas do traçado", () => {
   });
 });
 
-describe("o aviso do topo não fica preso na tela", () => {
-  const avisoDaChegada = (f: ReturnType<typeof fakeCtx>) =>
-    f.textos.some((t) => t.includes("Percurso completo"));
-
-  it("chegada com foto não vira aviso no topo", () => {
-    const f = fakeCtx();
-    desenhar(f.ctx, {
-      ...estado(0.98, 14, null),
-      endpoints: { a: null, b: LOCAL_B },
-      photos: cacheComFoto,
-    });
-    expect(avisoDaChegada(f)).toBe(false);
-  });
-
-  it("sem foto, o aviso da chegada sai quando o percurso termina", () => {
-    // na cartela o `t` fica parado em 1: um aviso medido em metros só termina
-    // se a vida dele acabar **no fim do percurso** — foi o "continua o toast"
-    const tl = buildTimeline(14, { voo: false, cartela: true });
-    const fimDoPercurso = fakeCtx();
-    desenhar(fimDoPercurso.ctx, {
-      ...estado(1, 14, null, null, null, tl),
-      elapsed: routeEnd(tl),
-      timeline: tl,
-    });
-    expect(avisoDaChegada(fimDoPercurso)).toBe(false);
-
-    const naCartela = fakeCtx();
-    desenhar(naCartela.ctx, {
-      ...estado(1, 14, null, null, null, tl),
-      elapsed: 14,
-      timeline: tl,
-    });
-    expect(avisoDaChegada(naCartela)).toBe(false);
-  });
-
-  it("o aviso da chegada dura o mesmo em rota curta e em rota longa", () => {
+describe("o aviso do topo saiu de cena", () => {
+  it("não há mais retângulo de notificação no alto do quadro", () => {
     /*
-     * Ele é medido em **segundos de vídeo**, não em metros: numa rota de 40 km
-     * os mesmos 600 m passavam em meio segundo (ninguém lê) e numa de 2 km
-     * ficavam uma eternidade. Aqui, nos dois casos, ele entra faltando ~2,5 s
-     * para o fim do percurso.
+     * O pedido: "sem o toast em cima da tela". Quem anuncia a passagem é o pino
+     * da parada — com a foto e o nome desenhados no mapa —, e a chegada é o pino
+     * do B (que cresce) e a cartela final. O texto do aviso não existe mais.
      */
-    const tl = buildTimeline(14, { voo: false, cartela: false });
-    const curta = buildTrack([
-      { lat: -23.5, lng: -48.4, ele: 700, t: T0 },
-      { lat: -23.512, lng: -48.412, ele: 720, t: T0 + 600_000 },
-    ]);
-    const longa = buildTrack([
-      { lat: -23.5, lng: -48.4, ele: 700, t: T0 },
-      { lat: -23.86, lng: -48.76, ele: 900, t: T0 + 5400_000 },
-    ]);
-    const entradaDoAviso = (trk: typeof curta) => {
-      for (let ms = 0; ms <= 26000; ms += 100) {
-        const instante = routeEnd(tl) - 4 + ms / 1000;
-        if (instante < 0) continue;
-        const f = fakeCtx();
-        desenhar(
-          f.ctx,
-          {
-            ...estado(routeProgress(tl, instante), 14, null, null, null, tl),
-            elapsed: instante,
-          },
-          trk,
-        );
-        if (f.textos.some((x) => x.includes("Percurso completo"))) return instante;
-      }
-      return NaN;
-    };
-    const antesCurta = routeEnd(tl) - entradaDoAviso(curta);
-    const antesLonga = routeEnd(tl) - entradaDoAviso(longa);
-    expect(antesCurta).toBeCloseTo(2.5, 1);
-    expect(antesLonga).toBeCloseTo(2.5, 1);
-    expect(Math.abs(antesCurta - antesLonga)).toBeLessThan(0.3);
-  });
-
-  it("mas ele aparece antes, para dar tempo de ler", () => {
-    const tl = buildTimeline(14, { voo: false, cartela: true });
-    const instante = routeEnd(tl) - 0.6;
-    const f = fakeCtx();
-    desenhar(f.ctx, {
-      ...estado((instante - tl.voo) / tl.percurso, 14, null, null, null, tl),
-      elapsed: instante,
-      timeline: tl,
+    const passagem = fakeCtx();
+    desenhar(passagem.ctx, { ...estado(0.51, 14, null), ...comVolta() });
+    const chegada = fakeCtx();
+    desenhar(chegada.ctx, {
+      ...estado(1, 14, null),
+      endpoints: { a: null, b: LOCAL_B },
     });
-    expect(avisoDaChegada(f)).toBe(true);
+    for (const txt of [...passagem.textos, ...chegada.textos]) {
+      expect(txt).not.toContain("km do início");
+      expect(txt).not.toContain("Percurso completo");
+      expect(txt).not.toContain("Início do percurso");
+    }
   });
 });
-
-/* ------------------------------------------------------------------ */
-/* O nome das pontas: dentro da moldura e uma só na frente            */
-/* ------------------------------------------------------------------ */
 
 describe("o nome da partida e da chegada", () => {
   const NOMES = ["Casa", "Cachoeira"];
@@ -2761,6 +2615,163 @@ describe("partida e chegada no mesmo lugar", () => {
 /* ------------------------------------------------------------------ */
 /* A emenda dos blocos de mapa                                         */
 /* ------------------------------------------------------------------ */
+
+/* ------------------------------------------------------------------ */
+/* O orçamento de blocos com a aproximação das paradas                 */
+/* ------------------------------------------------------------------ */
+
+/** Traçado reto de `km` quilômetros (o mesmo formato do teste do orçamento). */
+function percursoLongo(km: number, n = 4000) {
+  const graus = km / 111.32;
+  return Array.from({ length: n }, (_, i) => ({
+    lat: -23.5 + (i / (n - 1)) * graus,
+    lng: -48.4 + (i / (n - 1)) * graus * 0.35,
+  }));
+}
+
+describe("o foco no ícone do ponto", () => {
+  /* a rota do usuário — 21,4 km — e uma parada 440 m fora da linha, em t = 0,6 */
+  const CAMINHO = buildTrack(percursoLongo(21.4));
+  const NO_PONTO = sampleTrack(CAMINHO, 0.6).pos;
+  const PARADA = parada({
+    t: 0.6,
+    pos: {
+      lat: NO_PONTO.lat,
+      lng: NO_PONTO.lng + 440 / (111_320 * Math.cos((NO_PONTO.lat * Math.PI) / 180)),
+    },
+  });
+  const cameraComFoco = (terceira: boolean) => ({
+    mode: "follow" as const,
+    followZoom: 15,
+    chase: terceira ? { gira: false, tilt: false } : undefined,
+    cinematic: { opening: false, stops: true, stopTs: [0.6], chegada: false },
+  });
+
+  /**
+   * A animação inteira a 30 quadros por segundo, com a câmera de verdade.
+   *
+   * O renderizador é **um só** de ponta a ponta, como na exportação: é a
+   * suavização da câmera (e o adiantamento do alvo) que decide onde o zoom
+   * desenhado cai. Um quadro isolado não mede isso — o primeiro quadro de um
+   * renderizador novo já está no alvo, sem atraso nenhum para compensar.
+   *
+   * Devolve o quadro do **pico do zoom desenhado** (a câmera suavizada dentro do
+   * renderizador, que é o que o usuário vê) e o quadro da parada em si.
+   */
+  const animacao = (terceira: boolean) => {
+    const tl = buildTimeline(14, { voo: false, cartela: true });
+    const r = new SceneRenderer("dark");
+    const quadros: { t: number; zoom: number; y: number }[] = [];
+    for (let seg = 0; seg <= tl.percurso + 1e-6; seg += 1 / 30) {
+      const t = routeProgress(tl, seg);
+      const f = fakeCtx();
+      r.render(f.ctx, 1280, 720, {
+        ...estado(t, 14, null, null, null, tl),
+        track: CAMINHO,
+        stops: [PARADA],
+        camera: cameraComFoco(terceira),
+      });
+      const selo = f.arcosPos.filter((a) => a[2] > 15 && a[2] < 20)[0];
+      quadros.push({
+        t,
+        zoom: (r as unknown as { cam: { zoom: number } | null }).cam?.zoom ?? NaN,
+        y: selo ? selo[1] : NaN,
+      });
+    }
+    const pico = quadros.reduce((a, b) => (b.zoom > a.zoom ? b : a));
+    return {
+      pico,
+      /** segundos de vídeo entre o pico e a parada (é a unidade da ênfase) */
+      atraso: Math.abs(pico.t - 0.6) * tl.percurso,
+      linha: terceira ? 720 * CHASE_ALTURA : 360,
+    };
+  };
+
+  /*
+   * O pedido: "quero sem a pausa nos pontos, só um zoom e focar no ícone do
+   * ponto". Sem a freada, quem faz a ênfase é a câmera — ela chega mais perto
+   * (o zoom) **e** vai até o lugar da parada.
+   *
+   * A câmera suaviza o alvo, então o que aparece no vídeo chega atrasado:
+   * medido na animação inteira, o pico do zoom desenhado caía ~0,1 s de vídeo
+   * **depois** da parada (297 m no GPX do usuário). Adiantando o alvo nesse
+   * mesmo tanto, o pico cai em cima do ponto — nos dois modos de câmera.
+   */
+  it("o pico do zoom desenhado cai em cima do ponto — nos dois modos de câmera", () => {
+    for (const terceira of [false, true]) {
+      const { atraso } = animacao(terceira);
+      expect(atraso).toBeLessThan(0.05);
+    }
+  });
+
+  it("no pico, o ícone do lugar está perto da linha da câmera", () => {
+    // sem isso o zoom acontecia com o ícone fora do quadro — era o "focar no
+    // ícone" que não acontecia
+    for (const terceira of [false, true]) {
+      const { pico, linha } = animacao(terceira);
+      expect(Math.abs(pico.y - linha)).toBeLessThan(130);
+    }
+  });
+
+  it("longe de qualquer ponto, o enquadramento é o de sempre", () => {
+    // o peso da ênfase é a própria força da aproximação: a zero, nada muda
+    // (aqui na rota curta e de sempre, para o teto de blocos não entrar na conta)
+    const emoji = findCharacter("car").emoji;
+    const personagem = (comFoco: boolean) => {
+      const f = fakeCtx();
+      desenhar(f.ctx, {
+        ...estado(0.2, 14, null), // bem longe da parada de t = 0,6
+        stops: [PARADA],
+        camera: {
+          mode: "follow",
+          followZoom: 15,
+          chase: { gira: false, tilt: false },
+          cinematic: { opening: false, stops: comFoco, stopTs: [0.6], chegada: false },
+        },
+      });
+      return f.textosYAbs[f.textos.indexOf(emoji)];
+    };
+    expect(personagem(true)).toBeCloseTo(personagem(false), 6);
+  });
+});
+
+describe("o orçamento de blocos com a aproximação das paradas", () => {
+  const camera = { mode: "follow" as const, followZoom: 16, chase: { gira: false, tilt: true } };
+  const sete = [0.15, 0.3, 0.45, 0.6, 0.75, 0.9, 1];
+  const contar = (km: number, comParadas: boolean) =>
+    tilesForAnimation(
+      buildTrack(percursoLongo(km)),
+      camera,
+      1080,
+      1920,
+      "dark",
+      comParadas ? { opening: false, stops: true, stopTs: sete, chegada: true } : null,
+    ).length;
+
+  it("a parada perde o ganho de zoom antes de a exportação ser recusada", () => {
+    /*
+     * Números medidos (1080x1920, terceira pessoa, mapa escuro, zoom 16): uma
+     * rota de 20 km pede **750** blocos sozinha; com as sete paradas, **1395** —
+     * no teto (1400), mas dentro. O que segura isso é a pergunta "esta vista
+     * cabe?" feita **antes** de acrescentá-la: sem ela, a última parada estourava
+     * e a exportação era recusada por causa da aproximação — que é um ganho, e
+     * não pode ser o motivo de o vídeo não sair.
+     */
+    const sem = contar(20, false);
+    const com = contar(20, true);
+    expect(com).toBeLessThanOrEqual(TILE_BUDGET);
+    expect(com).toBeGreaterThan(sem); // e a aproximação de fato entrou
+    expect(com).toBeGreaterThan(TILE_BUDGET - 200); // …encostando no teto
+  });
+
+  it("numa rota que já estoura sozinha, a parada não piora a conta", () => {
+    // 40 km: a rota sozinha passa do teto — e aí não entra nenhuma vista de
+    // parada (o aviso de "reduza o zoom" é sobre a rota, não sobre a ênfase)
+    const sem = contar(40, false);
+    expect(sem).toBeGreaterThan(TILE_BUDGET);
+    expect(contar(40, true)).toBe(sem);
+  });
+});
 
 describe("a emenda dos blocos de mapa", () => {
   /** A matriz com que os blocos são desenhados (o `setTransform` do quadro). */

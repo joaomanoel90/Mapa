@@ -5,7 +5,6 @@ import { cn } from "../utils/cn";
 export default function Timeline({
   progress,
   rota,
-  tempoDoPonto,
   playing,
   duration,
   track,
@@ -22,20 +21,13 @@ export default function Timeline({
   /**
    * Onde a personagem está **na rota** (0..1).
    *
-   * Com a desaceleração nos pontos as duas coisas deixam de ser iguais: o
-   * cursor da barra anda no relógio do vídeo, e a personagem anda mais devagar
-   * perto das paradas. Tudo o que fala da rota usa esta posição — a distância
-   * percorrida, quais paradas já ficaram para trás e a próxima parada.
+   * Era diferente de `progress` enquanto havia a **freada** nos pontos (o
+   * cursor andava no relógio do vídeo e a personagem, mais devagar, perto das
+   * paradas). Sem a freada as duas são a mesma posição — a prop continua aqui
+   * porque é a rota que a barra mostra: a distância percorrida, quais paradas já
+   * ficaram para trás e a próxima parada.
    */
   rota?: number;
-  /**
-   * Converte uma posição da rota na fração do vídeo em que ela acontece.
-   *
-   * É o que põe as bolinhas das paradas no lugar certo da barra: elas marcam o
-   * **instante da passagem**, então o cursor cruza cada bolinha exatamente
-   * quando a personagem passa por lá (e clicar nela leva o vídeo até ali).
-   */
-  tempoDoPonto?: (t: number) => number;
   playing: boolean;
   duration: number;
   track: Track;
@@ -47,9 +39,8 @@ export default function Timeline({
   onSeek: (t: number) => void;
   onRestart: () => void;
 }) {
-  // sem a desaceleração (ou fora do componente) a rota e o vídeo são a mesma coisa
+  // a rota e o vídeo são a mesma posição (a barra é o relógio do vídeo)
   const naRota = rota ?? progress;
-  const tempoDe = tempoDoPonto ?? ((t: number) => t);
   const traveled = track.total * naRota;
   const ordered = sortPois(stops);
   const next = ordered.find((p) => p.t > naRota);
@@ -95,7 +86,7 @@ export default function Timeline({
             />
             {ordered.map((p) => {
               const done = p.t <= naRota;
-              const onde = tempoDe(p.t);
+              const onde = p.t;
               return (
                 <button
                   key={p.id}

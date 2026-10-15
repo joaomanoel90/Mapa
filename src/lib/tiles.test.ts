@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { BASEMAP_ORDER, BASEMAPS, emPixelInteiro, pontoEmPixelInteiro, tileUrl, type Basemap } from "./tiles";
+import {
+  BASEMAP_ORDER,
+  BASEMAPS,
+  emPixelInteiro,
+  pontoEmPixelInteiro,
+  tileUrl,
+  type Basemap,
+} from "./tiles";
 
 /** Estilo de teste com subdomínios, para checar a rotação de {s}. */
 const comSubdominios: Basemap = {

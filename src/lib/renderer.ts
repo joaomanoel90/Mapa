@@ -22,7 +22,7 @@ import {
   type ChaseConfig,
   type CinematicConfig,
 } from "./camera";
-import { routeEnd, routeProgress, timelineOr, type Timeline } from "./timeline";
+import { routeEnd, timelineOr, type Timeline } from "./timeline";
 import { NEUTRAL_COLOR, type ColoredRoute } from "./coloring";
 import type { KmMark } from "./km-marks";
 import { countPassed } from "./passages";
@@ -849,9 +849,50 @@ export class SceneRenderer {
     );
 
     // --- câmera (alvo puro + suavização) ---
+    /*
+     * Para onde a câmera vai na ênfase de uma parada: **o lugar**, e não o ponto
+     * da rota.
+     *
+     * O ponto tem endereço próprio quando o usuário escolheu um lugar para ele
+     * (a parada pode ficar fora da linha — é o que o selo "⤷ 240 m" no mapa
+     * avisa). Indo para o ponto da rota, o zoom da ênfase (2,2 níveis) jogava o
+     * ícone **para fora do quadro** justamente no instante em que a parada é
+     * anunciada: medido numa parada a 440 m da linha, em 1280x720, o ícone saía
+     * 1.321 px acima do centro da tela. O pedido é "só um zoom e focar no ícone
+     * do ponto" — então a câmera vai até o ícone.
+     */
+    const focoDaParada = (ts: number) => {
+      const parada = input.stops.find((p) =>
+        (input.passages?.[p.id] ?? [p.t]).some((x) => Math.abs(x - ts) < 1e-6),
+      );
+      return parada ? poiLatLng(parada, track) : sampleTrack(track, ts).pos;
+    };
+
+    /*
+     * O alvo da câmera é avaliado alguns décimos de segundo **à frente** do
+     * relógio do vídeo.
+     *
+     * A câmera suaviza o alvo (as constantes `CAM_TAU_*`), então o que aparece no
+     * vídeo chega atrasado. Medido com o GPX do usuário (21,4 km, 8 paradas,
+     * 30 quadros por segundo, 1080x1920: o pico do zoom **desenhado** comparado
+     * com o ponto da parada):
+     *
+     * | avanço do alvo | pico do zoom desenhado |
+     * |---|---|
+     * | 0 s | 297 m **depois** do ponto |
+     * | **0,1 s** | **0 m** |
+     * | 0,15 s | 198 m antes |
+     * | 0,3 s | 594 m antes |
+     *
+     * Com um décimo de segundo, o pico do zoom que o usuário vê cai **em cima do
+     * ponto** — que é o pedido: "focar no ícone do ponto".
+     */
+    const AVANCO_S = 0.1;
+    const tDoAlvo = tl.percurso > 0 ? Math.min(1, t + AVANCO_S / tl.percurso) : t;
+
     const target = cameraTarget({
       track,
-      t,
+      t: tDoAlvo,
       camera,
       width,
       height,
@@ -859,7 +900,7 @@ export class SceneRenderer {
       elapsed: input.elapsed,
       duration: input.duration,
       routeSeconds: tl.percurso,
-      stopPos: (ts) => sampleTrack(track, ts).pos,
+      stopPos: focoDaParada,
     });
 
     if (!this.cam) this.cam = { lat: target.lat, lng: target.lng, zoom: target.zoom };
@@ -912,9 +953,22 @@ export class SceneRenderer {
      *
      * Durante o voo de abertura nada disso vale: a câmera segue o seu próprio
      * caminho (é ele que pousa) e o enquadramento entra junto com o pouso.
+     *
+     * **A ênfase da parada é a exceção**: ali o quadro desliza até o ponto, que
+     * é o pedido do usuário ("só um zoom e focar no ícone do ponto"). O peso é a
+     * própria força da aproximação (`target.boost`) e o deslocamento sai da
+     * câmera já suavizada (`this.cam`, que está indo para o ponto) — então o
+     * ícone entra na linha da câmera sem tranco, e o personagem volta para baixo
+     * do quadro quando a ênfase acaba. Sem a ênfase o peso é zero e nada muda.
      */
     const ancorarNoPersonagem = !!chase && target.opening >= 1;
-    const centro = ancorarNoPersonagem ? sample.pos : this.cam;
+    const seguir = ancorarNoPersonagem ? target.boost : 1;
+    const centro = ancorarNoPersonagem
+      ? {
+          lat: sample.pos.lat + (this.cam.lat - sample.pos.lat) * seguir,
+          lng: sample.pos.lng + (this.cam.lng - sample.pos.lng) * seguir,
+        }
+      : this.cam;
     /** o giro que o mapa recebe neste quadro (0 = norte para cima) */
     const anguloMapa = chase?.gira ? -rumo * target.opening : 0;
     const vista = vistaDe({
@@ -1275,10 +1329,6 @@ export class SceneRenderer {
     const headerBottom = style.showTitle
       ? drawTitle(ctx, width, input, sample, onDark, sf)
       : 0;
-
-    if (style.showStops && track.pts.length > 1) {
-      drawEventToast(ctx, width, input, sf, headerBottom);
-    }
 
     // --- overlays ---
     if (style.showProgress) drawProgress(ctx, width, height, input, sf);
@@ -2066,201 +2116,6 @@ function drawPin(
 /* Paradas do percurso                                                 */
 /* ------------------------------------------------------------------ */
 
-type ToastEvent = {
-  /** posição do evento na rota (0..1) */
-  at: number;
-  /**
-   * Quanto a notificação dura, em fração da rota.
-   *
-   * As paradas e a partida são medidas em **metros** (o aviso acompanha o
-   * lugar); a chegada é medida em **segundos de vídeo**, para o aviso ter
-   * sempre a mesma duração na tela — em metros, numa rota longa ele passava
-   * depressa demais e numa curta ficava demais.
-   */
-  hold: number;
-  emoji: string;
-  title: string;
-  sub: string;
-  color: string;
-};
-
-/**
- * Toast de eventos no topo da tela — estilo notificação.
- * Fica em posição FIXA (não cola no personagem), então nunca é escondido.
- * Cobre partida (A), cada parada e chegada (B).
- * Animação medida em metros — idêntica na pré-visualização e no vídeo.
- */
-function drawEventToast(
-  ctx: CanvasRenderingContext2D,
-  width: number,
-  input: FrameState,
-  sf: number,
-  headerBottom: number,
-) {
-  const { track, t, stops, endpoints } = input;
-  const total = track.total;
-  if (total <= 0) return;
-
-  // duração do toast em metros percorridos
-  const holdMeters = Math.max(90, Math.min(600, total * 0.07));
-  /**
-   * Quanto tempo o aviso da chegada fica na tela (segundos de vídeo).
-   *
-   * Ele termina **no instante da chegada**: o pino do B chega ao tamanho cheio
-   * exatamente ali, e o aviso já saiu — quem anuncia a chegada é o pino (com a
-   * foto, quando existe), não um retângulo no topo.
-   */
-  const TOAST_CHEGADA_S = 2.5;
-
-  /*
-   * Quem tem foto pronta não vira toast: o círculo com a foto (e o nome embaixo
-   * dele) já anuncia o lugar, e escrever de novo no topo seria repetir a mesma
-   * informação. Se a foto foi escolhida mas **não** carregou, o toast continua
-   * aparecendo — melhor repetir do que o lugar passar em branco.
-   */
-  const anunciadoPelaFoto = (foto: string | undefined) => {
-    if (!foto) return false;
-    if (input.photos?.get(foto)) return true;
-    // escolhida e ainda carregando também cala o aviso: ele só volta quando o
-    // carregamento **falhou** de verdade (`has` diz que já tentou)
-    return !input.photos?.has?.(foto);
-  };
-
-  const events: ToastEvent[] = [];
-  // partida
-  if (!anunciadoPelaFoto(endpoints.a?.photo)) {
-    events.push({
-      at: 0,
-      hold: holdMeters / total,
-      emoji: endpoints.a?.emoji.trim() || "🚩",
-      title: endpoints.a?.label.trim() || "Partida",
-      sub: "Início do percurso",
-      color: "#22c55e",
-    });
-  }
-  // paradas — uma vez para **cada passagem** (na volta, aparece de novo)
-  for (const s of stops) {
-    if (anunciadoPelaFoto(s.photo)) continue;
-    const passagens = input.passages?.[s.id] ?? [s.t];
-    for (const ts of passagens) {
-      const km = (ts * total) / 1000;
-      events.push({
-        at: ts,
-        hold: holdMeters / total,
-        emoji: s.emoji,
-        title: s.label.trim() || "Parada",
-        sub: `📍 ${km < 10 ? km.toFixed(2) : km.toFixed(1)} km do início`,
-        color: s.color,
-      });
-    }
-  }
-  /*
-   * Chegada: o aviso entra nos **últimos 2,5 s de vídeo** do percurso e termina
-   * no instante em que o personagem chega.
-   *
-   * Já foi medido em metros como as paradas, e dava dois problemas: numa rota
-   * longa passava rápido demais, numa curta ficava demais — e, disparando antes
-   * do fim do percurso com sobra para depois, ficava congelado na tela quando o
-   * `t` parava em 1 (a cartela). Em segundos de vídeo ele tem sempre a mesma
-   * duração e sai antes do quadro da chegada.
-   */
-  const tl = timelineOr(input.timeline, input.duration);
-  if (!anunciadoPelaFoto(endpoints.b?.photo)) {
-    const at = routeProgress(tl, routeEnd(tl) - TOAST_CHEGADA_S);
-    events.push({
-      at,
-      hold: Math.max(0.01, 1 - at),
-      emoji: endpoints.b?.emoji.trim() || "🏁",
-      title: endpoints.b?.label.trim() || "Chegada",
-      sub: `Percurso completo · ${formatDistance(total)}`,
-      color: "#f87171",
-    });
-  }
-
-  // evento ativo = o mais recente dentro da janela
-  let active: ToastEvent | null = null;
-  let decorrido = 0;
-  for (const ev of events) {
-    const d = t - ev.at;
-    if (d >= 0 && d <= ev.hold && (!active || ev.at >= active.at)) {
-      active = ev;
-      decorrido = d;
-    }
-  }
-  if (!active) return;
-
-  const p = Math.max(0, Math.min(1, decorrido / active.hold)); // 0..1
-  // vida acabada: não desenha nem o quadro de saída (com a janela fechando no
-  // fim do percurso, o `p` chega a 1 exatamente ali e o aviso já saiu)
-  if (p >= 1) return;
-  const appear = Math.min(1, p / 0.1);
-  const fade = p > 0.78 ? Math.max(0, (1 - p) / 0.22) : 1;
-  const alpha = appear * fade;
-  const slide = Math.max(0, 1 - easeOutBack(Math.min(1, p / 0.16))) * 12 * sf;
-
-  const fTitle = `800 ${Math.round(15.5 * sf)}px "Inter","Segoe UI",system-ui,sans-serif`;
-  const fSub = `600 ${Math.round(11 * sf)}px "Inter","Segoe UI",system-ui,sans-serif`;
-  ctx.save();
-  ctx.font = fTitle;
-  const nw = ctx.measureText(active.title).width;
-  ctx.font = fSub;
-  const sw = ctx.measureText(active.sub).width;
-
-  const badge = 34 * sf;
-  const bw = Math.max(nw, sw) + badge + 36 * sf;
-  const bh = 46 * sf;
-  const x = width / 2 - bw / 2;
-  const y = Math.max(64 * sf, headerBottom + 14 * sf) + slide;
-
-  ctx.globalAlpha = alpha;
-
-  // cartão
-  roundRect(ctx, x, y, bw, bh, 13 * sf);
-  ctx.fillStyle = "rgba(9,12,20,0.93)";
-  ctx.shadowColor = "rgba(0,0,0,0.55)";
-  ctx.shadowBlur = 18 * sf;
-  ctx.shadowOffsetY = 5 * sf;
-  ctx.fill();
-  ctx.shadowColor = "transparent";
-  ctx.strokeStyle = hexA(active.color, 0.9);
-  ctx.lineWidth = 1.8 * sf;
-  ctx.stroke();
-
-  // barra de vida do toast (quanto falta para sumir)
-  const lifeW = (bw - 24 * sf) * Math.max(0, 1 - p);
-  roundRect(ctx, x + 12 * sf, y + bh - 4.5 * sf, lifeW, 2.5 * sf, 1.5 * sf);
-  ctx.fillStyle = hexA(active.color, 0.75);
-  ctx.fill();
-
-  // medalhão do emoji
-  const bx = x + 10 * sf + badge / 2;
-  const by = y + bh / 2;
-  ctx.beginPath();
-  ctx.arc(bx, by, badge / 2, 0, Math.PI * 2);
-  ctx.fillStyle = hexA(active.color, 0.16);
-  ctx.fill();
-  ctx.lineWidth = 1.6 * sf;
-  ctx.strokeStyle = hexA(active.color, 0.85);
-  ctx.stroke();
-  ctx.font = `${Math.round(badge * 0.56)}px ${EMOJI_FONT}`;
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-  ctx.fillText(active.emoji, bx, by + 1 * sf);
-
-  // textos
-  const tx = x + badge + 22 * sf;
-  ctx.textAlign = "left";
-  ctx.textBaseline = "alphabetic";
-  ctx.fillStyle = "#ffffff";
-  ctx.font = fTitle;
-  ctx.fillText(active.title, tx, y + 20 * sf);
-  ctx.fillStyle = active.color;
-  ctx.font = fSub;
-  ctx.fillText(active.sub, tx, y + 36 * sf);
-
-  ctx.restore();
-}
-
 /** Quantas paradas o personagem já alcançou. */
 export function countStopsPassed(stops: Poi[], t: number): number {
   let n = 0;
@@ -2283,10 +2138,10 @@ function easeOutBack(x: number): number {
 /**
  * Quanto a etiqueta da parada leva para aparecer — em **segundos de vídeo**.
  *
- * Era medida em metros (como o pino), e a diferença aparece no fim do trajeto:
- * a desaceleração da parada faz os últimos metros durarem muito tempo de vídeo,
- * então uma parada perto do fim tinha a etiqueta nascendo depois do fim do
- * vídeo. Em segundos ela entra igual em qualquer rota.
+ * Era medida em metros (como o pino), e a diferença aparece quando o vídeo anda
+ * poucos metros por segundo: uma parada perto do fim tinha a etiqueta nascendo
+ * depois do fim do vídeo. Em segundos ela entra igual em qualquer percurso — o
+ * usuário avisou que não vai usar só o trajeto de 21 km.
  */
 const ROTULO_ENTRA_S = 0.35;
 
@@ -2438,11 +2293,11 @@ function drawStops(
      * mesmo jeito em qualquer rota — e a pré-visualização e a gravação
      * continuam idênticas, porque as duas usam o mesmo `t`.
      *
-     * A etiqueta também é medida em segundos de vídeo, e não mais em metros:
-     * em metros ela dependia de quantos metros o vídeo anda por segundo, e
-     * justamente no fim do trajeto a desaceleração da parada faz os últimos
-     * metros durarem muito tempo de vídeo. Numa parada perto do fim, a etiqueta
-     * nascia depois de o vídeo acabar — e o que sobrava era só o aviso do topo.
+     * A etiqueta também é medida em segundos de vídeo, e não mais em metros: em
+     * metros ela dependeria de quantos metros o vídeo anda por segundo — numa
+     * caminhada de 2 km e numa travessia de 60 km a mesma parada tem de acender
+     * pelo mesmo tempo. Numa parada perto do fim, em metros ela nascia depois de
+     * o vídeo acabar.
      */
     const foto = stop.photo ? (input.photos?.get(stop.photo) ?? null) : null;
     // a janela da foto começa na passagem mais recente: na volta, ela aparece

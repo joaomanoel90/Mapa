@@ -11,6 +11,8 @@ import { findCharacter, gaitOf } from "./characters";
 import {
   SceneRenderer,
   PINO_CRESCE_S,
+  centroDoBloco,
+  ladoDoBloco,
   andar,
   crescimentoDoPino,
   pipocoDaPonta,
@@ -64,6 +66,8 @@ function fakeCtx() {
    * da cartela — o `textosY` sozinho é a posição dentro do `translate`.
    */
   const textosYAbs: number[] = [];
+  /** o x absoluto de cada texto, na ordem de `textos` (a etiqueta pode deslizar) */
+  const textosXAbs: number[] = [];
   /** cor em vigor em cada texto (na ordem de `textos`) */
   const textosCor: string[] = [];
   /** o que foi desenhado, na ordem: "texto:…" ou "imagem" */
@@ -72,6 +76,18 @@ function fakeCtx() {
   const textosPos: { s: string; x: number; y: number }[] = [];
   /** primeiro ponto de cada `moveTo` (onde o traçado caiu na tela) */
   const movimentos: number[][] = [];
+  /**
+   * A caixa de cada `fillText`, na mesma ordem de `textos`: é o `roundRect`
+   * desenhado imediatamente antes (a única coisa que usa `arcTo` no renderer).
+   * Sem ela, "o nome ficou dentro da moldura" só dava para conferir por uma
+   * estimativa de largura — e a estimativa errava 2 px para cada lado.
+   */
+  const caixas: ({ x0: number; y0: number; x1: number; y1: number } | null)[] = [];
+  /** caixa do caminho em construção (as quinas do `roundRect`) */
+  let quina: { x0: number; y0: number; x1: number; y1: number } | null = null;
+  /** as caixas fechadas até agora, com o número da chamada em que nasceram */
+  const caixasDesenhadas: { op: number; x0: number; y0: number; x1: number; y1: number }[] = [];
+  let ops = 0;
   const props: Record<string, unknown> = {};
   let pontos = 0;
   // deslocamento em vigor (segue `save`/`restore`/`translate`)
@@ -94,6 +110,7 @@ function fakeCtx() {
         }
         if (typeof prop === "symbol") return undefined;
         return (...args: unknown[]) => {
+          ops++;
           if (prop === "save") pilha.push([tx, ty, esc]);
           if (prop === "restore") {
             const p = pilha.pop();
@@ -116,8 +133,26 @@ function fakeCtx() {
               x: Number(args[1] ?? 0),
               y: Number(args[2] ?? 0),
             });
-            textosYAbs.push(ty + Number(args[2] ?? args[1] ?? 0));
+            textosYAbs.push(ty + esc * Number(args[2] ?? args[1] ?? 0));
+            textosXAbs.push(tx + esc * Number(args[1] ?? 0));
             textosCor.push(String(props.fillStyle ?? ""));
+            /*
+             * A caixa da etiqueta é o `roundRect` desenhado umas poucas
+             * chamadas antes (a seta, no meio, abre um caminho novo). Procura-se
+             * pela caixa **centrada no texto** entre as últimas 20 chamadas —
+             * assim um retângulo qualquer não é confundido com a etiqueta.
+             */
+            const xAbs = tx + esc * Number(args[1] ?? 0);
+            const yAbs = ty + esc * Number(args[2] ?? args[1] ?? 0);
+            const perto = caixasDesenhadas
+              .filter(
+                (b) =>
+                  b.op >= ops - 20 &&
+                  Math.abs((b.x0 + b.x1) / 2 - xAbs) < 2 &&
+                  Math.abs((b.y0 + b.y1) / 2 - yAbs) < 3,
+              )
+              .pop();
+            caixas.push(perto ? { x0: perto.x0, y0: perto.y0, x1: perto.x1, y1: perto.y1 } : null);
             ordem.push(`texto:${args[0]}`);
           }
           if (prop === "drawImage") {
@@ -137,7 +172,32 @@ function fakeCtx() {
           if (prop === "fill" && typeof props.fillStyle === "string") {
             pinturas.push(props.fillStyle);
           }
-          if (prop === "beginPath") pontos = 0;
+          if (prop === "beginPath") {
+            pontos = 0;
+            quina = null;
+          }
+          if (prop === "arcTo") {
+            // o `roundRect` passa pelas quatro quinas: a união delas é a caixa
+            for (const [px, py] of [
+              [args[0], args[1]],
+              [args[2], args[3]],
+            ]) {
+              const x = Number(px ?? 0);
+              const y = Number(py ?? 0);
+              quina = quina
+                ? { x0: Math.min(quina.x0, x), y0: Math.min(quina.y0, y), x1: Math.max(quina.x1, x), y1: Math.max(quina.y1, y) }
+                : { x0: x, y0: y, x1: x, y1: y };
+            }
+          }
+          if (prop === "closePath" && quina) {
+            caixasDesenhadas.push({
+              op: ops,
+              x0: tx + esc * quina.x0,
+              y0: ty + esc * quina.y0,
+              x1: tx + esc * quina.x1,
+              y1: ty + esc * quina.y1,
+            });
+          }
           if (prop === "moveTo") {
             pontos++;
             movimentos.push(args as number[]);
@@ -163,6 +223,8 @@ function fakeCtx() {
     textos,
     textosY,
     textosYAbs,
+    textosXAbs,
+    caixas,
     textosPos,
     textosCor,
     ordem,
@@ -1886,6 +1948,33 @@ const escalaDoPino = (f: ReturnType<typeof fakeCtx>) => {
 const seloNaTela = (f: ReturnType<typeof fakeCtx>) =>
   f.arcosPos.find((a) => a[2] > 30 && a[2] < 50) ?? null;
 
+/**
+ * Os nomes desenhados **junto dos pinos** (não os do aviso do topo).
+ *
+ * A etiqueta de partida/chegada divide o texto com o aviso do topo — os dois
+ * escrevem "Casa", por exemplo. O que separa os dois é a altura: o aviso vive no
+ * alto da tela e a etiqueta viaja com o pino.
+ */
+const rotulosDosPinos = (f: ReturnType<typeof fakeCtx>, nomes: string[], altura: number) =>
+  f.textos.filter((t, i) => nomes.includes(t) && f.textosYAbs[i] > altura * 0.35);
+
+/**
+ * Todas as etiquetas de um nome, com o retângulo que ocupam na tela.
+ *
+ * O retângulo vem do `roundRect` que desenha a etiqueta (medido pelo `fakeCtx`),
+ * não de uma estimativa de largura — é a mesma caixa que o usuário vê.
+ */
+function etiquetasNaTela(f: ReturnType<typeof fakeCtx>, nomes: string[]) {
+  const out: { nome: string; x0: number; x1: number; y0: number; y1: number; x: number; y: number }[] = [];
+  f.textos.forEach((t, i) => {
+    if (!nomes.includes(t)) return;
+    const caixa = f.caixas[i];
+    if (!caixa) return;
+    out.push({ nome: t, ...caixa, x: f.textosXAbs[i], y: f.textosYAbs[i] });
+  });
+  return out;
+}
+
 describe("a ponta cresce quando o personagem chega", () => {
   const COM_FOTO = { emoji: "💦", label: "Cachoeira", photo: SRC };
 
@@ -2059,6 +2148,272 @@ describe("o aviso do topo não fica preso na tela", () => {
       timeline: tl,
     });
     expect(avisoDaChegada(f)).toBe(true);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* O nome das pontas: dentro da moldura e uma só na frente            */
+/* ------------------------------------------------------------------ */
+
+describe("o nome da partida e da chegada", () => {
+  const NOMES = ["Casa", "Cachoeira"];
+
+  it("nunca sai da moldura, em nenhum instante e em nenhum formato", () => {
+    /*
+     * O pedido: "ajuste o nome do ponto A e B, fica fora da moldura". A etiqueta
+     * era centrada no pino; com a câmera que acompanha, o pino vive encostado na
+     * borda — e o nome saía pela metade.
+     */
+    /*
+     * A varredura que encontrou o problema: cinco formatos (do 16:9 ao retrato
+     * de celular) × quatro câmeras × 121 instantes. A conta da altura do bloco
+     * tinha sido feita só para o 16:9 — no 9:16 a etiqueta saía 4 px abaixo do
+     * rodapé, e era assim que o usuário via.
+     */
+    const formatos: [number, number][] = [
+      [1280, 720],
+      [1920, 1080],
+      [960, 960],
+      [864, 1080],
+      [1080, 1920],
+    ];
+    const camaras: FrameState["camera"][] = [
+      { mode: "follow", followZoom: 16 },
+      { mode: "follow", followZoom: 13 },
+      { mode: "follow", followZoom: 14.5, chase: { gira: false, tilt: true } },
+      { mode: "fit", followZoom: 14 },
+    ];
+    let desenhadas = 0;
+    let coladas = 0;
+    for (const [w, h] of formatos) {
+      for (const camera of camaras) {
+        for (let k = 0; k <= 120; k++) {
+          const elapsed = (k / 120) * 14;
+          const t = Math.max(0, Math.min(1, elapsed / 14));
+          const f = fakeCtx();
+          desenhar(
+            f.ctx,
+            {
+              ...estado(t, 14, null),
+              camera,
+              elapsed,
+              // sem o aviso do topo: aqui só interessam as etiquetas dos pinos
+              style: { ...style, showStops: false },
+              endpoints: { a: LOCAL_A, b: LOCAL_B },
+              photos: cacheComFoto,
+            },
+            track,
+            w,
+            h,
+          );
+          for (const e of etiquetasNaTela(f, NOMES)) {
+            desenhadas++;
+            // colada na borda = o caso que o deslize tem de resolver
+            if (e.x0 < 70 || e.x1 > w - 70) coladas++;
+            // a caixa vem do próprio desenho (o `roundRect` da etiqueta): não
+            // há folga nenhuma a dar — nem um pixel para fora da moldura
+            expect(e.x0).toBeGreaterThanOrEqual(-0.001);
+            expect(e.x1).toBeLessThanOrEqual(w + 0.001);
+            expect(e.y0).toBeGreaterThanOrEqual(-0.001);
+            expect(e.y1).toBeLessThanOrEqual(h + 0.001);
+          }
+        }
+      }
+    }
+    // o teste não pode passar por não ter desenhado nada: as etiquetas aparecem…
+    expect(desenhadas).toBeGreaterThan(50);
+    // …e o cenário inclui o caso difícil (etiqueta encostando na borda)
+    expect(coladas).toBeGreaterThan(0);
+  });
+
+  it("sem o pino na tela, o nome não fica solto", () => {
+    // trazer o nome para dentro da moldura com o pino já fora deixaria uma
+    // etiqueta flutuando sobre o mapa, apontando para nada
+    const semAviso = { ...style, showStops: false };
+    const dentro = fakeCtx();
+    desenhar(dentro.ctx, {
+      ...estado(0.5, 14, null),
+      style: semAviso,
+      endpoints: { a: LOCAL_A, b: null },
+      photos: cacheComFoto,
+    });
+    expect(dentro.textos).toContain("Casa");
+
+    const fora = fakeCtx();
+    desenhar(fora.ctx, {
+      ...estado(0.5, 14, null),
+      style: semAviso,
+      camera: { mode: "follow", followZoom: 17 },
+      endpoints: { a: LOCAL_A, b: null },
+      photos: cacheComFoto,
+    });
+    expect(fora.textos).not.toContain("Casa");
+  });
+
+  it("a etiqueta fica acima ou abaixo do pino — nunca por cima do selo", () => {
+    /*
+     * O defeito que só apareceu na folha de imagens: o topo da etiqueta era
+     * `-(r + gap)` — ou seja, ela começava 6 px acima do **centro** do pino e
+     * cobria metade do selo. Depois do conserto, a caixa fica inteira de um dos
+     * lados do círculo.
+     */
+    const f = fakeCtx();
+    desenhar(f.ctx, {
+      ...estado(0.98, 14, null),
+      style: { ...style, showStops: false },
+      endpoints: { a: LOCAL_A, b: LOCAL_B },
+      photos: cacheComFoto,
+    });
+    // o selo do pino: um círculo de raio 17 no tamanho cheio (o fakeCtx anota o
+    // raio como ele é pedido, dentro do `scale` do pipoco)
+    const selos = f.arcosPos.filter((a) => Math.abs(a[2] - 17) < 0.01);
+    expect(selos.length).toBeGreaterThan(0);
+    const etiquetas = etiquetasNaTela(f, NOMES);
+    expect(etiquetas.length).toBeGreaterThan(0);
+    for (const e of etiquetas) {
+      const pino = selos.reduce((melhor, a) =>
+        Math.hypot(a[0] - e.x, a[1] - e.y) < Math.hypot(melhor[0] - e.x, melhor[1] - e.y) ? a : melhor,
+      );
+      const acima = e.y1 <= pino[1];
+      const folga = acima ? pino[1] - e.y1 : e.y0 - pino[1];
+      // a caixa inteira fora do selo (com a folga do `gap`), nunca atravessada
+      expect(folga).toBeGreaterThanOrEqual(pino[2] + 1);
+    }
+  });
+
+  it("com o pino na borda, a foto e o nome também ficam dentro da moldura", () => {
+    // o caso do usuário: a chegada encostando na borda, com foto no lugar
+    const f = fakeCtx();
+    const w = 1280;
+    const h = 720;
+    desenhar(
+      f.ctx,
+      {
+        ...estado(0.5, 14, null),
+        style: { ...style, showStops: false },
+        camera: { mode: "follow", followZoom: 16 },
+        endpoints: { a: LOCAL_A, b: null },
+        photos: cacheComFoto,
+      },
+      track,
+      w,
+      h,
+    );
+    for (const e of etiquetasNaTela(f, NOMES)) {
+      expect(e.x0).toBeGreaterThanOrEqual(0);
+      expect(e.x1).toBeLessThanOrEqual(w);
+    }
+  });
+
+  it("o bloco desce quando não cabe em cima, e sobe quando não cabe embaixo", () => {
+    expect(ladoDoBloco(500, 60, 720, 8)).toBe("acima");
+    expect(ladoDoBloco(40, 60, 720, 8)).toBe("abaixo"); // colado no topo
+    expect(ladoDoBloco(700, 60, 720, 8)).toBe("acima"); // colado na base
+    // bloco enorme: só troca de lado quando não cabe em cima (300) nem embaixo (500)
+    expect(ladoDoBloco(300, 400, 720, 8)).toBe("abaixo");
+    expect(ladoDoBloco(500, 400, 720, 8)).toBe("acima");
+    // e, sem caber em lugar nenhum, fica do lado com mais chão — nunca fora da tela
+    expect(ladoDoBloco(100, 370, 720, 8)).toBe("abaixo");
+    expect(ladoDoBloco(700, 370, 720, 8)).toBe("acima");
+  });
+
+  it("o deslize do bloco para dentro da moldura é o mínimo possível", () => {
+    expect(centroDoBloco(640, 100, 1280, 8)).toBe(640); // no meio, não mexe
+    expect(centroDoBloco(10, 100, 1280, 8)).toBe(58); // encostado à esquerda
+    expect(centroDoBloco(1275, 100, 1280, 8)).toBe(1222); // encostado à direita
+    // bloco maior que o quadro: centraliza em vez de pular de lado
+    expect(centroDoBloco(100, 2000, 1280, 8)).toBe(640);
+    // o pino continua embaixo da etiqueta: o deslocamento nunca passa do necessário
+    expect(centroDoBloco(60, 100, 1280, 8) - 60).toBeLessThan(20);
+  });
+});
+
+describe("partida e chegada no mesmo lugar", () => {
+  /** Uma volta fechada: a partida e a chegada caem no mesmo ponto do mapa. */
+  const G = 1 / 111320;
+  const volta: { lat: number; lng: number }[] = [];
+  {
+    let x = 0;
+    let y = 0;
+    for (const [dx, dy] of [
+      [0, 1],
+      [1, 0],
+      [0, -1],
+      [-1, 0],
+    ] as [number, number][]) {
+      for (let i = 0; i < 60; i++) {
+        x += (dx * 700) / 60;
+        y += (dy * 700) / 60;
+        volta.push({ lat: -23.5 + y * G, lng: -46.6 + x * G });
+      }
+    }
+    volta.push({ lat: -23.5, lng: -46.6 });
+  }
+  const anel = buildTrack(volta);
+  // as duas pontas do trajeto: o pino da partida e o da chegada, com nomes
+  // diferentes (é a coincidência dos nomes que a regra do "na frente" resolve)
+  const PARTIDA = { ...LOCAL_A, label: "Casa" };
+  const CHEGADA = { ...LOCAL_B, label: "Chegada" };
+  const NOMES = ["Casa", "Chegada"];
+  const camera: FrameState["camera"] = {
+    mode: "follow",
+    followZoom: 16,
+    cinematic: { opening: true, stops: false, stopTs: [], chegada: true },
+  };
+
+  const rotulosEm = (elapsed: number, tl: Timeline) => {
+    const f = fakeCtx();
+    desenhar(
+      f.ctx,
+      {
+        ...estado(Math.max(0, Math.min(1, (elapsed - tl.voo) / tl.percurso)), 16, null, null, null, tl),
+        camera,
+        elapsed,
+        // sem o aviso do topo, que também escreve o nome do lugar
+        style: { ...style, showStops: false },
+        endpoints: { a: PARTIDA, b: CHEGADA },
+        photos: cacheComFoto,
+      },
+      anel,
+    );
+    return rotulosDosPinos(f, NOMES, 0);
+  };
+
+  it("no início quem está na frente é a partida, e o nome é o dela", () => {
+    const tl = buildTimeline(16, { voo: true, cartela: false });
+    expect(rotulosEm(tl.voo, tl)).toEqual(["Casa"]);
+    expect(rotulosEm(tl.voo + 0.4, tl)).toEqual(["Casa"]);
+    // e no meio do percurso também: o pino da chegada ainda é o "fantasma"
+    expect(rotulosEm(tl.voo + tl.percurso * 0.5, tl)).toEqual(["Casa"]);
+  });
+
+  it("no fim a chegada passa por cima e toma o nome", () => {
+    const tl = buildTimeline(16, { voo: true, cartela: false });
+    const fim = routeEnd(tl);
+    // o pipoco da chegada começa 0,7 s antes de ela chegar
+    expect(rotulosEm(fim - 1.2, tl)).toEqual(["Casa"]);
+    expect(rotulosEm(fim - 0.3, tl)).toEqual(["Chegada"]);
+    expect(rotulosEm(fim, tl)).toEqual(["Chegada"]);
+  });
+
+  it("na cartela final quem fica na frente continua sendo a chegada", () => {
+    const tl = buildTimeline(16, { voo: true, cartela: true });
+    expect(rotulosEm(routeEnd(tl) + 1.5, tl)).toEqual(["Chegada"]);
+  });
+
+  it("com as duas pontas longe uma da outra, cada pino tem o seu nome", () => {
+    // fora da coincidência, os dois nomes aparecem — a regra do “na frente” só
+    // vale quando os dois pinos caem no mesmo lugar
+    const f = fakeCtx();
+    desenhar(f.ctx, {
+      ...estado(0.5, 14, null),
+      style: { ...style, showStops: false },
+      camera: { mode: "fit", followZoom: 16 },
+      endpoints: { a: LOCAL_A, b: LOCAL_B },
+      photos: cacheComFoto,
+    });
+    expect(f.textos).toContain("Casa");
+    expect(f.textos).toContain("Cachoeira");
   });
 });
 

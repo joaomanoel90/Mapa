@@ -1033,32 +1033,68 @@ export class SceneRenderer {
         if (p === null || p >= 1) return;
         drawImpacto(ctx, toXY(at), cor, p, sf);
       };
-      ondaDaPonta(pipocoDaPonta(input, "a"), track.pts[0], "#22c55e");
-      ondaDaPonta(pipocoDaPonta(input, "b"), track.pts[track.pts.length - 1], "#f87171");
-      drawPin(
-        ctx,
-        toXY(track.pts[0]),
-        "A",
-        "#22c55e",
-        sf,
-        input.endpoints.a,
-        fotoDoLocal(input.endpoints.a),
-        photoWindowAlpha(input.elapsed - tl.voo + PHOTO_FADE_IN_S),
-        cartao ? retanguloDaCartela(cartao) : null,
-        crescimentoDoPino(input, "a"),
-      );
-      drawPin(
-        ctx,
-        toXY(track.pts[track.pts.length - 1]),
-        "B",
-        "#f87171",
-        sf,
-        input.endpoints.b,
-        fotoDoLocal(input.endpoints.b),
-        photoWindowAlpha(routeEnd(tl) - input.elapsed + PHOTO_FADE_IN_S),
-        cartao ? retanguloDaCartela(cartao) : null,
-        crescimentoDoPino(input, "b"),
-      );
+      const pipocoA = pipocoDaPonta(input, "a");
+      const pipocoB = pipocoDaPonta(input, "b");
+      ondaDaPonta(pipocoA, track.pts[0], "#22c55e");
+      ondaDaPonta(pipocoB, track.pts[track.pts.length - 1], "#f87171");
+
+      const pinoA = toXY(track.pts[0]);
+      const pinoB = toXY(track.pts[track.pts.length - 1]);
+      /*
+       * --- as duas pontas no mesmo lugar ---
+       *
+       * Numa volta (partida e chegada no mesmo ponto), os dois pinos caem um em
+       * cima do outro, e só um nome pode aparecer. Quem manda é o **relógio**:
+       * enquanto o pipoco da chegada não começou, quem está na frente é a
+       * partida (ele pipocou na largada e o nome do lugar vale dali até o fim);
+       * quando a chegada começa a pipocar, ela passa a ficar na frente e o nome
+       * dela toma o lugar. É o que o usuário pediu: "o A em destaque no início
+       * e depois o B por cima no final".
+       */
+      const raio = 17 * sf;
+      const coincidem = Math.hypot(pinoA.x - pinoB.x, pinoA.y - pinoB.y) < raio * 3;
+      const chegadaNaFrente = pipocoB !== null;
+      const temNome = (m?: import("./endpoints").EndpointMark | null) =>
+        hasMark(m ?? null) && !!m!.label.trim();
+      /** qual das duas fica atrás (e portanto esconde o nome, quando a da frente tem um) */
+      const atras: "a" | "b" | null = !coincidem
+        ? null
+        : chegadaNaFrente
+          ? temNome(input.endpoints.b)
+            ? "a"
+            : null
+          : temNome(input.endpoints.a)
+            ? "b"
+            : null;
+
+      const desenharPonta = (ponta: "a" | "b") => {
+        const fim = ponta === "b";
+        const mark = fim ? input.endpoints.b : input.endpoints.a;
+        drawPin(ctx, fim ? pinoB : pinoA, fim ? "B" : "A", fim ? "#f87171" : "#22c55e", sf, {
+          mark,
+          foto: fotoDoLocal(mark),
+          fotoAlpha: photoWindowAlpha(
+            fim ? routeEnd(tl) - input.elapsed + PHOTO_FADE_IN_S : input.elapsed - tl.voo + PHOTO_FADE_IN_S,
+          ),
+          esquiva: cartao ? retanguloDaCartela(cartao) : null,
+          crescimento: fim ? crescimentoDoPino(input, "b") : crescimentoDoPino(input, "a"),
+          quadro: { width, height },
+          semNome: atras === ponta,
+        });
+      };
+
+      // a que fica atrás é desenhada primeiro; fora da coincidência, a ordem é
+      // a de sempre (partida e depois chegada)
+      if (coincidem && chegadaNaFrente) {
+        desenharPonta("a");
+        desenharPonta("b");
+      } else if (coincidem) {
+        desenharPonta("b");
+        desenharPonta("a");
+      } else {
+        desenharPonta("a");
+        desenharPonta("b");
+      }
     }
 
     const headerBottom = style.showTitle
@@ -1490,21 +1526,198 @@ export function liftToClear(
   return sobra > 0 ? sobra * Math.min(1, forca) : 0;
 }
 
+/**
+ * De que lado do pino o bloco (foto + nome) cabe melhor.
+ *
+ * Acima é onde ele nasce — é o desenho de sempre. Só desce quando não há chão
+ * acima; e, quando não há de nenhum lado, fica no lado com mais espaço (o pino
+ * no alto da tela pendura o bloco para baixo, e vice-versa).
+ */
+export function ladoDoBloco(
+  y: number,
+  altura: number,
+  alturaDoQuadro: number,
+  margem: number,
+): "acima" | "abaixo" {
+  if (y - altura >= margem) return "acima";
+  if (y + altura <= alturaDoQuadro - margem) return "abaixo";
+  return y > alturaDoQuadro / 2 ? "acima" : "abaixo";
+}
+
+/**
+ * Onde o bloco do nome fica na horizontal (o centro, já limitado ao quadro).
+ *
+ * O desenho era centrado no pino; encostado na borda, metade do nome saía pela
+ * moldura. Aqui ele desliza o mínimo para caber: o pino continua embaixo (a seta
+ * aponta para ele) e o nome aparece inteiro.
+ */
+export function centroDoBloco(
+  x: number,
+  larguraNaTela: number,
+  larguraDoQuadro: number,
+  margem: number,
+): number {
+  const metade = larguraNaTela / 2;
+  const min = margem + metade;
+  const max = larguraDoQuadro - margem - metade;
+  if (min > max) return larguraDoQuadro / 2; // o bloco é maior que o quadro
+  return Math.max(min, Math.min(max, x));
+}
+
+/** As opções do pino de uma ponta (são muitas: vão por nome). */
+type OpcoesDoPino = {
+  mark?: import("./endpoints").EndpointMark | null;
+  foto?: PhotoImage | null;
+  fotoAlpha?: number;
+  /** retângulo que o pino não pode invadir (a cartela final, no fim do vídeo) */
+  esquiva?: { x: number; y: number; w: number; h: number; forca: number } | null;
+  /** 1 = tamanho cheio; menos = o pino ainda está nascendo ("pipoco") */
+  crescimento?: number;
+  /** o quadro do vídeo: o nome e a foto não podem sair dele */
+  quadro?: { width: number; height: number };
+  /** não desenha o nome (a outra ponta está na frente, no mesmo lugar) */
+  semNome?: boolean;
+};
+
+/**
+ * O bloco de cima (ou de baixo) de um pino de ponta: a foto e o nome.
+ *
+ * O nome era centrado no pino; quando a partida ou a chegada encostava na borda
+ * do quadro — o que a câmera que acompanha faz o tempo todo —, a etiqueta saía
+ * pela moldura (o usuário viu e cobrou: "o nome do ponto A e B fica fora da
+ * moldura"). Aqui o bloco **escolhe o lado** com espaço (acima, e abaixo quando
+ * não cabe) e **desliza na horizontal** para caber inteiro, com a seta apontando
+ * para o pino mesmo deslocada.
+ *
+ * Tudo isto é medido no **espaço da tela**: a etiqueta é desenhada dentro do
+ * `scale` do pipoco, então o limite do quadro é convertido para o espaço local
+ * dividindo pelo crescimento.
+ */
+function drawBlocoDoPino(
+  ctx: CanvasRenderingContext2D,
+  pino: { x: number; y: number },
+  escala: number,
+  r: number,
+  color: string,
+  sf: number,
+  nome: string,
+  foto: PhotoImage | null,
+  fotoAlpha: number,
+  quadro: { width: number; height: number },
+) {
+  const margem = 8 * sf;
+  const bh = 19 * sf;
+  const gap = 6 * sf;
+  const lado = 56 * sf;
+  const temFoto = !!foto && fotoAlpha > 0.01;
+
+  // altura que o bloco ocupa a partir do centro do pino (raio + conteúdo)
+  const conteudo = (nome ? bh + gap : 0) + (temFoto ? lado + gap : 0);
+  const altura = (r + conteudo) * escala;
+  const acima = ladoDoBloco(pino.y, altura, quadro.height, margem) === "acima";
+
+  // largura do bloco (o maior dos dois) e o quanto ele pode deslizar
+  ctx.font = `700 ${Math.round(11.5 * sf)}px "Inter","Segoe UI",system-ui,sans-serif`;
+  const bw = nome ? ctx.measureText(nome).width + 16 * sf : 0;
+  const largura = Math.max(bw, temFoto ? lado : 0);
+  const centroX = centroDoBloco(pino.x, largura * escala, quadro.width, margem);
+  const dx = (centroX - pino.x) / escala;
+
+  ctx.save();
+  // o bloco inteiro desliza junto (nome e foto continuam alinhados)
+  ctx.translate(dx, 0);
+
+  if (acima) {
+    if (temFoto) {
+      ctx.save();
+      ctx.globalAlpha = fotoAlpha;
+      const yTopo = -(r + gap + (nome ? bh + gap : 0) + lado);
+      drawStopCircle(ctx, foto as never, 0, yTopo + lado, lado, color, sf);
+      ctx.restore();
+    }
+    // o topo da etiqueta fica **acima do pino** (r + gap) e a foto acima dela —
+    // era `-(r + gap)`, e o nome caía por cima do próprio pino
+    if (nome) desenharEtiqueta(ctx, nome, 0, -(r + gap + bh), bw, bh, color, sf, true, -dx);
+  } else {
+    if (nome) desenharEtiqueta(ctx, nome, 0, r + gap, bw, bh, color, sf, false, -dx);
+    if (temFoto) {
+      ctx.save();
+      ctx.globalAlpha = fotoAlpha;
+      const yTopo = r + gap + (nome ? bh + gap : 0);
+      drawStopCircle(ctx, foto as never, 0, yTopo + lado, lado, color, sf);
+      ctx.restore();
+    }
+  }
+  ctx.restore();
+}
+
+/**
+ * A etiqueta do nome (o retângulo arredondado) com a seta apontando para o pino.
+ *
+ * `topo` é o y do **topo** da caixa no espaço local do pino; `acima` diz de que
+ * lado o bloco está (a seta aponta para o lado do pino). `setaX` é onde a seta
+ * cai dentro da caixa — a etiqueta pode ter deslizado na horizontal, e a seta
+ * continua apontando para o pino em vez de para o centro do retângulo.
+ */
+function desenharEtiqueta(
+  ctx: CanvasRenderingContext2D,
+  texto: string,
+  cx: number,
+  topo: number,
+  bw: number,
+  bh: number,
+  color: string,
+  sf: number,
+  acima: boolean,
+  setaX: number,
+) {
+  const x = cx - bw / 2;
+  roundRect(ctx, x, topo, bw, bh, 7 * sf);
+  ctx.fillStyle = "rgba(9,12,20,0.92)";
+  ctx.shadowColor = "rgba(0,0,0,0.45)";
+  ctx.shadowBlur = 8 * sf;
+  ctx.fill();
+  ctx.shadowColor = "transparent";
+  ctx.strokeStyle = hexA(color, 0.85);
+  ctx.lineWidth = 1.4 * sf;
+  ctx.stroke();
+
+  // seta: encostada na caixa, apontando para o pino (que fica do outro lado)
+  const dentro = Math.max(x + 6 * sf, Math.min(x + bw - 6 * sf, setaX));
+  const base = acima ? topo + bh : topo;
+  const ponta = acima ? base + 4 * sf : base - 4 * sf;
+  ctx.beginPath();
+  ctx.moveTo(dentro - 4 * sf, base);
+  ctx.lineTo(dentro + 4 * sf, base);
+  ctx.lineTo(dentro, ponta);
+  ctx.closePath();
+  ctx.fillStyle = "rgba(9,12,20,0.92)";
+  ctx.fill();
+
+  ctx.fillStyle = "#ffffff";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(texto, cx, topo + bh / 2 + 0.5 * sf);
+}
+
 function drawPin(
   ctx: CanvasRenderingContext2D,
   at: { x: number; y: number },
   fallback: string,
   color: string,
   sf: number,
-  mark?: import("./endpoints").EndpointMark | null,
-  foto?: PhotoImage | null,
-  fotoAlpha = 0,
-  /** retângulo que o pino não pode invadir (a cartela final, no fim do vídeo) */
-  esquiva?: { x: number; y: number; w: number; h: number; forca: number } | null,
-  /** 1 = tamanho cheio; menos = o pino ainda está nascendo ("pipoco") */
-  crescimento = 1,
+  opcoes: OpcoesDoPino = {},
 ) {
-  const marked = hasMark(mark ?? null);
+  const {
+    mark = null,
+    foto = null,
+    fotoAlpha = 0,
+    esquiva = null,
+    crescimento = 1,
+    quadro = null,
+    semNome = false,
+  } = opcoes;
+  const marked = hasMark(mark);
   // mesmo tamanho do pino das paradas — a ideia é que os dois sejam o mesmo pino
   const r = 17 * sf;
 
@@ -1564,47 +1777,37 @@ function drawPin(
   };
   drawPinBadge(ctx, r, color, sf, conteudo);
 
-  // etiqueta com o nome do local marcado
-  const label = marked ? mark!.label.trim() : "";
-  if (label) {
-    ctx.font = `700 ${Math.round(11.5 * sf)}px "Inter","Segoe UI",system-ui,sans-serif`;
-    const tw = ctx.measureText(label).width;
-    const bw = tw + 16 * sf;
-    const bh = 19 * sf;
-    const by = -r - bh - 6 * sf;
-    roundRect(ctx, -bw / 2, by, bw, bh, 7 * sf);
-    ctx.fillStyle = "rgba(9,12,20,0.92)";
-    ctx.shadowColor = "rgba(0,0,0,0.45)";
-    ctx.shadowBlur = 8 * sf;
-    ctx.fill();
-    ctx.shadowColor = "transparent";
-    ctx.strokeStyle = hexA(color, 0.85);
-    ctx.lineWidth = 1.4 * sf;
-    ctx.stroke();
-    // seta da etiqueta
-    ctx.beginPath();
-    ctx.moveTo(-4 * sf, by + bh);
-    ctx.lineTo(4 * sf, by + bh);
-    ctx.lineTo(0, by + bh + 4 * sf);
-    ctx.closePath();
-    ctx.fillStyle = "rgba(9,12,20,0.92)";
-    ctx.fill();
-    ctx.fillStyle = "#ffffff";
-    ctx.textBaseline = "middle";
-    ctx.fillText(label, 0, by + bh / 2 + 0.5 * sf);
-  }
-
-  // foto do local em círculo, acima do nome — **menor** que a das paradas: as
-  // duas ficam nos extremos do trajeto, onde o personagem e a cartela final
-  // disputam o mesmo lugar
-  if (foto && fotoAlpha > 0.01) {
-    const lado = 56 * sf;
-    // acima do pino e da etiqueta do nome (as duas coisas estão em y negativo)
-    const alturaRotulo = label ? r + 19 * sf + 10 * sf : r;
-    ctx.save();
-    ctx.globalAlpha = fotoAlpha;
-    drawStopCircle(ctx, foto, 0, -alturaRotulo - 6 * sf, lado, color, sf);
-    ctx.restore();
+  /*
+   * O nome e a foto do lugar — **dentro do quadro**.
+   *
+   * Quando o pino está fora da tela, o bloco nem é desenhado: ele já não
+   * apareceria, e trazê-lo para dentro da moldura deixaria um nome solto, sem
+   * pino nenhum embaixo para a seta apontar. Meio pino na borda (o caso comum,
+   * com a câmera que acompanha) tem o nome puxado para dentro — que é o que o
+   * usuário pediu.
+   *
+   * O critério é o **centro** do pino: com ele dentro, o bloco cabe de um dos
+   * lados por construção (`ladoDoBloco` só escolhe um lado que caiba). Com o
+   * centro fora, o pino está mais da metade para fora e o bloco sairia pendurado
+   * na borda — foi o que a varredura de formatos pegou (uma etiqueta 4 px abaixo
+   * do rodapé, de um pino que estava quase todo fora).
+   */
+  const nome = marked && !semNome ? mark!.label.trim() : "";
+  const centroFora =
+    !quadro || at.x < 0 || at.x > quadro.width || at.y < 0 || at.y > quadro.height;
+  if ((nome || foto) && quadro && !centroFora) {
+    drawBlocoDoPino(
+      ctx,
+      { x: at.x, y: at.y - subida },
+      crescimento,
+      r,
+      color,
+      sf,
+      nome,
+      foto && fotoAlpha > 0.01 ? foto : null,
+      fotoAlpha,
+      quadro,
+    );
   }
   ctx.restore();
 }

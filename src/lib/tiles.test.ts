@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { BASEMAP_ORDER, BASEMAPS, tileUrl, type Basemap } from "./tiles";
+import { BASEMAP_ORDER, BASEMAPS, emPixelInteiro, pontoEmPixelInteiro, tileUrl, type Basemap } from "./tiles";
 
 /** Estilo de teste com subdomínios, para checar a rotação de {s}. */
 const comSubdominios: Basemap = {
@@ -69,6 +69,78 @@ describe("catálogo de estilos", () => {
     for (const id of BASEMAP_ORDER) {
       expect(BASEMAPS[id].template.toLowerCase(), id).not.toContain("api_key");
       expect(BASEMAPS[id].template.toLowerCase(), id).not.toContain("access_token");
+    }
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* A grade de pixels do dispositivo                                    */
+/* ------------------------------------------------------------------ */
+
+describe("a grade de pixels", () => {
+  it("prende o valor no pixel do dispositivo", () => {
+    expect(emPixelInteiro(10.24, 1)).toBe(10);
+    expect(emPixelInteiro(10.6, 1)).toBe(11);
+    // com dpr 2 o pixel do aparelho é meio pixel de CSS: 10,25 → 10,5 (não 10)
+    expect(emPixelInteiro(10.24, 2)).toBe(10);
+    expect(emPixelInteiro(10.26, 2)).toBe(10.5);
+    expect(emPixelInteiro(10.75, 2)).toBe(11);
+  });
+
+  it("o resultado cai na grade do aparelho, seja qual for o dpr", () => {
+    /*
+     * É a conta que o mapa precisa para não deixar fresta: o valor preso tem de
+     * ser um número **inteiro de pixels de aparelho** — e isso vale também para
+     * o dpr fracionário (1,5 e 1,25 existem em celular e em tela com zoom).
+     */
+    for (const dpr of [1, 1.25, 1.5, 2, 2.75, 3]) {
+      for (const v of [0, 0.1, 3.33, 17.5, 128.02, 333.33, -7.4]) {
+        const preso = emPixelInteiro(v, dpr);
+        expect(Math.abs(preso * dpr - Math.round(preso * dpr)), `dpr ${dpr} em ${v}`).toBeLessThan(1e-9);
+        expect(Math.abs(preso - v)).toBeLessThanOrEqual(0.5 / dpr + 1e-9);
+      }
+    }
+  });
+
+  it("não deixa o valor fugir por causa de lixo na entrada", () => {
+    expect(emPixelInteiro(7.4, 0)).toBe(7);
+    expect(emPixelInteiro(7.4, NaN)).toBe(7);
+    expect(emPixelInteiro(7.4, -2)).toBe(7);
+  });
+
+  it("prende os dois eixos de uma posição do mapa", () => {
+    expect(pontoEmPixelInteiro(10.26, 20.74, 2)).toEqual({ x: 10.5, y: 20.5 });
+    // o ajuste é pequeno: menos de meio pixel de aparelho em cada eixo
+    const { x, y } = pontoEmPixelInteiro(100.37, -50.61, 2);
+    expect(Math.abs(x - 100.37)).toBeLessThanOrEqual(0.25);
+    expect(Math.abs(y + 50.61)).toBeLessThanOrEqual(0.25);
+  });
+
+  it("o movimento de um quadro não vira degrau: um pixel de deslocamento continua igual", () => {
+    /*
+     * A câmera "Seguir" move o mapa a cada quadro. Se o arredondamento mudasse
+     * o passo, o mapa andaria aos saltos: aqui, um deslocamento de 1 px de
+     * aparelho chega inteiro — e o que sobra do arredondamento é menor que meio
+     * pixel (invisível).
+     */
+    const dpr = 2;
+    let pos = 0;
+    const passos: number[] = [];
+    for (let i = 1; i <= 40; i++) {
+      const alvo = pos + 1 / dpr; // exatamente 1 px de aparelho por quadro
+      const preso = emPixelInteiro(alvo, dpr);
+      passos.push(preso - pos);
+      pos = preso;
+    }
+    expect(new Set(passos)).toEqual(new Set([0.5]));
+    expect(pos).toBeCloseTo(40 / dpr, 9);
+    // e acompanhando um alvo quebrado (o caso real), o atraso fica abaixo de
+    // meio pixel de aparelho, sem acumular
+    let p2 = 0;
+    for (let i = 1; i <= 200; i++) {
+      const alvo = i * 0.37;
+      p2 = emPixelInteiro(alvo, dpr);
+      expect(Math.abs(p2 - alvo)).toBeLessThanOrEqual(0.25);
     }
   });
 });

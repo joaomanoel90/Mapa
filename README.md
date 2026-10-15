@@ -392,6 +392,17 @@ já está inteira na tela, e o painel avisa).
   nível de zoom e volta depois de passar. É zoom, não desvio: o personagem
   continua no centro. Duas paradas vizinhas não somam zoom, e a janela acompanha
   a duração do vídeo (~1,2 s de cada lado).
+- **Freada:** a pessoa **desacelera** ao passar por cada parada — a 4× mais
+  devagar em cima dela, com o foco do zoom entrando junto. O tempo da freada sai
+  do próprio percurso (a duração escolhida não muda) e a rota inteira continua
+  sendo percorrida. A curva é uma função pura (`pacing.ts`), medida com o teto
+  de metade do percurso dentro das paradas: com 3 paradas a janela é ±11% da
+  rota, com 40 ela encolhe para ±0,8% em vez de o vídeo virar uma corrida entre
+  pontos. Vale para todas as **passagens** (uma parada visitada duas vezes freia
+  duas vezes). Quem manda no desenho é a **posição** — a câmera, a rota
+  percorrida, o anel do progresso e o próprio foco acompanham; a barra do tempo
+  mostra o relógio do vídeo e as bolinhas das paradas marcam o instante da
+  passagem, então clicar numa delas leva ao lugar certo.
 
 O alvo da câmera virou uma **função pura** (`camera.ts`) — antes morava dentro do
 `render`, misturado com a suavização, e não tinha como ser testado. Durante a
@@ -406,6 +417,31 @@ Sem isso o começo do vídeo sairia com o mapa vazio. Custo medido numa rota de
 de 1.400. As vistas de parada são limitadas a **oito** paradas por rota (numa
 rota com cinquenta, aproximar em todas dobraria a conta sem ninguém reparar nas
 do meio).
+
+### A emenda entre as imagens do mapa
+
+Duas correções para as **linhas escuras nas emendas** dos blocos de mapa (mais
+visíveis no mapa claro e no satélite):
+
+- **No vídeo**, cada bloco era desenhado no seu retângulo exato do mundo. Com o
+  zoom quebrado (o `s` fracionário do `vistaDe`), as duas bordas de uma emenda
+  caíam em coordenadas de tela quebradas e a cobertura podia somar menos de um
+  pixel: o que sobrava era o fundo do mapa. Agora as bordas são presas na grade
+  de pixels da tela (`retanguloDoBloco`) — um bloco e o seu vizinho calculam a
+  fronteira comum com a mesma conta. Com o mapa **girado** não há grade a
+  seguir, e aí a emenda é coberta por meio pixel de folga em cada lado.
+- **Na pré-visualização**, o Leaflet move o "map pane" com `translate3d` em
+  coordenadas quebradas — e com a câmera "Seguir" ele se move a cada quadro. A
+  posição é presa na grade de pixels do **aparelho** (`emPixelInteiro`, que
+  considera o `devicePixelRatio`) logo depois de cada movimento: o ajuste é
+  menor que meio pixel, não acumula, e é o que faz duas imagens vizinhas
+  encostarem em cima de um pixel.
+
+Os dois casos são medidos em teste: no vídeo, as bordas desenhadas são
+inteiras e dois vizinhos compartilham a mesma fronteira; a folha de blocos do
+mapa girado cobre o retângulo ideal por todos os lados. Um teste de pixel
+(com um bloco de cor chapada e um fundo contrastante, no laboratório) conta
+**zero** pixels de fundo à mostra em sete combinações de formato e câmera.
 
 ### Passagens: quando a rota volta pelo mesmo caminho
 

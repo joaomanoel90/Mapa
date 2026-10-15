@@ -123,6 +123,37 @@ export function tileUrl(basemap: Basemap, z: number, x: number, y: number): stri
 }
 
 /* ------------------------------------------------------------------ */
+/* A grade de pixels do dispositivo                                    */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Prende um valor (em pixels de CSS) na grade de pixels do dispositivo.
+ *
+ * É a mesma ideia do `retanguloDoBloco` do renderizador, do lado do DOM: uma
+ * imagem de mapa colocada em cima de meio pixel é reamostrada pelo navegador, e
+ * entre duas imagens vizinhas isso deixa uma **fresta** de menos de um pixel —
+ * que aparece como uma linha escura (é o fundo do mapa que fica à mostra). Com o
+ * `devicePixelRatio` de 2 do celular, prender no pixel de CSS não basta: o
+ * navegador desenha em pixels de dispositivo, e é nessa grade que as bordas
+ * precisam cair.
+ */
+export function emPixelInteiro(valor: number, dpr = 1): number {
+  const f = Number.isFinite(dpr) && dpr > 0 ? dpr : 1;
+  // multiplicar pelo dpr põe o valor em pixels de dispositivo: arredondar ali
+  // é o mesmo que prender no pixel do aparelho, seja ele 1, 2 ou 1,5 por CSS
+  return Math.round(valor * f) / f;
+}
+
+/** O mesmo, para um ponto em pixels de CSS. */
+export function pontoEmPixelInteiro(
+  x: number,
+  y: number,
+  dpr = 1,
+): { x: number; y: number } {
+  return { x: emPixelInteiro(x, dpr), y: emPixelInteiro(y, dpr) };
+}
+
+/* ------------------------------------------------------------------ */
 /* Carregamento de tiles                                               */
 /* ------------------------------------------------------------------ */
 

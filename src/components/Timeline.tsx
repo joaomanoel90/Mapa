@@ -4,6 +4,8 @@ import { cn } from "../utils/cn";
 
 export default function Timeline({
   progress,
+  rota,
+  tempoDoPonto,
   playing,
   duration,
   track,
@@ -15,7 +17,25 @@ export default function Timeline({
   onSeek,
   onRestart,
 }: {
+  /** fração do **vídeo** (é a posição do cursor na barra) */
   progress: number;
+  /**
+   * Onde a personagem está **na rota** (0..1).
+   *
+   * Com a desaceleração nos pontos as duas coisas deixam de ser iguais: o
+   * cursor da barra anda no relógio do vídeo, e a personagem anda mais devagar
+   * perto das paradas. Tudo o que fala da rota usa esta posição — a distância
+   * percorrida, quais paradas já ficaram para trás e a próxima parada.
+   */
+  rota?: number;
+  /**
+   * Converte uma posição da rota na fração do vídeo em que ela acontece.
+   *
+   * É o que põe as bolinhas das paradas no lugar certo da barra: elas marcam o
+   * **instante da passagem**, então o cursor cruza cada bolinha exatamente
+   * quando a personagem passa por lá (e clicar nela leva o vídeo até ali).
+   */
+  tempoDoPonto?: (t: number) => number;
   playing: boolean;
   duration: number;
   track: Track;
@@ -27,10 +47,13 @@ export default function Timeline({
   onSeek: (t: number) => void;
   onRestart: () => void;
 }) {
-  const traveled = track.total * progress;
+  // sem a desaceleração (ou fora do componente) a rota e o vídeo são a mesma coisa
+  const naRota = rota ?? progress;
+  const tempoDe = tempoDoPonto ?? ((t: number) => t);
+  const traveled = track.total * naRota;
   const ordered = sortPois(stops);
-  const next = ordered.find((p) => p.t > progress);
-  const passed = ordered.filter((p) => p.t <= progress).length;
+  const next = ordered.find((p) => p.t > naRota);
+  const passed = ordered.filter((p) => p.t <= naRota).length;
   return (
     <div
       className={cn(
@@ -71,20 +94,21 @@ export default function Timeline({
               style={{ ["--accent" as string]: accent }}
             />
             {ordered.map((p) => {
-              const done = p.t <= progress;
+              const done = p.t <= naRota;
+              const onde = tempoDe(p.t);
               return (
                 <button
                   key={p.id}
                   type="button"
                   disabled={disabled}
                   title={`${p.label} · ${formatDistance(p.t * track.total)} — clique para ir até aqui`}
-                  onClick={() => onSeek(p.t)}
+                  onClick={() => onSeek(onde)}
                   className={cn(
                     "absolute top-1/2 z-10 grid h-5 w-5 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full border-2 bg-zinc-950 text-[10px] leading-none transition-all hover:scale-125",
                     done ? "scale-105" : "opacity-55 grayscale",
                   )}
                   style={{
-                    left: `calc(8px + (100% - 16px) * ${p.t})`,
+                    left: `calc(8px + (100% - 16px) * ${onde})`,
                     borderColor: done ? p.color : "rgba(255,255,255,0.3)",
                     boxShadow: done ? `0 0 10px -2px ${p.color}` : "none",
                   }}
@@ -109,7 +133,7 @@ export default function Timeline({
             <div className="mt-1.5 flex items-center gap-2 border-t border-white/5 pt-1.5">
               <div className="flex shrink-0 items-center gap-1">
                 {ordered.map((p) => {
-                  const done = p.t <= progress;
+                  const done = p.t <= naRota;
                   return (
                     <span
                       key={p.id}
@@ -137,7 +161,7 @@ export default function Timeline({
                     <span className="font-semibold text-white">{next.label}</span>
                     <span className="text-zinc-500">
                       {" "}
-                      · a {formatDistance((next.t - progress) * track.total)}
+                      · a {formatDistance((next.t - naRota) * track.total)}
                       {isOffRoute(next, track) && (
                         <span className="text-amber-300/80">
                           {" "}

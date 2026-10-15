@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import L from "leaflet";
-import { BASEMAPS, type BasemapId } from "../lib/tiles";
+import { BASEMAPS, pontoEmPixelInteiro, type BasemapId } from "../lib/tiles";
 import { nearestTOnTrack, sampleTrack, type LatLng, type Track } from "../lib/geo";
 import { HOME_CITY } from "../lib/geocode";
 import { gaitOf, type Character } from "../lib/characters";
@@ -202,6 +202,47 @@ export default function MapView(props: Props) {
       ro.disconnect();
       map.remove();
       mapRef.current = null;
+    };
+  }, []);
+
+  /*
+   * --- todas as imagens de mapa em cima de pixels inteiros ---
+   *
+   * O Leaflet move o "map pane" com `translate3d` em coordenadas quebradas
+   * (`setPosition` não arredonda), e com a câmera "Seguir" ele se move a cada
+   * quadro. Com o pane em cima de meio pixel, cada imagem de mapa é reamostrada
+   * e a emenda entre duas vizinhas pode ficar com menos de um pixel de
+   * cobertura — é a **linha preta na emenda das imagens** que o usuário viu
+   * (no escuro ela passa despercebida; no satélite, não).
+   *
+   * Aqui a posição do pane é presa na grade de pixels do **dispositivo** logo
+   * depois de cada movimento. O ajuste é de menos de meio pixel (invisível) e
+   * não acumula: o Leaflet sempre subtrai a próxima posição da última guardada,
+   * que passa a ser a arredondada.
+   */
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    const pane = map.getPane("mapPane");
+    if (!pane) return;
+    const dpr = typeof window === "undefined" ? 1 : window.devicePixelRatio || 1;
+    const prender = () => {
+      const atual = L.DomUtil.getPosition(pane);
+      if (!atual) return;
+      const { x, y } = pontoEmPixelInteiro(atual.x, atual.y, dpr);
+      if (x === atual.x && y === atual.y) return;
+      L.DomUtil.setPosition(pane, L.point(x, y));
+    };
+    map.on("move", prender);
+    map.on("moveend", prender);
+    map.on("zoom", prender);
+    map.on("zoomend", prender);
+    prender();
+    return () => {
+      map.off("move", prender);
+      map.off("moveend", prender);
+      map.off("zoom", prender);
+      map.off("zoomend", prender);
     };
   }, []);
 

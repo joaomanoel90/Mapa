@@ -58,6 +58,8 @@ function fakeCtx() {
   const pinturas: string[] = [];
   /** cada `drawImage`: os argumentos, o alfa e a escala em vigor no momento */
   const imagens: { args: number[]; alpha: number; escala: number }[] = [];
+  /** cada `setTransform(a,b,c,d,e,f)`: é a matriz dos blocos de mapa */
+  const transforms: number[][] = [];
   /** o y de cada `fillText`, na mesma ordem de `textos` */
   const textosY: number[] = [];
   /**
@@ -163,6 +165,7 @@ function fakeCtx() {
               escala: esc,
             });
           }
+          if (prop === "setTransform") transforms.push(args.map((a) => Number(a)));
           if (prop === "rotate") giros.push((Number(args[0] ?? 0) * 180) / Math.PI);
           if (prop === "arc") {
             arcos.push(args as number[]);
@@ -229,6 +232,7 @@ function fakeCtx() {
     textosCor,
     ordem,
     arcos,
+    transforms,
     arcosPos,
     giros,
     tracos,
@@ -2414,6 +2418,197 @@ describe("partida e chegada no mesmo lugar", () => {
     });
     expect(f.textos).toContain("Casa");
     expect(f.textos).toContain("Cachoeira");
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* A emenda dos blocos de mapa                                         */
+/* ------------------------------------------------------------------ */
+
+describe("a emenda dos blocos de mapa", () => {
+  /** A matriz com que os blocos são desenhados (o `setTransform` do quadro). */
+  const matriz = (f: ReturnType<typeof fakeCtx>) => {
+    const m = f.transforms.find((t) => t.length === 6);
+    expect(m).toBeDefined();
+    return m as number[];
+  };
+
+  /** Os blocos desenhados no quadro (4 argumentos e tamanho de bloco). */
+  const blocos = (f: ReturnType<typeof fakeCtx>) =>
+    f.imagens.filter((i) => i.args.length === 4 && i.args[2] > 250 && i.args[2] < 264);
+
+  /**
+   * Um quadro com o mapa **pronto**.
+   *
+   * O `request` do store é assíncrono (baixa e filtra o bloco), e num teste nada
+   * chega: aqui ele entrega na hora uma imagem de mentira, que é o que faz o
+   * laço de desenho dos blocos rodar de verdade.
+   */
+  const desenharComMapa = (ctx: CanvasRenderingContext2D, st: FrameState) => {
+    const r = new SceneRenderer("dark");
+    const store = r.tiles;
+    const bloco = { width: 256, height: 256 } as unknown as CanvasImageSource;
+    store.request = (z: number, x: number, y: number) => {
+      store.put(z, x, y, bloco as never);
+    };
+    r.render(ctx, 1280, 720, { ...st, track });
+    return r;
+  };
+
+  const quadroDeBlocos = (followZoom: number, chase?: { gira: boolean; tilt?: boolean }) => {
+    const f = fakeCtx();
+    desenharComMapa(f.ctx, {
+      ...estado(0.5, 14, null),
+      camera: { mode: "follow", followZoom, chase },
+      style: {
+        ...style,
+        showRoute: false,
+        showTraveled: false,
+        showEndpoints: false,
+        showStops: false,
+        showHud: false,
+        showSummary: false,
+        showProgress: false,
+        showTitle: false,
+      },
+    });
+    return f;
+  };
+
+  it("no zoom quebrado, as bordas dos blocos caem em pixels inteiros da tela", () => {
+    /*
+     * O defeito que o usuário viu ("linhas pretas na emenda das imagens"): com o
+     * zoom quebrado (16,4), cada bloco era desenhado no seu retângulo exato e a
+     * cobertura dos dois lados de uma emenda podia somar menos de 1 pixel — o
+     * que sobrava era o fundo do mapa aparecendo como uma linha escura.
+     */
+    const f = quadroDeBlocos(16.4);
+    const [a, b, c, d, e, fy] = matriz(f);
+    expect(b).toBeCloseTo(0, 9); // sem giro: a grade de pixels existe
+    expect(c).toBeCloseTo(0, 9);
+    // a escala não é inteira: é justamente o caso em que as bordas quebravam
+    expect(Math.abs(a - Math.round(a))).toBeGreaterThan(0.1);
+
+    const desenhados = blocos(f);
+    expect(desenhados.length).toBeGreaterThan(4);
+    for (const i of desenhados) {
+      const X0 = a * i.args[0] + e;
+      const X1 = a * (i.args[0] + i.args[2]) + e;
+      const Y0 = d * i.args[1] + fy;
+      const Y1 = d * (i.args[1] + i.args[3]) + fy;
+      expect(Math.abs(X0 - Math.round(X0))).toBeLessThan(1e-6);
+      expect(Math.abs(X1 - Math.round(X1))).toBeLessThan(1e-6);
+      expect(Math.abs(Y0 - Math.round(Y0))).toBeLessThan(1e-6);
+      expect(Math.abs(Y1 - Math.round(Y1))).toBeLessThan(1e-6);
+      // e a escala ficou dentro do pixel: nada de bloco esticado
+      expect(Math.abs(X1 - X0 - 256 * a)).toBeLessThan(1.01);
+      expect(Math.abs(Y1 - Y0 - 256 * d)).toBeLessThan(1.01);
+    }
+  });
+
+  it("dois vizinhos compartilham exatamente a borda (sem fresta e sem sobreposição)", () => {
+    const f = quadroDeBlocos(16.4);
+    const [a, , , d, e, fy] = matriz(f);
+    const desenhados = blocos(f);
+    // uma fileira de blocos: as bordas direita/esquerda têm de encostar
+    const porFileira = new Map<number, number[]>();
+    for (const i of desenhados) {
+      const Y0 = Math.round(d * i.args[1] + fy);
+      const lista = porFileira.get(Y0) ?? [];
+      lista.push(Math.round(a * i.args[0] + e));
+      porFileira.set(Y0, lista);
+    }
+    let emendas = 0;
+    for (const colunas of porFileira.values()) {
+      colunas.sort((p, q) => p - q);
+      expect(colunas.length).toBeGreaterThan(1);
+      for (let i = 1; i < colunas.length; i++) {
+        /*
+         * A esquerda de um é a direita do outro, na largura exata do bloco na
+         * tela (256·a, com a sobra de meio pixel do arredondamento). Se a
+         * diferença fosse maior, haveria fresta; menor, sobreposição.
+         */
+        expect(Math.abs(colunas[i] - colunas[i - 1] - 256 * a)).toBeLessThanOrEqual(1.001);
+        emendas++;
+      }
+    }
+    expect(emendas).toBeGreaterThan(3);
+  });
+
+  it("o bloco não anda na tela: a borda presa fica a menos de meio pixel", () => {
+    const f = quadroDeBlocos(15.7);
+    const [a, , , d, e, fy] = matriz(f);
+    for (const i of blocos(f)) {
+      const idealX = a * i.args[0] + e;
+      const idealY = d * i.args[1] + fy;
+      expect(Math.abs(idealX - Math.round(idealX))).toBeLessThanOrEqual(0.5);
+      expect(Math.abs(idealY - Math.round(idealY))).toBeLessThanOrEqual(0.5);
+    }
+  });
+
+  it("com o mapa girado, o bloco ganha a folga que cobre a emenda", () => {
+    /*
+     * Com giro não há grade de pixels a seguir (as bordas dos blocos são
+     * oblíquas): aí a folga de meio pixel em cada lado é o que garante que a
+     * emenda não fique por conta da cobertura do rasterizador.
+     */
+    const f = quadroDeBlocos(15, { gira: true, tilt: false });
+    const [a, b, c, , e, fy] = matriz(f);
+    expect(Math.abs(b) + Math.abs(c)).toBeGreaterThan(0.1); // está girado
+    const desenhados = blocos(f);
+    expect(desenhados.length).toBeGreaterThan(4);
+    const [b0, c0, d0, e0, f0] = [b, c, matriz(f)[3], e, fy];
+    /** a caixa na tela dos quatro cantos de um retângulo do mundo */
+    const caixa = (x: number, y: number, w: number, h: number) => {
+      const pts = [
+        [x, y],
+        [x + w, y],
+        [x, y + h],
+        [x + w, y + h],
+      ].map(([X, Y]) => ({ x: a * X + c0 * Y + e0, y: b0 * X + d0 * Y + f0 }));
+      return {
+        x0: Math.min(...pts.map((p) => p.x)),
+        x1: Math.max(...pts.map((p) => p.x)),
+        y0: Math.min(...pts.map((p) => p.y)),
+        y1: Math.max(...pts.map((p) => p.y)),
+      };
+    };
+    for (const i of desenhados) {
+      const desenhado = caixa(i.args[0], i.args[1], i.args[2], i.args[3]);
+      const ideal = caixa(
+        Math.round((i.args[0] + i.args[2] / 2) / 256 - 0.5) * 256,
+        Math.round((i.args[1] + i.args[3] / 2) / 256 - 0.5) * 256,
+        256,
+        256,
+      );
+      /*
+       * O que a folga tem de fazer: o bloco desenhado **cobre** o ideal por
+       * todos os lados — é essa sobra que fecha a emenda quando as bordas dos
+       * blocos são oblíquas (não há grade de pixels a seguir).
+       */
+      expect(desenhado.x0).toBeLessThanOrEqual(ideal.x0 - 0.3);
+      expect(desenhado.x1).toBeGreaterThanOrEqual(ideal.x1 + 0.3);
+      expect(desenhado.y0).toBeLessThanOrEqual(ideal.y0 - 0.3);
+      expect(desenhado.y1).toBeGreaterThanOrEqual(ideal.y1 + 0.3);
+      // …e a folga é pequena: nada de bloco esticado na tela
+      expect(desenhado.x1 - desenhado.x0).toBeLessThan(ideal.x1 - ideal.x0 + 8);
+      // simétrica: a folga é tirada dos dois lados, então o mapa não anda
+      const meioX = i.args[0] + i.args[2] / 2 - 128;
+      expect(Math.abs((((meioX % 256) + 256) % 256) - 0)).toBeLessThan(0.05);
+    }
+  });
+
+  it("sem zoom quebrado as contas continuam fechando", () => {
+    // zoom inteiro: a grade de pixels coincide com a grade dos blocos
+    const f = quadroDeBlocos(16);
+    // a matriz é [a, b, c, d, e, f]: sem giro e sem inclinação, b e c são zero
+    const [a, , , d] = matriz(f);
+    expect(a).toBeCloseTo(1, 9);
+    expect(d).toBeCloseTo(1, 9);
+    for (const i of blocos(f)) {
+      expect(i.args[2]).toBeCloseTo(256, 6);
+      expect(i.args[3]).toBeCloseTo(256, 6);
+    }
   });
 });
 

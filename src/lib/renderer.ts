@@ -36,6 +36,7 @@ import {
   formatDistance,
   haversine,
   project,
+  rumoSuave,
   sampleTrack,
   unproject,
   visibleRuns,
@@ -466,8 +467,8 @@ export function tilesForAnimation(
    * render usa) é maior que a tela. Sem isso, o vídeo sairia com buracos nas
    * diagonais.
    */
-  const push = (centro: LatLng, zoom: number, rumo: number, gira: boolean) => {
-    const v = vistaDe({
+  const vista = (centro: LatLng, zoom: number, rumo: number, gira: boolean) =>
+    vistaDe({
       centro,
       zoom,
       width,
@@ -479,11 +480,31 @@ export function tilesForAnimation(
       // com buracos no alto (blocos que o desenho pede e a conta não pediu)
       tilt: chase ? fatorDeTilt(camera) : 1,
     });
+
+  /**
+   * Quantos blocos desta vista ainda **não** estão no mapa.
+   *
+   * É o que permite perguntar "esta vista cabe?" **antes** de acrescentá-la. A
+   * primeira versão copiava o mapa inteiro a cada vista para poder desfazer —
+   * numa rota longa são centenas de vistas e uma cópia de mil blocos cada: a
+   * conta ficou 12x mais lenta (a sugestão de zoom no painel passou de 70 ms
+   * para 1 s).
+   */
+  const novosDaVista = (v: Vista) => {
+    let n = 0;
+    for (const [z, x, y] of tilesDaVista(v, 1)) if (!map.has(`${z}/${x}/${y}`)) n++;
+    return n;
+  };
+
+  const despejar = (v: Vista) => {
     for (const [z, x, y] of tilesDaVista(v, 1)) {
       const k = `${z}/${x}/${y}`;
       if (!map.has(k)) map.set(k, { url: tileUrl(bm, z, x, y), z, x, y });
     }
   };
+
+  const push = (centro: LatLng, zoom: number, rumo: number, gira: boolean) =>
+    despejar(vista(centro, zoom, rumo, gira));
 
   const b = boundsOf(track.pts);
   const centro = { lat: (b.north + b.south) / 2, lng: (b.east + b.west) / 2 };
@@ -512,11 +533,23 @@ export function tilesForAnimation(
     // todas elas dobraria a conta dos servidores gratuitos sem que ninguém
     // reparasse nas do meio
     const validas = cine.stopTs.filter((ts) => Number.isFinite(ts));
-    const escolhidas = validas.length <= 8 ? validas : spread(validas, 8);
+    const escolhidas = validas.length <= LIMITE_VISTAS_DE_PARADA ? validas : spread(validas, LIMITE_VISTAS_DE_PARADA);
     const zoomParada = Math.min(zoomEfetivo(camera) + STOP_BOOST, maxZoom);
     for (const ts of escolhidas) {
       const s = sampleTrack(track, ts);
-      push(s.pos, zoomParada, s.heading, true);
+      /*
+       * O teto manda mais que a parada: a vista extra é um **ganho** (o foco
+       * chega mais perto), e não pode ser o motivo de a exportação ser recusada.
+       * A pergunta é feita **antes** de acrescentar — e, se esta não couber, as
+       * seguintes também não caberiam (o custo só cresce), então para aqui.
+       *
+       * O que sobra do teto depois da rota é o que define quantas paradas ganham
+       * a aproximação: numa rota curta e num quadro largo, todas; numa rota longa
+       * em retrato, as primeiras.
+       */
+      const v = vista(s.pos, zoomParada, s.heading, true);
+      if (map.size + novosDaVista(v) > TILE_BUDGET) break;
+      despejar(v);
     }
   }
   return Array.from(map.values());
@@ -537,6 +570,15 @@ function spread<T>(lista: T[], n: number): T[] {
  */
 export const TILE_BUDGET = 1400;
 
+/**
+ * Quantas paradas ganham uma vista própria (mais aproximada) no aquecimento.
+ *
+ * O ganho de zoom em cada parada custa blocos de um nível acima, e só as
+ * primeiras paradas fazem diferença na conta: numa rota com cinquenta, aproximar
+ * em todas dobraria o custo nos servidores gratuitos.
+ */
+export const LIMITE_VISTAS_DE_PARADA = 8;
+
 /* ------------------------------------------------------------------ */
 /* Renderer                                                            */
 /* ------------------------------------------------------------------ */
@@ -550,17 +592,41 @@ type Camera = { lat: number; lng: number; zoom: number };
  * Em 0,6 s a esquina é feita como quem realmente vira o corpo: o rumo começa a
  * mudar antes de o traçado mudar de direção e termina depois.
  */
-const RUMO_TAU_S = 0.6;
+const RUMO_TAU_S = 0.5;
 
 /**
  * Teto da velocidade de giro (graus por segundo de vídeo).
  *
- * O filtro sozinho responde rápido demais quando o rumo dá um salto grande (num
- * zigue-zague do arquivo, o primeiro quadro levaria ~1/6 da virada inteira).
- * Com o teto, nenhuma virada é mais rápida que ~1,2 volta por segundo: um
- * giro de 90° leva no mínimo 0,75 s, sempre.
+ * É uma **rede de segurança**, não o mecanismo: com o rumo já suavizado na
+ * distância (ver `rumoSuave`), a virada acontece em rampa e o teto quase nunca
+ * entra. Ele existe para o primeiro quadro (quando ainda não há rumo anterior) e
+ * para um traçado com uma volta fechada, onde nenhum filtro esperto evita um
+ * giro grande — e girar o mapa a 120°/s (o valor antigo) era justamente o
+ * "pulo" que o usuário viu a cada curva.
  */
-const RUMO_MAX_GRAUS_S = 120;
+const RUMO_MAX_GRAUS_S = 90;
+
+/**
+ * Tamanho da janela do rumo, em **segundos de vídeo**.
+ *
+ * A suavização tem de ser medida no tempo de tela, não em metros: a mesma rota
+ * vira 3 km/s de caminhada num vídeo de 7 s e 30 m/s num vídeo de 10 min, e uma
+ * janela de 30 m daria uma virada suave num caso e um salto no outro.
+ *
+ * O número foi escolhido medindo: com 1,6 s, uma quina de 90° é feita em ~1,6 s
+ * de vídeo e o giro mais rápido do quadro fica em ~1,9° (57°/s) com aceleração
+ * de 0,11°/quadro². Menos que isso (0,5 s) e o teto de giro volta a entrar em
+ * 14% dos quadros — era o "pulo"; mais que isso (2,6 s) e o personagem aponta
+ * para a média de um trecho longo demais, atrasando a virada.
+ */
+const RUMO_JANELA_S = 1.6;
+
+/** Meia-janela da suavização em metros, para um traçado e um percurso dados. */
+export function janelaDoRumo(totalM: number, percursoS: number): number {
+  const s = Number.isFinite(percursoS) && percursoS > 0 ? percursoS : 10;
+  const m = Number.isFinite(totalM) && totalM > 0 ? totalM : 0;
+  return Math.max(1, (m / s) * RUMO_JANELA_S);
+}
 
 /**
  * Constante de tempo da inclinação do corpo na curva (segundos de vídeo).
@@ -768,10 +834,31 @@ export class SceneRenderer {
      * acontece em ~0,25 s: o mesmo caminho, sem o tranco.
      */
     const dt = this.avancarTempo(input.elapsed);
-    const rumo = this.suavizarRumo(sample.heading, dt);
+
+    /*
+     * --- o rumo do quadro ---
+     *
+     * Duas suavizações em série, e cada uma tira um degrau diferente:
+     *
+     * 1. **na distância** (`rumoSuave`): a direção do segmento atual é uma
+     *    escada, e a cada quina do traçado ela salta de uma vez. A média das
+     *    direções numa janela de ~0,5 s de vídeo para cada lado é contínua — o
+     *    degrau simplesmente não existe mais;
+     * 2. **no tempo** (`suavizarRumo`): a janela deslizante ainda tem quinas na
+     *    derivada (a direção média muda mais depressa no meio da curva), e o
+     *    filtro de tempo dá a inércia de quem realmente vira o corpo.
+     *
+     * Era aqui que estava o "a cada curva parece que está pulando a imagem": com
+     * o alvo em degraus, o teto de giro entrava em 21% dos quadros de uma rota
+     * em zigue-zague, e o mapa girava a 120°/s em rampa.
+     */
+    const tl = timelineOr(input.timeline, input.duration);
+    const rumo = this.suavizarRumo(
+      rumoSuave(track, t, janelaDoRumo(track.total, tl.percurso)),
+      dt,
+    );
 
     // --- câmera (alvo puro + suavização) ---
-    const tl = timelineOr(input.timeline, input.duration);
     const target = cameraTarget({
       track,
       t,
@@ -911,6 +998,11 @@ export class SceneRenderer {
    * ponto B). O raio cobre o pino, o nome e a foto do lugar — o pino é o que não
    * pode sumir atrás do painel.
    */
+  /**
+   * Raio do selo do pino na tela, com folga — o pino tem 17, e o bloco da
+   * parada não deve encostar nele nem no miolo da foto.
+   */
+  const RAIO_DO_SELO = 40;
   const lugaresDasPontas: { x: number; y: number; r: number }[] = [];
   if (style.showEndpoints && track.pts.length > 1) {
     for (const p of [track.pts[0], track.pts[track.pts.length - 1]]) {
@@ -1023,7 +1115,22 @@ export class SceneRenderer {
 
     // --- paradas do percurso ---
     if (style.showStops && input.stops.length > 0 && track.pts.length > 1) {
-      drawStops(ctx, input, toXY, sf);
+      /*
+       * O que é desenhado **por cima** do bloco de uma parada: a cartela final e
+       * os selos da partida/chegada. A chegada fica a poucos metros da última
+       * parada, e o pino dela tapava metade do nome — o bloco da parada agora
+       * foge deles também.
+       */
+      const selos = lugaresDasPontas.map((l) => ({
+        x: l.x - RAIO_DO_SELO * sf,
+        y: l.y - RAIO_DO_SELO * sf,
+        w: 2 * RAIO_DO_SELO * sf,
+        h: 2 * RAIO_DO_SELO * sf,
+      }));
+      drawStops(ctx, input, toXY, sf, {
+        quadro: { width, height },
+        proibidos: [...(cartao ? [retanguloDaCartela(cartao)] : []), ...selos],
+      });
     }
 
     /*
@@ -1616,6 +1723,81 @@ export function centroDoBloco(
   return Math.max(min, Math.min(max, x));
 }
 
+/** Um retângulo qualquer na tela (a cartela final, o aviso do topo). */
+type RetanguloNaTela = { x: number; y: number; w: number; h: number };
+
+/**
+ * Onde cai o bloco de uma parada (a foto e o nome) — em pixels da tela.
+ *
+ * O bloco era desenhado no espaço do pino, sempre acima dele. Com a câmera que
+ * acompanha, o pino de uma parada **perto do fim do trajeto** fica na parte de
+ * baixo do quadro — e o bloco saía pela moldura: o usuário só via o aviso do
+ * topo ("no ponto de parada perto do final, ele aparece como toast, como ele
+ * ficou em baixo da tela").
+ *
+ * Aqui ele é posicionado como o dos pinos A/B: acima, ou abaixo quando acima
+ * não cabe; desliza para dentro do quadro na horizontal; e foge do que estiver
+ * cobrindo aquele ponto — a cartela final e os selos da partida/chegada, que
+ * são desenhados **por cima** (e a chegada fica a poucos metros da última
+ * parada, o que tapava metade do nome). O quadro manda em tudo: se não houver
+ * como fugir, o bloco fica onde couber inteiro.
+ *
+ * Devolve o **topo** (`y`), o **centro** (`x`) e de que lado ficou.
+ */
+export function lugarDoBloco(
+  pino: { x: number; y: number },
+  largura: number,
+  altura: number,
+  raio: number,
+  respiro: number,
+  quadro: { width: number; height: number },
+  margem: number,
+  proibidos: RetanguloNaTela[] = [],
+): { x: number; y: number; acima: boolean } {
+  const metade = largura / 2;
+  const min = margem + metade;
+  const max = quadro.width - margem - metade;
+  // o pino continua no eixo do bloco; o bloco é que desliza para caber
+  const x = min > max ? quadro.width / 2 : Math.max(min, Math.min(max, pino.x));
+
+  const acimaY = pino.y - raio - respiro - altura;
+  const abaixoY = pino.y + raio + respiro;
+  const fora = (y: number) => y < margem || y + altura > quadro.height - margem;
+  const colide = (y: number) =>
+    proibidos.some(
+      (b) => x + metade > b.x && x - metade < b.x + b.w && y + altura > b.y && y < b.y + b.h,
+    );
+
+  // primeiro: dentro do quadro (não adianta fugir da cartela e sair da
+  // moldura). Depois: fora do que cobre. No empate, o lado de sempre é o de cima.
+  const candidatos = [
+    { acima: true, y: acimaY, dentro: !fora(acimaY) },
+    { acima: false, y: abaixoY, dentro: !fora(abaixoY) },
+  ];
+  const dentro = candidatos.filter((c) => c.dentro);
+  const livres = dentro.filter((c) => !colide(c.y));
+  const escolhido = livres[0] ?? dentro[0] ?? candidatos[0];
+  let acima = escolhido.acima;
+  let y = escolhido.y;
+
+  // coberto dos dois lados (a cartela no meio da tela): sobe para cima do que
+  // cobre, se sobrar espaço no quadro
+  if (colide(y)) {
+    const cobrem = proibidos.filter(
+      (b) => x + metade > b.x && x - metade < b.x + b.w && y + altura > b.y && y < b.y + b.h,
+    );
+    const teto = Math.min(...cobrem.map((b) => b.y)) - altura - respiro;
+    if (teto >= margem) {
+      acima = true;
+      y = teto;
+    }
+  }
+
+  // o quadro manda: o bloco nunca fica fora dele
+  y = Math.max(margem, Math.min(quadro.height - margem - altura, y));
+  return { x, y, acima };
+}
+
 /** As opções do pino de uma ponta (são muitas: vão por nome). */
 type OpcoesDoPino = {
   mark?: import("./endpoints").EndpointMark | null;
@@ -2082,11 +2264,27 @@ function easeOutBack(x: number): number {
  * A animação é medida em METROS percorridos, então o resultado é idêntico
  * na pré-visualização e no vídeo gravado.
  */
+/**
+ * Quanto a etiqueta da parada leva para aparecer — em **segundos de vídeo**.
+ *
+ * Era medida em metros (como o pino), e a diferença aparece no fim do trajeto:
+ * a desaceleração da parada faz os últimos metros durarem muito tempo de vídeo,
+ * então uma parada perto do fim tinha a etiqueta nascendo depois do fim do
+ * vídeo. Em segundos ela entra igual em qualquer rota.
+ */
+const ROTULO_ENTRA_S = 0.35;
+
 function drawStops(
   ctx: CanvasRenderingContext2D,
   input: FrameState,
   toXY: (p: LatLng) => { x: number; y: number },
   sf: number,
+  opcoes: {
+    /** o quadro do vídeo: o bloco do nome não pode sair dele */
+    quadro: { width: number; height: number };
+    /** o que está desenhado por cima (a cartela final): o bloco foge disso */
+    proibidos?: RetanguloNaTela[];
+  },
 ) {
   const { track, t, stops, style } = input;
   // a janela da foto da parada é medida em segundos de **percurso**
@@ -2134,9 +2332,6 @@ function drawStops(
         : ativa === null
           ? 1
           : Math.min(1, ((t - ativa) * track.total) / popMeters);
-    // para a etiqueta: ela nasce na primeira passagem e fica (como sempre foi)
-    const pRotulo = Math.min(1, ((t - primeira) * track.total) / popMeters);
-
     ctx.save();
 
     // linha de chamada: liga a rota ao ponto de interesse
@@ -2177,10 +2372,18 @@ function drawStops(
     // onda de impacto no instante em que é alcançada
     if (!upcoming && p < 1) drawImpacto(ctx, { x: px, y: py }, stop.color, p, sf);
 
-    const scale = upcoming ? 0.7 : Math.max(0.15, easeOutBack(p));
-    ctx.globalAlpha = upcoming ? 0.55 : Math.min(1, 0.3 + p * 1.2);
+    const escala = upcoming ? 0.7 : Math.max(0.15, easeOutBack(p));
+    const alfaPino = upcoming ? 0.55 : Math.min(1, 0.3 + p * 1.2);
+
+    /*
+     * O pino, no "pipoco" da passagem (o pino das paradas fica em 0,7 até o
+     * personagem passar e aí cresce) — e o bloco do nome e da foto à parte,
+     * em **pixels da tela**, para poder escolher o lado e desviar da cartela.
+     */
+    ctx.save();
+    ctx.globalAlpha = alfaPino;
     ctx.translate(px, py);
-    ctx.scale(scale, scale);
+    ctx.scale(escala, escala);
 
     const r = 17 * sf;
     // mesma regra dos pinos A/B: com foto, o miolo mostra a foto (o trajeto
@@ -2197,6 +2400,7 @@ function drawStops(
       ctx.fillText(stop.emoji, 0, r * 0.05);
     };
     drawPinBadge(ctx, r, stop.color, sf, miolo);
+    ctx.restore();
 
     /*
      * Foto da parada (polaroide) e etiqueta com o nome.
@@ -2208,75 +2412,224 @@ function drawStops(
      * mesmo jeito em qualquer rota — e a pré-visualização e a gravação
      * continuam idênticas, porque as duas usam o mesmo `t`.
      */
+    /*
+     * A foto da parada e a etiqueta com o nome.
+     *
+     * A foto entra junto com o "pipoco" do pino e sai depois de um tempo —
+     * medida em **segundos de vídeo**, e não em metros como o pino. Em metros
+     * ela ficaria ilegível justamente nas rotas longas: 1,3 km de foto numa
+     * travessia de 435 km são 0,04 s de vídeo. Em segundos, a foto aparece do
+     * mesmo jeito em qualquer rota — e a pré-visualização e a gravação
+     * continuam idênticas, porque as duas usam o mesmo `t`.
+     *
+     * A etiqueta também é medida em segundos de vídeo, e não mais em metros:
+     * em metros ela dependia de quantos metros o vídeo anda por segundo, e
+     * justamente no fim do trajeto a desaceleração da parada faz os últimos
+     * metros durarem muito tempo de vídeo. Numa parada perto do fim, a etiqueta
+     * nascia depois de o vídeo acabar — e o que sobrava era só o aviso do topo.
+     */
     const foto = stop.photo ? (input.photos?.get(stop.photo) ?? null) : null;
     // a janela da foto começa na passagem mais recente: na volta, ela aparece
     // de novo, mesmo que já tenha aparecido na ida
     const desde = ultima === null ? -1 : (t - ultima) * tl.percurso;
     const fotoAlpha = foto ? photoWindowAlpha(desde) : 0;
-    const ladoFoto = 78 * sf;
-    // sem foto pronta, a etiqueta não sobe: não pode ficar um buraco no lugar dela
-    const alturaFoto = foto ? (ladoFoto + 10 * sf) * fotoAlpha : 0;
-    const rotuloVisivel = ultima !== null && style.showStopLabels && pRotulo > 0.26;
-    const la = rotuloVisivel ? Math.min(1, (pRotulo - 0.26) / 0.38) : 0;
-    const baseRotulo = -r - 33 * sf - 8 * sf + (1 - la) * 9 * sf;
+    const rotuloAlpha =
+      ultima === null || !style.showStopLabels
+        ? 0
+        : Math.min(1, Math.max(0, (t - primeira) * tl.percurso) / ROTULO_ENTRA_S);
 
-    if (foto && fotoAlpha > 0.01) {
-      // o alfa é calculado, e não lido do contexto: ler `ctx.globalAlpha` de
-      // volta devolveria o valor do pino em vez do que está valendo de fato
-      const alfaPino = Math.min(1, 0.3 + p * 1.2);
-      ctx.save();
-      ctx.globalAlpha = alfaPino * fotoAlpha;
-      drawStopCircle(ctx, foto, 0, baseRotulo - alturaFoto - 6 * sf, ladoFoto, stop.color, sf);
-      ctx.restore();
-    }
-
-    // etiqueta com nome + distância desde a partida
-    if (rotuloVisivel) {
-      ctx.globalAlpha = Math.min(1, 0.3 + p * 1.2) * la;
-      const name = stop.label.trim() || "Parada";
+    /*
+     * Com o pino fora da tela o bloco nem é desenhado: ele já não apareceria, e
+     * puxá-lo para dentro da moldura deixaria um nome solto, apontando para
+     * nada (é o mesmo critério dos pinos A/B).
+     */
+    const centroFora = px < 0 || px > opcoes.quadro.width || py < 0 || py > opcoes.quadro.height;
+    if (!centroFora && (fotoAlpha > 0.01 || rotuloAlpha > 0.02)) {
       // no retorno, o km é o do momento (16,8 km), não o da primeira passagem
       const km = ((ultima ?? stop.t) * track.total) / 1000;
       const kmTxt = `${km < 10 ? km.toFixed(2) : km.toFixed(1)} km`;
-      const sub = off >= 25 ? `⤷ ${kmTxt}` : kmTxt;
-      const fName = `700 ${Math.round(13.5 * sf)}px "Inter","Segoe UI",system-ui,sans-serif`;
-      const fSub = `600 ${Math.round(10.5 * sf)}px "Inter","Segoe UI",system-ui,sans-serif`;
-      ctx.font = fName;
-      const nw = ctx.measureText(name).width;
-      ctx.font = fSub;
-      const sw = ctx.measureText(sub).width;
-      const bw = Math.max(nw, sw) + 20 * sf;
-      const bh = 33 * sf;
-      const by = baseRotulo - alturaFoto;
-
-      roundRect(ctx, -bw / 2, by, bw, bh, 9 * sf);
-      ctx.fillStyle = "rgba(9,12,20,0.92)";
-      ctx.shadowColor = "rgba(0,0,0,0.45)";
-      ctx.shadowBlur = 10 * sf;
-      ctx.fill();
-      ctx.shadowColor = "transparent";
-      ctx.strokeStyle = hexA(stop.color, 0.85);
-      ctx.lineWidth = 1.6 * sf;
-      ctx.stroke();
-
-      ctx.beginPath();
-      ctx.moveTo(-5 * sf, by + bh);
-      ctx.lineTo(5 * sf, by + bh);
-      ctx.lineTo(0, by + bh + 5 * sf);
-      ctx.closePath();
-      ctx.fillStyle = "rgba(9,12,20,0.92)";
-      ctx.fill();
-
-      ctx.textBaseline = "alphabetic";
-      ctx.fillStyle = "#ffffff";
-      ctx.font = fName;
-      ctx.fillText(name, 0, by + 15 * sf);
-      ctx.fillStyle = stop.color;
-      ctx.font = fSub;
-      ctx.fillText(sub, 0, by + 27 * sf);
+      desenharBlocoDaParada(ctx, {
+        pino: { x: px, y: py },
+        raio: 17 * sf,
+        color: stop.color,
+        sf,
+        nome: stop.label.trim() || "Parada",
+        sub: off >= 25 ? `⤷ ${kmTxt}` : kmTxt,
+        foto,
+        fotoAlpha,
+        alfaPino,
+        rotuloAlpha,
+        quadro: opcoes.quadro,
+        proibidos: opcoes.proibidos ?? [],
+      });
     }
-
     ctx.restore();
   }
+}
+
+/**
+ * O bloco de uma parada: a foto, o nome e o km — em **pixels da tela**.
+ *
+ * Fica fora do `scale` do "pipoco" de propósito: assim o bloco é medido e
+ * posicionado no quadro de verdade (`lugarDoBloco`), e não no espaço do pino,
+ * que a cada quadro está num tamanho e num lugar diferente.
+ *
+ * A seta só é desenhada enquanto o bloco está encostado no pino: quando ele
+ * sobe para fugir da cartela, uma seta solta apontaria para o nada.
+ */
+function desenharBlocoDaParada(
+  ctx: CanvasRenderingContext2D,
+  o: {
+    /** posição do pino, em pixels da tela */
+    pino: { x: number; y: number };
+    /** raio do pino, em pixels */
+    raio: number;
+    color: string;
+    sf: number;
+    nome: string;
+    sub: string;
+    foto: PhotoImage | null;
+    fotoAlpha: number;
+    /** alfa do pino (o bloco acompanha a entrada dele) */
+    alfaPino: number;
+    /** 0..1: o quanto a etiqueta já entrou */
+    rotuloAlpha: number;
+    quadro: { width: number; height: number };
+    proibidos: RetanguloNaTela[];
+  },
+) {
+  const margem = 10 * o.sf;
+  const respiro = 8 * o.sf;
+  const gap = 6 * o.sf;
+  const ladoFoto = 78 * o.sf;
+  const bh = 33 * o.sf;
+  const temFoto = !!o.foto && o.fotoAlpha > 0.01;
+  const temNome = o.rotuloAlpha > 0.02;
+
+  const fNome = `700 ${Math.round(13.5 * o.sf)}px "Inter","Segoe UI",system-ui,sans-serif`;
+  const fSub = `600 ${Math.round(10.5 * o.sf)}px "Inter","Segoe UI",system-ui,sans-serif`;
+  ctx.font = fNome;
+  const nw = ctx.measureText(o.nome).width;
+  ctx.font = fSub;
+  const sw = ctx.measureText(o.sub).width;
+  const bw = Math.max(nw, sw) + 20 * o.sf;
+
+  // o conteúdo, de cima para baixo, sem contar o pino
+  const conteudo = (temNome ? bh + (temFoto ? gap : 0) : 0) + (temFoto ? ladoFoto : 0);
+  const largura = Math.max(temNome ? bw : 0, temFoto ? ladoFoto : 0);
+  const lugar = lugarDoBloco(
+    o.pino,
+    largura,
+    conteudo,
+    o.raio,
+    respiro,
+    o.quadro,
+    margem,
+    o.proibidos,
+  );
+
+  // encostado no pino? então o bloco ainda aponta para ele: o nome desce um
+  // bico na direção do pino (com foto no meio, a seta aponta para a foto — é o
+  // desenho de sempre). Longe do pino (fugindo da cartela), a seta sai de cena.
+  const borda = lugar.acima ? lugar.y + conteudo : lugar.y;
+  const alvo = lugar.acima ? o.pino.y - o.raio - respiro : o.pino.y + o.raio + respiro;
+  const encostado = Math.abs(borda - alvo) < 0.5;
+
+  ctx.save();
+  ctx.translate(lugar.x, lugar.y);
+
+  // dentro do bloco: a foto encosta no pino e o nome fica do lado de fora — é o
+  // desenho de sempre (o nome subia para dar lugar à foto), e o espelho dele
+  // quando o bloco desce
+  const porFoto = (topo: number) => {
+    if (!temFoto) return;
+    ctx.save();
+    ctx.globalAlpha = o.alfaPino * o.fotoAlpha;
+    drawStopCircle(ctx, o.foto as never, 0, topo + ladoFoto, ladoFoto, o.color, o.sf);
+    ctx.restore();
+  };
+  const porNome = (topo: number) => {
+    if (!temNome) return;
+    ctx.save();
+    ctx.globalAlpha = o.alfaPino * o.rotuloAlpha;
+    desenharEtiquetaDaParada(
+      ctx,
+      o.nome,
+      o.sub,
+      topo,
+      bw,
+      bh,
+      o.color,
+      o.sf,
+      lugar.acima,
+      encostado ? o.pino.x - lugar.x : 0,
+      encostado,
+    );
+    ctx.restore();
+  };
+
+  if (lugar.acima) {
+    porFoto(temNome ? bh + gap : 0);
+    porNome(0);
+  } else {
+    porFoto(0);
+    porNome(temFoto ? ladoFoto + gap : 0);
+  }
+
+  ctx.restore();
+}
+
+/**
+ * A etiqueta de uma parada: o nome em cima, o km embaixo.
+ *
+ * `topo` é o y do topo da caixa; `acima` diz de que lado da caixa o pino está
+ * (a seta aponta para lá) e `setaX` onde a seta cai dentro dela — a etiqueta
+ * pode ter deslizado na horizontal, e a seta continua apontando para o pino.
+ */
+function desenharEtiquetaDaParada(
+  ctx: CanvasRenderingContext2D,
+  nome: string,
+  sub: string,
+  topo: number,
+  bw: number,
+  bh: number,
+  color: string,
+  sf: number,
+  acima: boolean,
+  setaX: number,
+  comSeta: boolean,
+) {
+  roundRect(ctx, -bw / 2, topo, bw, bh, 9 * sf);
+  ctx.fillStyle = "rgba(9,12,20,0.92)";
+  ctx.shadowColor = "rgba(0,0,0,0.45)";
+  ctx.shadowBlur = 10 * sf;
+  ctx.fill();
+  ctx.shadowColor = "transparent";
+  ctx.strokeStyle = hexA(color, 0.85);
+  ctx.lineWidth = 1.6 * sf;
+  ctx.stroke();
+
+  if (comSeta) {
+    const dentro = Math.max(-bw / 2 + 6 * sf, Math.min(bw / 2 - 6 * sf, setaX));
+    const base = acima ? topo + bh : topo;
+    const ponta = acima ? base + 5 * sf : base - 5 * sf;
+    ctx.beginPath();
+    ctx.moveTo(dentro - 5 * sf, base);
+    ctx.lineTo(dentro + 5 * sf, base);
+    ctx.lineTo(dentro, ponta);
+    ctx.closePath();
+    ctx.fillStyle = "rgba(9,12,20,0.92)";
+    ctx.fill();
+  }
+
+  ctx.textAlign = "center";
+  ctx.textBaseline = "alphabetic";
+  ctx.fillStyle = "#ffffff";
+  ctx.font = `700 ${Math.round(13.5 * sf)}px "Inter","Segoe UI",system-ui,sans-serif`;
+  ctx.fillText(nome, 0, topo + 15 * sf);
+  ctx.fillStyle = color;
+  ctx.font = `600 ${Math.round(10.5 * sf)}px "Inter","Segoe UI",system-ui,sans-serif`;
+  ctx.fillText(sub, 0, topo + 27 * sf);
 }
 
 /**

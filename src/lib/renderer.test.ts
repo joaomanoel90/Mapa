@@ -7,9 +7,11 @@ import { formatClock, timesOf } from "./hud";
 import { type PhotoImage, type PhotoLookup } from "./photos";
 import type { Poi } from "./pois";
 import { kmMarks } from "./km-marks";
-import { findCharacter } from "./characters";
+import { findCharacter, gaitOf } from "./characters";
 import {
   SceneRenderer,
+  andar,
+  inclinacaoDaCurva,
   liftToClear,
   overlapsCard,
   summaryBox,
@@ -31,6 +33,12 @@ function fakeCtx() {
   const textos: string[] = [];
   /** arcos desenhados: [x, y, raio, início, fim] */
   const arcos: number[][] = [];
+  /**
+   * Os mesmos arcos, mas com a posição **absoluta** (soma o `translate` em
+   * vigor). É o que permite perguntar onde o personagem estava na tela — o
+   * `arcos` sozinho é sempre (0,0) porque o desenho translada antes.
+   */
+  const arcosPos: number[][] = [];
   /** cada `stroke()`: a cor, a espessura e quantos pontos o caminho tinha */
   const tracos: { cor: string; largura: number; pontos: number }[] = [];
   /** cada `fill()`: a cor de preenchimento em vigor (a polaroide branca era um fill) */
@@ -104,7 +112,10 @@ function fakeCtx() {
               alpha: Number(props.globalAlpha ?? 1),
             });
           }
-          if (prop === "arc") arcos.push(args as number[]);
+          if (prop === "arc") {
+            arcos.push(args as number[]);
+            arcosPos.push([tx + Number(args[0] ?? 0), ty + Number(args[1] ?? 0), ...(args.slice(2) as number[])]);
+          }
           // só a cor em texto: alguns lugares passam um gradiente (objeto) aqui
           if (prop === "fill" && typeof props.fillStyle === "string") {
             pinturas.push(props.fillStyle);
@@ -139,6 +150,7 @@ function fakeCtx() {
     textosCor,
     ordem,
     arcos,
+    arcosPos,
     tracos,
     movimentos,
     imagens,
@@ -1441,5 +1453,137 @@ describe("partida e chegada no vídeo", () => {
     expect(liftToClear(300, 400, 1, 10)).toBe(0);
     expect(liftToClear(400, 300, 0.5, 10)).toBeCloseTo(55);
     expect(liftToClear(400, 300, 0, 10)).toBe(0);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* O andar do personagem                                               */
+/* ------------------------------------------------------------------ */
+
+/**
+ * O selo do personagem na tela.
+ *
+ * O primeiro arco com raio entre 30 e 50 px: o selo do personagem tem ~38 px
+ * (0,62 de 62), enquanto o aro de pulso tem ~61, o halo ~93 e os pinos 17. É a
+ * posição **absoluta**, então dá para ver o corpo subir e trocar de lado de um
+ * quadro para o outro — que é exatamente o que o olho chama de "andar".
+ */
+const seloNaTela = (f: ReturnType<typeof fakeCtx>) =>
+  f.arcosPos.find((a) => a[2] > 30 && a[2] < 50) ?? null;
+
+describe("o andar do personagem", () => {
+  const semVoo = buildTimeline(14, { voo: false, cartela: false });
+  const quadro = (elapsed: number, id = "run", timeline: Timeline = semVoo) => ({
+    ...estado(0.5, 14, null, null, null, timeline),
+    elapsed,
+    timeline,
+    character: findCharacter(id),
+  });
+
+  it("o corpo sobe e desce: alto no meio do passo, no chão na pisada", () => {
+    // um caso medido, e não um número escolhido: meio passo depois da pisada
+    const correndo = findCharacter("run");
+    const hz = gaitOf(correndo).hz;
+    const pisada = andar(quadro(1), correndo);
+    const alto = andar(quadro(1 + 0.5 / hz), correndo);
+    expect(Math.abs(pisada.sobe)).toBeLessThan(0.002);
+    expect(alto.sobe).toBeLessThan(-0.15);
+    // estica no alto e achata na batida (é o peso do passo)
+    expect(alto.estica).toBeGreaterThan(0.05);
+    expect(pisada.estica).toBeLessThan(-0.05);
+  });
+
+  it("o peso troca de lado a cada passo", () => {
+    const correndo = findCharacter("run");
+    const hz = gaitOf(correndo).hz;
+    const primeiro = andar(quadro(1 + 0.25 / hz), correndo).lado;
+    const segundo = andar(quadro(1 + 0.75 / hz), correndo).lado;
+    expect(primeiro).toBeGreaterThan(0.05);
+    expect(segundo).toBeLessThan(-0.05);
+  });
+
+  it("o selo do personagem se move no quadro (é isso que anda)", () => {
+    // dois quadros com meio passo de diferença, no mesmo instante do percurso:
+    // o mapa é o mesmo, então quem se mexeu foi o corpo
+    const correndo = findCharacter("run");
+    const hz = gaitOf(correndo).hz;
+    const pisada = fakeCtx();
+    const alto = fakeCtx();
+    const ladoOposto = fakeCtx();
+    desenhar(pisada.ctx, quadro(1));
+    desenhar(alto.ctx, quadro(1 + 0.5 / hz));
+    desenhar(ladoOposto.ctx, quadro(1 + 0.25 / hz));
+    const noChao = seloNaTela(pisada);
+    const noAlto = seloNaTela(alto);
+    const deslocado = seloNaTela(ladoOposto);
+    expect(noChao).not.toBeNull();
+    expect(noAlto).not.toBeNull();
+    // subiu: y cresce para baixo, então o de baixo tem y maior
+    expect(noChao![1] - noAlto![1]).toBeGreaterThan(8);
+    // e o peso foi para o lado (no meio do passo o corpo não está centrado)
+    expect(Math.abs(noChao![0] - deslocado![0])).toBeGreaterThan(2);
+  });
+
+  it("parado no voo e na cartela, o personagem não fica torto", () => {
+    const tl = buildTimeline(14, { voo: true, cartela: true });
+    const correndo = findCharacter("run");
+    const zero = { sobe: 0, lado: 0, estica: 0 };
+    for (const elapsed of [0, tl.voo - 0.3, tl.voo, tl.voo + tl.percurso, 14]) {
+      expect(andar(quadro(elapsed, "run", tl), correndo)).toEqual(zero);
+    }
+    // e no meio do percurso ele anda, claro
+    const meio = andar(quadro(tl.voo + tl.percurso / 2, "run", tl), correndo);
+    expect(meio.sobe).toBeLessThan(-0.02);
+  });
+
+  it("quem tem roda não pula (carro que pula parece defeito)", () => {
+    const carro = findCharacter("car");
+    expect(gaitOf(carro).gait).toBe("roda");
+    const hz = gaitOf(carro).hz;
+    expect(andar(quadro(1 + 0.5 / hz, "car"), carro)).toEqual({ sobe: 0, lado: 0, estica: 0 });
+  });
+
+  it("quem paira sobe devagar, e bem menos que quem anda", () => {
+    const aviao = findCharacter("plane");
+    const correndo = findCharacter("run");
+    expect(gaitOf(aviao).gait).toBe("flutua");
+    const passo = 1 + 0.5 / gaitOf(aviao).hz;
+    const paira = andar(quadro(passo, "plane"), aviao);
+    const anda = andar(quadro(1 + 0.5 / gaitOf(correndo).hz), correndo);
+    expect(paira.sobe).toBeLessThan(0);
+    expect(Math.abs(paira.sobe)).toBeLessThan(Math.abs(anda.sobe) / 2);
+  });
+
+  it("a cadência é do personagem: correr dá mais passos que caminhar", () => {
+    const corrida = gaitOf(findCharacter("run")).hz;
+    const caminhada = gaitOf(findCharacter("walk")).hz;
+    expect(corrida).toBeGreaterThan(caminhada);
+    // no mesmo segundo, o corredor já está em outra fase
+    expect(andar(quadro(1.5, "run"), findCharacter("run")).lado).not.toBeCloseTo(
+      andar(quadro(1.5, "walk"), findCharacter("walk")).lado,
+      2,
+    );
+  });
+
+  it("na curva o corpo se inclina; na reta, não", () => {
+    const reta = buildTrack([
+      { lat: 0, lng: 0, ele: 0, t: 0 },
+      { lat: 0, lng: 0.001, ele: 0, t: 1 },
+      { lat: 0, lng: 0.002, ele: 0, t: 2 },
+      { lat: 0, lng: 0.003, ele: 0, t: 3 },
+    ]);
+    expect(inclinacaoDaCurva(reta, 1)).toBe(0);
+    // esquina de 90°: segue o giro, com teto de 10°
+    const curva = buildTrack([
+      { lat: 0, lng: 0, ele: 0, t: 0 },
+      { lat: 0, lng: 0.001, ele: 0, t: 1 },
+      { lat: 0, lng: 0.002, ele: 0, t: 2 },
+      { lat: 0.001, lng: 0.002, ele: 0, t: 3 },
+      { lat: 0.002, lng: 0.002, ele: 0, t: 4 },
+    ]);
+    // o sinal segue o lado da curva (positivo = para a direita); o que importa
+    // aqui é que ela aparece e que o teto de 10° segura
+    expect(Math.abs(inclinacaoDaCurva(curva, 2))).toBeGreaterThan(5);
+    expect(Math.abs(inclinacaoDaCurva(curva, 2))).toBeLessThanOrEqual(10);
   });
 });

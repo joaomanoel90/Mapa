@@ -214,10 +214,48 @@ body {
 }
 .char-emoji {
   position: relative;
-  font-size: 30px;
+  /* maior, como no vídeo: a figura não pode ficar pequena dentro do aro */
+  font-size: 36px;
   line-height: 1;
   transform-origin: 50% 50%;
   filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.55));
+}
+
+/*
+ * O passo do selo na prévia — o mesmo desenho do vídeo: sobe no meio do passo,
+ * troca de lado e volta na pisada (ver `andar` no renderer).
+ */
+.char-badge.char-passo {
+  animation: charStep var(--passo, 0.45s) ease-in-out infinite;
+}
+.char-badge.char-flutua {
+  animation: charFlutua 2.2s ease-in-out infinite;
+}
+
+@keyframes charStep {
+  0%,
+  100% {
+    transform: translate(0, 0);
+  }
+  25% {
+    transform: translate(8%, -8%);
+  }
+  50% {
+    transform: translate(0, -16%);
+  }
+  75% {
+    transform: translate(-8%, -8%);
+  }
+}
+
+@keyframes charFlutua {
+  0%,
+  100% {
+    transform: translate(0, 0);
+  }
+  50% {
+    transform: translate(0, -8%);
+  }
 }
 
 @keyframes charPulse {

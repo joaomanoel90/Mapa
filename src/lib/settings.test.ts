@@ -90,11 +90,21 @@ describe("sanitizeSettings", () => {
     expect(sanitizeSettings(raw({ cinematic: false })).cinematic).toBe(false);
   });
 
+  it("exige booleano também na terceira pessoa e no giro do mapa", () => {
+    expect(sanitizeSettings(raw({ thirdPerson: "sim" })).thirdPerson).toBeUndefined();
+    expect(sanitizeSettings(raw({ spinMap: 1 })).spinMap).toBeUndefined();
+    expect(sanitizeSettings(raw({ thirdPerson: true })).thirdPerson).toBe(true);
+    expect(sanitizeSettings(raw({ spinMap: false })).spinMap).toBe(false);
+  });
+
   it("nasce com a linha sólida e as novidades desligadas", () => {
     // as três são facultativas: quem não mexer no painel não vê diferença
     expect(DEFAULT_SETTINGS.colorBy).toBe("solid");
     expect(DEFAULT_SETTINGS.showKmMarks).toBe(false);
     expect(DEFAULT_SETTINGS.cinematic).toBe(false);
+    // a câmera de sempre é a que já existia: quem não mexer não vê diferença
+    expect(DEFAULT_SETTINGS.thirdPerson).toBe(false);
+    expect(DEFAULT_SETTINGS.spinMap).toBe(false);
   });
 
   it("só aceita foto do projeto como data URL de imagem dentro do teto", () => {

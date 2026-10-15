@@ -4,6 +4,7 @@ import { BASEMAPS, type BasemapId } from "../lib/tiles";
 import { nearestTOnTrack, sampleTrack, type LatLng, type Track } from "../lib/geo";
 import { HOME_CITY } from "../lib/geocode";
 import { gaitOf, type Character } from "../lib/characters";
+import { CHASE_ALTURA, CHASE_ZOOM } from "../lib/camera";
 import { poiAnchor, poiLatLng, poiOffset, type Poi } from "../lib/pois";
 import { hasMark, type Endpoints } from "../lib/endpoints";
 import { keepsMarker, pinsAsDots } from "../lib/pins";
@@ -30,6 +31,8 @@ type Props = {
   basemap: BasemapId;
   follow: boolean;
   followZoom: number;
+  /** câmera de terceira pessoa: mais perto e o personagem abaixo do centro */
+  thirdPerson: boolean;
   showRoute: boolean;
   onAddPoint: (p: LatLng) => void;
   onMovePoint: (index: number, p: LatLng) => void;
@@ -78,6 +81,7 @@ export default function MapView(props: Props) {
     basemap,
     follow,
     followZoom,
+    thirdPerson,
     showRoute,
     onAddPoint,
     onMovePoint,
@@ -103,6 +107,12 @@ export default function MapView(props: Props) {
   const plannedHitRef = useRef<L.Polyline | null>(null);
   const traveledRef = useRef<L.Polyline | null>(null);
   const charRef = useRef<L.Marker | null>(null);
+  /**
+   * O rumo **desenrolado** do marcador (soma os giros em vez de voltar de 179°
+   * para -179°). Sem isso a transição de 0,3 s do CSS giraria pelo caminho
+   * longo — o selo daria uma volta inteira ao cruzar o norte.
+   */
+  const rumoRef = useRef<number | null>(null);
   const wpLayerRef = useRef<L.LayerGroup | null>(null);
   const poiLayerRef = useRef<L.LayerGroup | null>(null);
   const poiElsRef = useRef<{ id: string; el: HTMLElement | null }[]>([]);
@@ -363,6 +373,7 @@ export default function MapView(props: Props) {
       charRef.current.remove();
       charRef.current = null;
     }
+    rumoRef.current = null;
     if (track.pts.length === 0) return;
     /*
      * O andar também na prévia: o selo do mapa balança no passo do personagem,
@@ -394,19 +405,41 @@ export default function MapView(props: Props) {
     const s = sampleTrack(track, progress);
     marker.setLatLng(s.pos);
     const el = marker.getElement();
+    // o rumo que o CSS vai girar: o mesmo do vídeo, sem o salto de 180°
+    let rumo = s.heading;
+    if (rumoRef.current !== null) {
+      while (rumo - rumoRef.current > 180) rumo -= 360;
+      while (rumo - rumoRef.current < -180) rumo += 360;
+    }
+    rumoRef.current = rumo;
     const rot = el?.querySelector<HTMLDivElement>(".char-rot");
-    if (rot) rot.style.transform = `rotate(${s.heading}deg)`;
+    if (rot) rot.style.transform = `rotate(${rumo}deg)`;
     const emoji = el?.querySelector<HTMLDivElement>(".char-emoji");
     if (emoji) {
       emoji.style.transform = rotate
-        ? `rotate(${s.heading + (character.baseAngle ?? 0)}deg)`
+        ? `rotate(${rumo + (character.baseAngle ?? 0)}deg)`
         : "none";
     }
     if (playing && follow) {
       const maxZ = BASEMAPS[basemap].maxZoom;
-      map.setView(s.pos, Math.max(3, Math.min(maxZ, followZoom)), { animate: false });
+      /*
+       * Terceira pessoa na prévia: a câmera chega mais perto e o **centro** da
+       * vista passa à frente do personagem, de modo que ele caia abaixo do meio
+       * — a mesma conta do vídeo (`CHASE_ALTURA`). O mapa não gira na prévia (o
+       * Leaflet trabalha com o norte para cima): o giro é do vídeo.
+       */
+      const zoom = Math.max(3, Math.min(maxZ, followZoom + (thirdPerson ? CHASE_ZOOM : 0)));
+      let centro = s.pos;
+      if (thirdPerson) {
+        const px = map.project(s.pos, zoom);
+        centro = map.unproject(
+          L.point(px.x, px.y - (CHASE_ALTURA - 0.5) * map.getSize().y),
+          zoom,
+        );
+      }
+      map.setView(centro, zoom, { animate: false });
     }
-  }, [track, progress, rotate, character, playing, follow, followZoom, basemap]);
+  }, [track, progress, rotate, character, playing, follow, followZoom, basemap, thirdPerson]);
 
   /**
    * A pré-visualização com câmera "seguir" move o mapa. Guardamos a vista do

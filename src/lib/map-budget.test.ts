@@ -116,6 +116,40 @@ describe("maior zoom que cabe", () => {
   });
 });
 
+describe("a conta enxerga a terceira pessoa", () => {
+  const track = buildTrack(percurso(150));
+
+  it("a mesma rota pede mais blocos em terceira pessoa", () => {
+    // a câmera chega 1,5 de zoom mais perto (`zoomEfetivo`): cada bloco cobre
+    // menos chão, então a mesma rota atravessa mais deles
+    const camera = { mode: "follow" as const, followZoom: 16 };
+    const deSempre = tilesNeeded({ ...base, track, camera });
+    const terceira = tilesNeeded({ ...base, track, camera: { ...camera, chase: { gira: false } } });
+    expect(terceira).toBeGreaterThan(deSempre);
+  });
+
+  it("o giro do mapa também entra na conta", () => {
+    // com o mapa girado a vista é uma caixa inclinada, que cobre mais cantos
+    const camera = { mode: "follow" as const, followZoom: 16 };
+    const reto = tilesNeeded({ ...base, track, camera: { ...camera, chase: { gira: false } } });
+    const girando = tilesNeeded({ ...base, track, camera: { ...camera, chase: { gira: true } } });
+    expect(girando).toBeGreaterThan(reto);
+  });
+
+  it("o zoom sugerido desce quando a terceira pessoa está ligada", () => {
+    // a sugestão tem de valer para a câmera que o painel mandou — senão o
+    // vídeo é recusado depois, com o usuário tendo clicado no botão
+    const semTerceira = maxFollowZoom({ ...base, track });
+    const comTerceira = maxFollowZoom({
+      ...base,
+      track,
+      camera: { mode: "follow", followZoom: 16, chase: { gira: true } },
+    });
+    expect(comTerceira).not.toBeNull();
+    expect(comTerceira as number).toBeLessThan(semTerceira as number);
+  });
+});
+
 describe("aviso da rota longa", () => {
   it("diz o zoom que cabe, em vez de só mandar diminuir", () => {
     const texto = budgetAdvice(7237, 13.5, "follow");

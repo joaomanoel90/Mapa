@@ -389,6 +389,39 @@ function App() {
   }, [fotos, settings.cardPhoto, pois, endpoints]);
 
   /**
+   * A câmera do vídeo, do painel e da conta de blocos — **uma fonte só**.
+   *
+   * A terceira pessoa entra aqui e não em cada montagem: ela muda o zoom (a
+   * câmera chega mais perto) e a vista (o personagem desce na tela e o mapa
+   * pode girar), e as três precisam enxergar a mesma câmera para a conta dos
+   * blocos continuar valendo para o vídeo de verdade.
+   */
+  const cameraDoVideo = useCallback(
+    (lista: Poi[]) => ({
+      mode: settings.cameraMode,
+      followZoom: settings.followZoom,
+      cinematic: {
+        opening: settings.cinematic,
+        stops: settings.cinematic,
+        stopTs: passageTimes(lista, passagens),
+        chegada: settings.cinematic,
+      },
+      chase:
+        settings.cameraMode === "follow" && settings.thirdPerson
+          ? { gira: settings.spinMap }
+          : undefined,
+    }),
+    [
+      settings.cameraMode,
+      settings.followZoom,
+      settings.cinematic,
+      settings.thirdPerson,
+      settings.spinMap,
+      passagens,
+    ],
+  );
+
+  /**
    * Maior zoom de acompanhamento que cabe no teto de blocos.
    *
    * Não depende do zoom escolhido — só da rota, do tamanho da tela e do mapa —
@@ -397,39 +430,21 @@ function App() {
    */
   const sugestaoZoom = useMemo(() => {
     if (settings.cameraMode !== "follow") return null;
+    const camera = cameraDoVideo(pois);
     return maxFollowZoom({
       track,
       width: aspect.w,
       height: aspect.h,
       basemap: settings.basemap,
       maxZoom: maxZoomFor(settings.basemap),
-      cinematic: {
-        opening: settings.cinematic,
-        stops: settings.cinematic,
-        stopTs: passageTimes(pois, passagens),
-      },
+      camera,
+      cinematic: camera.cinematic,
     });
-  }, [
-    track,
-    aspect,
-    settings.basemap,
-    settings.cameraMode,
-    settings.cinematic,
-    pois,
-    passagens,
-  ]);
+  }, [track, aspect, settings.basemap, settings.cameraMode, cameraDoVideo, pois]);
 
   /** Blocos que a câmera escolhida vai precisar — muda a cada passo do controle. */
   const blocos = useMemo(() => {
-    const camera = {
-      mode: settings.cameraMode,
-      followZoom: settings.followZoom,
-      cinematic: {
-        opening: settings.cinematic,
-        stops: settings.cinematic,
-        stopTs: passageTimes(pois, passagens),
-      },
-    };
+    const camera = cameraDoVideo(pois);
     const needed = tilesNeeded({
       track,
       width: aspect.w,
@@ -449,8 +464,7 @@ function App() {
     aspect,
     settings.basemap,
     settings.cameraMode,
-    settings.followZoom,
-    settings.cinematic,
+    cameraDoVideo,
     pois,
     sugestaoZoom,
   ]);
@@ -949,15 +963,7 @@ function App() {
       subtitle: settings.subtitle,
     };
     const stops = sortPois(pois);
-    const camera = {
-      mode: settings.cameraMode,
-      followZoom: settings.followZoom,
-      cinematic: {
-        opening: settings.cinematic,
-        stops: settings.cinematic,
-        stopTs: passageTimes(stops, passagens),
-      },
-    };
+    const camera = cameraDoVideo(stops);
 
     let paint: (t: number, elapsed: number) => void = () => undefined;
     let canvasForRecord: HTMLCanvasElement | null = null;
@@ -1264,6 +1270,7 @@ function App() {
             basemap={settings.basemap}
             follow={settings.cameraMode === "follow"}
             followZoom={settings.followZoom}
+            thirdPerson={settings.thirdPerson}
             showRoute={settings.showRoute}
             onAddPoint={addPoint}
             onMovePoint={movePoint}

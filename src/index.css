@@ -199,6 +199,9 @@ body {
   position: absolute;
   inset: 0;
   transform-origin: 50% 50%;
+  /* a virada é suavizada (o ângulo vem "desenrolado" do mapa): sem isto o
+     selo gira de uma vez a cada degrau do traçado */
+  transition: transform 0.3s linear;
 }
 .char-arrow {
   position: absolute;
@@ -218,43 +221,40 @@ body {
   font-size: 36px;
   line-height: 1;
   transform-origin: 50% 50%;
+  transition: transform 0.3s linear;
   filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.55));
 }
 
 /*
- * O passo do selo na prévia — o mesmo desenho do vídeo: sobe no meio do passo,
- * troca de lado e volta na pisada (ver `andar` no renderer).
+ * O andar do selo na prévia — o mesmo do vídeo, e **sem pulo**: o corpo não
+ * sobe nem desce (um selo quicando parecia um ícone, não alguém andando). Fica
+ * o balanço de peso, de leve, e a respiração. O movimento de verdade vem do
+ * giro suavizado (a transição no `.char-rot`).
  */
 .char-badge.char-passo {
-  animation: charStep var(--passo, 0.45s) ease-in-out infinite;
+  animation: charBalanco var(--passo, 0.45s) ease-in-out infinite;
 }
 .char-badge.char-flutua {
   animation: charFlutua 2.2s ease-in-out infinite;
 }
 
-@keyframes charStep {
+@keyframes charBalanco {
   0%,
   100% {
-    transform: translate(0, 0);
-  }
-  25% {
-    transform: translate(8%, -8%);
+    transform: translateX(-1.5%);
   }
   50% {
-    transform: translate(0, -16%);
-  }
-  75% {
-    transform: translate(-8%, -8%);
+    transform: translateX(1.5%);
   }
 }
 
 @keyframes charFlutua {
   0%,
   100% {
-    transform: translate(0, 0);
+    transform: translateY(0);
   }
   50% {
-    transform: translate(0, -8%);
+    transform: translateY(-2%);
   }
 }
 

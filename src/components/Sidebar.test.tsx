@@ -210,3 +210,38 @@ describe("painel: marcas de km e câmera cinematográfica", () => {
     expect(container.textContent ?? "").toContain("Só vale na câmera");
   });
 });
+
+describe("painel: terceira pessoa", () => {
+  it("nasce desligada e o clique liga", () => {
+    montar(<Painel />);
+    expect(botao("Terceira pessoa").getAttribute("aria-checked")).toBe("false");
+    clicar(botao("Terceira pessoa"));
+    expect(botao("Terceira pessoa").getAttribute("aria-checked")).toBe("true");
+  });
+
+  it("o giro do mapa só aparece depois de ligar a terceira pessoa", () => {
+    montar(<Painel />);
+    // desligada, o giro não é oferecido: seriam dois interruptores para a mesma
+    // ideia, e o de baixo sozinho não faz nada
+    expect(() => botao("Girar o mapa com o rumo")).toThrow();
+    clicar(botao("Terceira pessoa"));
+    expect(botao("Girar o mapa com o rumo").getAttribute("aria-checked")).toBe("false");
+    clicar(botao("Girar o mapa com o rumo"));
+    expect(botao("Girar o mapa com o rumo").getAttribute("aria-checked")).toBe("true");
+  });
+
+  it("explica o que muda no quadro", () => {
+    montar(<Painel />);
+    clicar(botao("Terceira pessoa"));
+    const texto = container.textContent ?? "";
+    expect(texto).toContain("abaixo do centro");
+    expect(texto).toContain("roda no rumo");
+  });
+
+  it("no “Rota toda” avisa que ela não vale", () => {
+    montar(<Painel inicial={{ cameraMode: "fit", thirdPerson: true }} />);
+    const texto = container.textContent ?? "";
+    expect(texto).toContain("Só vale na câmera");
+    expect(() => botao("Girar o mapa com o rumo")).toThrow();
+  });
+});

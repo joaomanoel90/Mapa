@@ -481,9 +481,10 @@ function Sidebar(props: Props) {
                       onChange={(v) => update("spinMap", v)}
                     />
                     <p className="text-[10.5px] leading-snug text-zinc-500">
-                      A câmera vem para trás do personagem: ele fica abaixo do centro e o
-                      caminho à frente ocupa a parte de cima do quadro. Com o giro, o
-                      caminho fica sempre “para cima” e o mapa roda no rumo.
+                      A câmera vem para trás do personagem: ele fica abaixo do centro, com o
+                      caminho à frente ocupando a parte de cima do quadro. O mapa continua
+                      com o norte para cima; ligando o giro, o caminho fica sempre “para
+                      cima” e o mapa roda no rumo.
                     </p>
                   </>
                 ) : (

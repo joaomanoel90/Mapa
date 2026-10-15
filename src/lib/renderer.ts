@@ -1,4 +1,4 @@
-import type { Character } from "./characters";
+import { gaitOf, type Character } from "./characters";
 import { poiLatLng, type Poi } from "./pois";
 import { hasMark, type Endpoints } from "./endpoints";
 import {
@@ -20,6 +20,7 @@ import { countPassed } from "./passages";
 import { coverSquare, type PhotoImage, type PhotoLookup } from "./photos";
 import {
   TILE_SIZE,
+  bearing,
   boundsOf,
   buildTrack,
   fitZoom,
@@ -32,6 +33,7 @@ import {
   type Bounds,
   type IndexRange,
   type LatLng,
+  type Sample,
   type Track,
 } from "./geo";
 
@@ -644,7 +646,7 @@ export class SceneRenderer {
     }
 
     // --- personagem ---
-    drawCharacter(ctx, toXY(sample.pos), sample.heading, input, sf);
+    drawCharacter(ctx, sample, toXY, input, sf);
 
     /*
      * --- pontos de partida e chegada ---
@@ -766,19 +768,106 @@ function photoWindowAlpha(desde: number): number {
 const EMOJI_FONT =
   '"Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji","Twemoji Mozilla",sans-serif';
 
+/**
+ * O andar do personagem.
+ *
+ * O emoji é um desenho parado — quem anda é o selo em volta dele. Três coisas
+ * juntas dão o passo: o corpo **sobe e desce** (baixo na pisada, alto no meio
+ * do passo), o peso **troca de lado** e o selo **estica** no alto e **achata**
+ * na batida. Antes disto o personagem deslizava pelo traçado como um pino
+ * parado, e o usuário descreveu exatamente isso: "o personagem ficou muito
+ * robótico ao caminhar pelo traçado".
+ *
+ * Quem anda sobre rodas não tem passo — carro que pula parece defeito — e quem
+ * paira sobe e desce devagar. Quem decide é o `gaitOf`, por personagem.
+ *
+ * A medida é o tempo do **percurso**, não o do vídeo: assim o personagem fica
+ * parado no voo de abertura e na cartela (não sai andando sozinho no fim), e a
+ * passada sai idêntica na prévia e no vídeo gravado — é o mesmo `elapsed`, a
+ * mesma conta.
+ *
+ * Tudo é fração do selo (não pixels), então o passo tem o mesmo tamanho em
+ * qualquer resolução e em qualquer tamanho de personagem.
+ */
+export function andar(
+  input: FrameState,
+  c: Character,
+): { sobe: number; lado: number; estica: number } {
+  const { gait, hz } = gaitOf(c);
+  if (gait === "roda") return { sobe: 0, lado: 0, estica: 0 };
+  const tl = timelineOr(input.timeline, input.duration);
+  const seg = Math.max(0, Math.min(tl.percurso, input.elapsed - tl.voo));
+  /*
+   * Sai andando e chega parando: a passada entra e sai suave nas pontas. Sem
+   * isso o personagem já aparecia com o corpo no meio do passo durante o voo de
+   * abertura (parado e torto), e a cartela final pegava o passo congelado no ar.
+   */
+  const entra = Math.min(1, seg / 0.45);
+  const sai = Math.min(1, (tl.percurso - seg) / 0.45);
+  const ganho = Math.max(0, Math.min(entra, sai));
+  if (ganho === 0) return { sobe: 0, lado: 0, estica: 0 };
+  const fase = hz * seg; // passos dados desde a largada
+  // 0 na pisada (pé no chão), 1 no meio do passo (corpo no alto)
+  const meio = 0.5 - 0.5 * Math.cos(fase * Math.PI * 2);
+  if (gait === "flutua")
+    return { sobe: -0.09 * meio * ganho, lado: 0, estica: 0.05 * (meio - 0.5) * ganho };
+  return {
+    sobe: -0.2 * meio * ganho,
+    lado: 0.13 * Math.sin(fase * Math.PI * 2) * ganho,
+    estica: 0.13 * (meio - 0.5) * ganho,
+  };
+}
+
+/** O rumo (graus) de `a` para `b` passando por `b` até `c`, em (-180, 180]. */
+function giroEntre(a: LatLng, b: LatLng, c: LatLng): number {
+  const antes = bearing(a, b);
+  const depois = bearing(b, c);
+  if (!Number.isFinite(antes) || !Number.isFinite(depois)) return 0;
+  let d = depois - antes;
+  while (d > 180) d -= 360;
+  while (d <= -180) d += 360;
+  return d;
+}
+
+/**
+ * Quanto o personagem se inclina na curva (graus).
+ *
+ * Reta = 0. Numa curva o corpo acompanha o giro — é o que separa "andando" de
+ * "sendo arrastado". O rumo é medido ~30 m **antes e depois** (em metros de
+ * caminho, não em quantidade de pontos, para valer também em arquivo ralo) e
+ * entra com um quarto do valor, no máximo 10° — inclinação de corrida, não de
+ * moto em curva.
+ */
+export function inclinacaoDaCurva(track: Track, i: number): number {
+  const pts = track.pts;
+  if (pts.length < 3) return 0;
+  const janelaM = 30;
+  let a = Math.max(0, Math.min(i, pts.length - 1));
+  while (a > 0 && haversine(pts[a], pts[i]) < janelaM) a--;
+  let b = Math.max(0, Math.min(i, pts.length - 1));
+  while (b < pts.length - 1 && haversine(pts[i], pts[b]) < janelaM) b++;
+  if (a === i || b === i) return 0;
+  return Math.max(-10, Math.min(10, giroEntre(pts[a], pts[i], pts[b]) * 0.25));
+}
+
 function drawCharacter(
   ctx: CanvasRenderingContext2D,
-  at: { x: number; y: number },
-  heading: number,
+  sample: Sample,
+  toXY: (p: LatLng) => { x: number; y: number },
   input: FrameState,
   sf: number,
 ) {
   const { character, style, rotate, elapsed } = input;
+  const at = toXY(sample.pos);
   const badge = Math.round(Math.max(38, Math.min(86, 62 * sf)) * (character.size ?? 1));
-  const pulse = 1 + 0.05 * Math.sin(elapsed * 4);
+  const respira = 1 + 0.05 * Math.sin(elapsed * 4);
+  const { sobe, lado, estica } = andar(input, character);
+  const inclina = inclinacaoDaCurva(input.track, sample.index);
 
   ctx.save();
-  ctx.translate(at.x, at.y);
+  ctx.translate(at.x + lado * badge, at.y + sobe * badge);
+  if (inclina !== 0) ctx.rotate((inclina * Math.PI) / 180);
+  if (estica !== 0) ctx.scale(1 - estica * 0.6, 1 + estica);
 
   // halo
   const halo = ctx.createRadialGradient(0, 0, badge * 0.25, 0, 0, badge * 1.5);
@@ -786,24 +875,29 @@ function drawCharacter(
   halo.addColorStop(1, hexA(style.accent, 0));
   ctx.fillStyle = halo;
   ctx.beginPath();
-  ctx.arc(0, 0, badge * 1.5 * pulse, 0, Math.PI * 2);
+  ctx.arc(0, 0, badge * 1.5 * respira, 0, Math.PI * 2);
   ctx.fill();
 
-  // anel de pulso
+  /*
+   * Anel de pulso: batia sozinho no relógio do vídeo (um "pisca-pisca" de
+   * painel); agora abre e fecha **no passo**, então o anel conta a mesma
+   * história que o corpo — um passo, uma batida.
+   */
   ctx.strokeStyle = hexA(style.accent, 0.55);
   ctx.lineWidth = 2 * sf;
   ctx.beginPath();
-  ctx.arc(0, 0, badge * (0.85 + 0.12 * pulse), 0, Math.PI * 2);
+  ctx.arc(0, 0, badge * (0.86 + 0.12 * respira + 0.06 * sobe), 0, Math.PI * 2);
   ctx.stroke();
 
   // seta de direção
-  const arrowAngle = ((heading - 90) * Math.PI) / 180;
+  const arrowAngle = ((sample.heading - 90) * Math.PI) / 180;
   ctx.save();
   ctx.rotate(arrowAngle);
+  ctx.globalAlpha = 0.9;
   ctx.beginPath();
-  ctx.moveTo(badge * 0.95, 0);
-  ctx.lineTo(badge * 0.62, -badge * 0.3);
-  ctx.lineTo(badge * 0.62, badge * 0.3);
+  ctx.moveTo(badge * 0.92, 0);
+  ctx.lineTo(badge * 0.6, -badge * 0.26);
+  ctx.lineTo(badge * 0.6, badge * 0.26);
   ctx.closePath();
   ctx.fillStyle = style.accent;
   ctx.strokeStyle = "rgba(255,255,255,0.9)";
@@ -825,16 +919,19 @@ function drawCharacter(
   ctx.strokeStyle = style.accent;
   ctx.stroke();
 
-  // emoji
-  ctx.rotate(rotate ? ((heading + (character.baseAngle ?? 0)) * Math.PI) / 180 : 0);
-  ctx.font = `${Math.round(badge * 0.6)}px ${EMOJI_FONT}`;
+  /*
+   * O emoji ocupa o selo de verdade: era desenhado com 0,6 do selo, e a figura
+   * ficava pequena dentro de um aro grande — o conjunto parecia ícone de painel,
+   * não personagem.
+   */
+  ctx.rotate(rotate ? ((sample.heading + (character.baseAngle ?? 0)) * Math.PI) / 180 : 0);
+  ctx.font = `${Math.round(badge * 0.78)}px ${EMOJI_FONT}`;
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   ctx.fillText(character.emoji, 0, badge * 0.03);
 
   ctx.restore();
 }
-
 /**
  * O pino redondo de um ponto no mapa — o mesmo desenho para as paradas e para
  * a partida/chegada.

@@ -3,7 +3,7 @@ import L from "leaflet";
 import { BASEMAPS, type BasemapId } from "../lib/tiles";
 import { nearestTOnTrack, sampleTrack, type LatLng, type Track } from "../lib/geo";
 import { HOME_CITY } from "../lib/geocode";
-import type { Character } from "../lib/characters";
+import { gaitOf, type Character } from "../lib/characters";
 import { poiAnchor, poiLatLng, poiOffset, type Poi } from "../lib/pois";
 import { hasMark, type Endpoints } from "../lib/endpoints";
 import { keepsMarker, pinsAsDots } from "../lib/pins";
@@ -364,9 +364,18 @@ export default function MapView(props: Props) {
       charRef.current = null;
     }
     if (track.pts.length === 0) return;
+    /*
+     * O andar também na prévia: o selo do mapa balança no passo do personagem,
+     * como no vídeo. A cadência é a do `gaitOf` (corrida ~3 passos por segundo,
+     * caminhada ~1,9), e quem tem roda não balança — carro que pula na prévia
+     * ficaria tão errado quanto no vídeo.
+     */
+    const comoAnda = gaitOf(character);
+    const classeAndar =
+      comoAnda.gait === "passo" ? " char-passo" : comoAnda.gait === "flutua" ? " char-flutua" : "";
     const icon = L.divIcon({
       className: "char-icon",
-      html: `<div class="char-badge" style="--accent:${accent}">
+      html: `<div class="char-badge${classeAndar}" style="--accent:${accent};--passo:${(1 / comoAnda.hz).toFixed(2)}s">
               <div class="char-rot"><div class="char-arrow"></div></div>
               <div class="char-emoji">${character.emoji}</div>
             </div>`,

@@ -54,6 +54,7 @@ const SHARED_KEYS = [
   "showProgress",
   "endCard",
   "showHud",
+  "activity",
   "colorBy",
   "showKmMarks",
   "cinematic",

@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_SETTINGS, maxZoomFor, sanitizeSettings, type Settings } from "./settings";
+import {
+  ACTIVITIES,
+  DEFAULT_SETTINGS,
+  maxZoomFor,
+  sanitizeSettings,
+  usaRitmo,
+  type Settings,
+} from "./settings";
 import { BASEMAPS } from "./tiles";
 
 /** Ajuda a montar entradas inválidas sem brigar com o tipo. */
@@ -160,5 +167,27 @@ describe("campos da cartela", () => {
     });
     expect(s.cardDistance).toBeUndefined();
     expect(s.cardElevation).toBeUndefined();
+  });
+});
+
+describe("atividade", () => {
+  it("o padrão é pedal: o HUD continua em km/h para quem já usa", () => {
+    expect(DEFAULT_SETTINGS.activity).toBe("pedal");
+    expect(usaRitmo(DEFAULT_SETTINGS.activity)).toBe(false);
+    expect(sanitizeSettings({ ...DEFAULT_SETTINGS }).activity).toBe("pedal");
+  });
+
+  it("só aceita as três atividades conhecidas", () => {
+    expect(sanitizeSettings(raw({ activity: "natacao" })).activity).toBeUndefined();
+    expect(sanitizeSettings(raw({ activity: 7 })).activity).toBeUndefined();
+    for (const a of ACTIVITIES) {
+      expect(sanitizeSettings(raw({ activity: a.id })).activity).toBe(a.id);
+    }
+  });
+
+  it("a pé (corrida e caminhada), o HUD mostra ritmo", () => {
+    expect(usaRitmo("corrida")).toBe(true);
+    expect(usaRitmo("caminhada")).toBe(true);
+    expect(usaRitmo("pedal")).toBe(false);
   });
 });

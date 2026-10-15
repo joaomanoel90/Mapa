@@ -8,7 +8,13 @@ import { CharacterPicker, AccentPicker } from "./CharacterPicker";
 import type { Place } from "../lib/geocode";
 import type { Poi } from "../lib/pois";
 import { Button, Label, Section, Segmented, Slider, TextInput, Toggle } from "./ui";
-import { ASPECTS, MAX_WAYPOINTS, type AspectId, type Settings } from "../lib/settings";
+import {
+  ACTIVITIES,
+  ASPECTS,
+  MAX_WAYPOINTS,
+  type AspectId,
+  type Settings,
+} from "../lib/settings";
 import type { EndCard, RideSummary } from "../lib/stats";
 import { PROFILES, PRESETS, type Profile, type Preset } from "../lib/routing";
 import { BASEMAPS, BASEMAP_ORDER } from "../lib/tiles";
@@ -585,6 +591,25 @@ function Sidebar(props: Props) {
               checked={s.cinematic}
               onChange={(v) => update("cinematic", v)}
             />
+          </div>
+          <div>
+            <Label>Atividade</Label>
+            <Segmented
+              options={ACTIVITIES.map((a) => ({
+                id: a.id,
+                label: a.label,
+                icon: a.icon,
+                title: a.hint,
+              }))}
+              value={s.activity}
+              onChange={(v) => update("activity", v)}
+            />
+            {s.activity !== "pedal" && (
+              <p className="mt-1 text-[11px] leading-snug text-zinc-500">
+                O HUD mostra o ritmo médio (<span className="font-semibold text-zinc-300">min/km</span>)
+                em vez da velocidade. Sem hora no arquivo nem tempo na cartela, sai um traço.
+              </p>
+            )}
           </div>
           {s.cinematic &&
             (s.cameraMode === "follow" ? (

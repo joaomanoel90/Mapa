@@ -105,6 +105,47 @@ export function elapsedAt(
 }
 
 /**
+ * Distância mínima para um ritmo médio significar alguma coisa.
+ *
+ * Ritmo sobre 30 m é ruído puro (o erro do GPS é maior que o trecho). Abaixo
+ * disto o HUD mostra um traço, como em todo número sem base.
+ */
+export const PACE_MIN_M = 50;
+
+/**
+ * Ritmo médio, em segundos por km.
+ *
+ * É a média do **percurso** (tempo total ÷ distância), e não o ritmo do
+ * instante: num clipe de 14 s o ritmo instantâneo não quer dizer nada, e o
+ * número que corredor olha é o do percurso inteiro. Devolve `null` quando não
+ * dá para medir com honestidade.
+ */
+export function averagePace(
+  segundos: number | null | undefined,
+  distanciaM: number,
+): number | null {
+  if (segundos === null || segundos === undefined) return null;
+  if (!Number.isFinite(segundos) || segundos <= 0) return null;
+  if (!Number.isFinite(distanciaM) || distanciaM < PACE_MIN_M) return null;
+  return segundos / (distanciaM / 1000);
+}
+
+/**
+ * Ritmo no formato de corredor: `5:24` (minutos e segundos por km).
+ *
+ * Acima de uma hora por km (dado esquisito) vira `h:mm:ss`, como o relógio do
+ * HUD — número sem dizer o que é não serve.
+ */
+export function formatPace(segPorKm: number): string {
+  const total = Math.max(0, Math.round(segPorKm));
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const seg = total % 60;
+  const dois = (n: number) => String(n).padStart(2, "0");
+  return h > 0 ? `${h}:${dois(m)}:${dois(seg)}` : `${m}:${dois(seg)}`;
+}
+
+/**
  * Velocidade instantânea em `t`, medida numa janela em volta do instante.
  *
  * Dois cuidados, os dois aprendidos medindo:

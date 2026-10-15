@@ -11,7 +11,7 @@ import {
   type TileImage,
 } from "./tiles";
 import type { EndCard } from "./stats";
-import { elapsedAt, formatClock, speedAt } from "./hud";
+import { averagePace, elapsedAt, formatClock, formatPace, speedAt } from "./hud";
 import { cameraTarget, STOP_BOOST, type CinematicConfig } from "./camera";
 import { routeEnd, timelineOr, type Timeline } from "./timeline";
 import { NEUTRAL_COLOR, type ColoredRoute } from "./coloring";
@@ -62,6 +62,13 @@ export type SceneStyle = {
   showSummary: boolean;
   /** painel de números no canto (velocidade, distância, relógio) */
   showHud: boolean;
+  /**
+   * No HUD, mostra o **ritmo** (min/km) no lugar da velocidade.
+   *
+   * Vale para corrida e caminhada: `min/km` é a unidade de quem vai a pé, e o
+   * número é a média do percurso.
+   */
+  pace?: boolean;
   title: string;
   subtitle: string;
 };
@@ -2030,6 +2037,15 @@ function drawHud(
       ? (track.total / (cardSeconds as number)) * 3.6
       : null;
 
+  /*
+   * Ritmo (min/km) para corrida e caminhada: é o número que quem vai a pé olha,
+   * e é a **média do percurso** — tempo total ÷ distância. O tempo sai da mesma
+   * fonte honesta do relógio, só que no **fim** do percurso (`t = 1`): hora do
+   * arquivo ou o tempo escrito na cartela; sem os dois, um traço.
+   */
+  const totalPerc = style.pace ? hudClock(track, 1, duration, times, cardSeconds) : null;
+  const ritmoSeg = totalPerc ? averagePace(totalPerc.segundos, track.total) : null;
+
   const claro = !onDark;
   const pad = 22 * sf;
   const r = 54 * sf;
@@ -2039,7 +2055,6 @@ function drawHud(
   const topo = Math.max(headerBottom, 0) + pad * 0.6;
   const cy = topo + r + anel / 2;
 
-  const fVel = `800 ${Math.round(30 * sf)}px "Inter","Segoe UI",system-ui,sans-serif`;
   const fUni = `700 ${Math.round(13 * sf)}px "Inter","Segoe UI",system-ui,sans-serif`;
   const fNota = `600 ${Math.round(10.5 * sf)}px "Inter","Segoe UI",system-ui,sans-serif`;
   const fInfo = `700 ${Math.round(13 * sf)}px "Inter","Segoe UI",system-ui,sans-serif`;
@@ -2076,8 +2091,34 @@ function drawHud(
     ctx.shadowBlur = 0;
   }
 
-  // velocidade no centro
-  const txtVel = velocidade === null ? "—" : velocidade.toFixed(velocidade < 10 ? 1 : 0);
+  // o número do centro: velocidade (km/h) ou ritmo (min/km)
+  const txtVel = style.pace
+    ? ritmoSeg === null
+      ? "—"
+      : formatPace(ritmoSeg)
+    : velocidade === null
+      ? "—"
+      : velocidade.toFixed(velocidade < 10 ? 1 : 0);
+  // `12:30` ocupa mais que `18`: a fonte se ajusta para não bater no aro
+  const fVel = `800 ${Math.round((txtVel.length > 4 ? 25 : 30) * sf)}px "Inter","Segoe UI",system-ui,sans-serif`;
+  /*
+   * O rótulo de cima diz **o que** é o número. `média` vale quando o número é
+   * média (ritmo sempre é; velocidade quando vem da cartela). Quando não há
+   * base, o rótulo diz por quê — e "percurso curto" é diferente de "sem
+   * arquivo": um é falta de dado, o outro é dado de menos.
+   */
+  const nota = style.pace
+    ? !totalPerc || totalPerc.segundos === null
+      ? "sem arquivo"
+      : ritmoSeg === null
+        ? "percurso curto"
+        : "média"
+    : media
+      ? "média"
+      : velocidade === null
+        ? "sem arquivo"
+        : null;
+
   ctx.textAlign = "center";
   ctx.textBaseline = "alphabetic";
   ctx.font = fVel;
@@ -2085,15 +2126,11 @@ function drawHud(
   ctx.fillText(txtVel, cx, cy + 4 * sf);
   ctx.font = fUni;
   ctx.fillStyle = claro ? "rgba(15,23,42,0.55)" : "rgba(255,255,255,0.62)";
-  ctx.fillText("km/h", cx, cy + 22 * sf);
-  if (media) {
+  ctx.fillText(style.pace ? "min/km" : "km/h", cx, cy + 22 * sf);
+  if (nota) {
     ctx.font = fNota;
     ctx.fillStyle = claro ? "rgba(15,23,42,0.45)" : "rgba(255,255,255,0.45)";
-    ctx.fillText("média", cx, cy - 26 * sf);
-  } else if (velocidade === null) {
-    ctx.font = fNota;
-    ctx.fillStyle = claro ? "rgba(15,23,42,0.45)" : "rgba(255,255,255,0.45)";
-    ctx.fillText("sem arquivo", cx, cy - 26 * sf);
+    ctx.fillText(nota, cx, cy - 26 * sf);
   }
 
   // faixa abaixo do anel: distância percorrida · relógio (quando há relógio)

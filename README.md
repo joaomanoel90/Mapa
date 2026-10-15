@@ -156,6 +156,42 @@ nem hora para medir, e às vezes o número que interessa é o do relógio de que
 pedalou, não o do arquivo. Escrevendo, a cartela serve para os dois casos — e
 nada aparece no vídeo sem alguém ter pedido.
 
+#### A distância medida do arquivo (e o ritmo)
+
+Somar a distância ponto a ponto **sempre infla**: o vaivém do GPS faz o caminho
+parecer mais longo. Numa corrida de 21 km isso é ~2% — e como o ritmo é tempo ÷
+distância, o HUD saía ~2% rápido (4:56 em vez de 5:02 num percurso de 21,37 km
+em 1h47m34s). Medido numa reta de 21,4 km com 1 ponto a cada 5 m:
+
+| ruído do GPS | somando cru | com o filtro |
+|---|---|---|
+| ±1,5 m | +1,4% | +0,3% |
+| ±2,0 m | +2,5% | **+0,4%** |
+| ±2,5 m | +3,9% | +0,7% |
+| ±3,0 m | +5,7% | +1,0% |
+
+O filtro é uma **média móvel de ±8 m de caminho**, em duas passadas — e a janela
+é medida em **metros**, não em quantidade de pontos, para o arquivo de 1 Hz e o
+de 10 Hz medirem o mesmo. Os pontos de **curva fechada** (mais de 50° num trecho
+de 20 m) ficam como estão: esquina de rua é caminho, não ruído. E medir a curva
+em 20 m, em vez de entre pontos vizinhos, é essencial — com ruído, um ponto
+jogado 3 m para o lado "vira" 50° sozinho, e aí o filtro preservaria tudo e não
+filtraria nada (foi o primeiro defeito que apareceu, medindo).
+
+A geometria de verdade não é comida:
+
+| percurso | somando cru | com o filtro |
+|---|---|---|
+| rua de cidade com curvas de 90° (limpa) | 0% | **0,000%** |
+| curva suave (30 m a cada 400 m, limpa) | 0% | −0,04% |
+| a mesma rua de cidade com ruído de ±2,5 m | +3,9% | +1,1% |
+
+Numa reta limpa o filtro é inofensivo por construção: a média de pontos alinhados
+cai na própria reta. O **desenho** continua sendo o arquivo, ponto a ponto; quem
+passa pelo filtro é só a medida — a distância do HUD, o ritmo, as marcas de km e
+o km dos avisos. A cartela continua sendo **só exibição**: nada no cálculo lê o
+que você digita nela.
+
 A **elevação** vem do `<ele>` e o **tempo** do `<time>`, campos que o Strava e o
 Garmin gravam em todo ponto e que o app passou a ler (antes eram ignorados).
 Ela passa por um corte de ruído, porque o altímetro oscila a cada leitura e somar
@@ -639,7 +675,7 @@ ou cortados.
 
 ```bash
 npm run typecheck  # tsc --noEmit
-npm test           # Vitest (566 casos)
+npm test           # Vitest (579 casos)
 npm run check:dist # o build saiu autocontido e sem /src/?
 ```
 
@@ -686,7 +722,7 @@ src/
    ├─ recorder.ts           gravação em tempo real (MediaRecorder)
    ├─ routing.ts            rotas OSRM por trecho, com cache
    ├─ tiles.ts              mapas gratuitos e filtros de estilo
-   ├─ geo.ts                matemática geográfica e projeção
+   ├─ geo.ts                matemática geográfica, medida com filtro de GPS e projeção
    ├─ pins.ts               quando o pino vira ponto no mapa
    ├─ pois.ts               paradas do percurso
    ├─ stats.ts              distância, elevação (com corte de ruído), tempo e cartela

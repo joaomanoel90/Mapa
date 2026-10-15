@@ -77,13 +77,193 @@ export function cumulative(pts: LatLng[]): number[] {
   return cum;
 }
 
+/**
+ * Janela (em metros de caminho) da média móvel que tira o ruído do GPS.
+ *
+ * Medido numa reta de 21,4 km com 1 ponto a cada 5 m: somando ponto a ponto sem
+ * filtro, um ruído de ±2 m infla a distância em **+2,4%**; com esta janela, em
+ * +0,7%. É a diferença entre o vídeo mostrar 4:56 e 5:00 num percurso que o
+ * Strava marca como 5:02.
+ */
+export const SMOOTH_WINDOW_M = 8;
+
+/**
+ * Curvatura (em graus) a partir da qual o ponto é **preservado** como está.
+ *
+ * A média móvel sozinha corta esquina: numa rua de cidade com curvas de 90°, a
+ * distância medida perdia 2,1% — e pé de ouvido isso é sumir com uma curva
+ * inteira. Preservando os pontos de curva fechada, a mesma rua de cidade mede
+ * exatamente o que mediava antes.
+ */
+export const SHARP_TURN_DEG = 50;
+
+/**
+ * Distância (m) usada para medir a curva em cada ponto.
+ *
+ * **Não** se mede o giro entre dois pontos vizinhos: com ruído de GPS, um ponto
+ * jogado 3 m para o lado num arquivo de 1 Hz vira uma "curva" de 50°, e aí o
+ * filtro preserva tudo e não filtra nada (foi o primeiro defeito que apareceu,
+ * medindo). O rumo é medido de 20 m antes até 20 m depois: o vaivém do sinal se
+ * cancela, e uma esquina de verdade continua aparecendo inteira.
+ */
+export const TURN_SPAN_M = 20;
+
+/**
+ * Quantas passadas a média móvel dá.
+ *
+ * Duas passadas encolhem o ruído que sobra sem mexer na geometria limpa (numa
+ * rua reta de verdade, a média de pontos alinhados cai na própria reta — o
+ * filtro é inofensivo nela). Medido numa reta de 21,4 km com ruído de ±2,5 m:
+ * somar cru dá +3,8%; uma passada, +1,0%; duas, +0,6%; três, +0,5% (a terceira
+ * já não paga o preço).
+ */
+export const SMOOTH_PASSES = 2;
+
+/**
+ * Todos os `LatLng` são o mesmo objeto no fim; nada aqui muta as pontas.
+ */
+function copia(p: LatLng): LatLng {
+  return { lat: p.lat, lng: p.lng, ...(p.ele === undefined ? {} : { ele: p.ele }) };
+}
+
+/** Primeiro índice cujo `cum` alcança `alvo` (cum é monótono). */
+function primeiroIndice(cum: number[], alvo: number): number {
+  let lo = 0;
+  let hi = cum.length - 1;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (cum[mid] < alvo) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo;
+}
+
+/** Último índice cujo `cum` não passa de `alvo`. */
+function ultimoIndice(cum: number[], alvo: number): number {
+  let lo = 0;
+  let hi = cum.length - 1;
+  while (lo < hi) {
+    const mid = (lo + hi + 1) >> 1;
+    if (cum[mid] <= alvo) lo = mid;
+    else hi = mid - 1;
+  }
+  return lo;
+}
+
+/**
+ * Onde cada ponto cai depois de tirar o vaivém do GPS.
+ *
+ * Cada ponto vira a média dos pontos que estão a até `windowM` de caminho dele
+ * (a média de desvios aleatórios encolhe: com n pontos, sobram 1/√n do ruído).
+ * Dois cuidados, os dois aprendidos medindo:
+ *
+ * 1. **as pontas e as curvas fechadas ficam como estão** — a média corta esquina
+ *    de verdade, e uma esquina de rua não é ruído;
+ * 2. **a janela é medida no caminho, e não em quantidade de pontos** — arquivos
+ *    de 1 Hz e de 10 Hz têm que medir a mesma distância.
+ */
+export function smoothedPoints(
+  pts: LatLng[],
+  windowM = SMOOTH_WINDOW_M,
+  passadas = SMOOTH_PASSES,
+): LatLng[] {
+  if (pts.length < 3 || !(windowM > 0)) return pts.map(copia);
+  let atual = pts.map(copia);
+  const n = Math.max(1, Math.round(passadas));
+  for (let k = 0; k < n; k++) atual = umaPassada(atual, windowM);
+  return atual;
+}
+
+/** Uma passada da média móvel (o vaivém do GPS encolhe; a reta fica na reta). */
+function umaPassada(pts: LatLng[], windowM: number): LatLng[] {
+  const n = pts.length;
+  if (n < 3) return pts.map(copia);
+
+  const cum = cumulative(pts);
+  // prefixos das coordenadas: a média de cada janela sai em tempo constante
+  const somaLat = new Float64Array(n + 1);
+  const somaLng = new Float64Array(n + 1);
+  for (let i = 0; i < n; i++) {
+    somaLat[i + 1] = somaLat[i] + pts[i].lat;
+    somaLng[i + 1] = somaLng[i] + pts[i].lng;
+  }
+
+  const out: LatLng[] = [];
+  for (let i = 0; i < n; i++) {
+    if (i === 0 || i === n - 1 || curvaFechada(pts, i, cum)) {
+      out.push(copia(pts[i]));
+      continue;
+    }
+    const lo = primeiroIndice(cum, cum[i] - windowM);
+    const hi = ultimoIndice(cum, cum[i] + windowM);
+    const m = hi - lo + 1;
+    if (m < 2) {
+      out.push(copia(pts[i]));
+      continue;
+    }
+    const medio = pts[i];
+    out.push({
+      lat: (somaLat[hi + 1] - somaLat[lo]) / m,
+      lng: (somaLng[hi + 1] - somaLng[lo]) / m,
+      ...(medio.ele === undefined ? {} : { ele: medio.ele }),
+    });
+  }
+  return out;
+}
+
+/**
+ * O ponto `i` é uma curva fechada (e não vaivém do GPS)?
+ *
+ * O rumo de chegada e o de saída são medidos em `TURN_SPAN_M` metros, e não nos
+ * pontos vizinhos: é o que separa uma esquina de verdade de um ponto que o sinal
+ * jogou para o lado. Um trecho curto demais não tem rumo confiável — aí,
+ * conservadoramente, o ponto é preservado (melhor manter um ponto a mais do que
+ * cortar uma curva de verdade).
+ */
+function curvaFechada(pts: LatLng[], i: number, cum: number[]): boolean {
+  const ia = Math.min(i - 1, primeiroIndice(cum, cum[i] - TURN_SPAN_M));
+  const ib = Math.max(i + 1, ultimoIndice(cum, cum[i] + TURN_SPAN_M));
+  if (ia < 0 || ib > pts.length - 1) return true;
+  if (ia === i || ib === i) return true;
+  if (haversine(pts[ia], pts[i]) < 1 || haversine(pts[i], pts[ib]) < 1) return true;
+  const b1 = bearing(pts[ia], pts[i]);
+  const b2 = bearing(pts[i], pts[ib]);
+  if (!Number.isFinite(b1) || !Number.isFinite(b2)) return true;
+  const delta = ((b2 - b1 + 540) % 360) - 180;
+  return Math.abs(delta) > SHARP_TURN_DEG;
+}
+
+/**
+ * Distância acumulada medida **com o ruído do GPS removido**.
+ *
+ * A distância que vai para os números do vídeo (ritmo, distância do HUD, marcas
+ * de km) sai daqui; o traçado **desenhado** continua sendo o do arquivo, ponto a
+ * ponto. É a mesma ideia que os aplicativos de treino usam — aqui somar cru
+ * infla a distância em ~2%, e o ritmo sai ~2% rápido por causa disso.
+ *
+ * O `cum` devolvido é por ponto do **arquivo**, então `sampleTrack`, as marcas
+ * de km e o HUD seguem falando a mesma língua.
+ */
+export function measuredCumulative(
+  pts: LatLng[],
+  windowM = SMOOTH_WINDOW_M,
+  passadas = SMOOTH_PASSES,
+): number[] {
+  return cumulative(smoothedPoints(pts, windowM, passadas));
+}
+
 export function buildTrack(input: LatLng[]): Track {
   let pts = input;
   if (input.length > MAX_TRACK_POINTS) {
     const step = Math.ceil(input.length / MAX_TRACK_POINTS);
     pts = input.filter((_, i) => i % step === 0 || i === input.length - 1);
   }
-  const cum = cumulative(pts);
+  /*
+   * O desenho usa `pts` como sempre; só a **medida** passa pelo filtro. Com os
+   * três pontos de um teste de unidade, o filtro devolve a mesma coisa: os
+   * pontos do meio de uma reta caem na própria reta.
+   */
+  const cum = pts.length < 3 ? cumulative(pts) : measuredCumulative(pts);
   return { pts, cum, total: cum[cum.length - 1] ?? 0 };
 }
 

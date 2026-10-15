@@ -335,30 +335,33 @@ export function projetorDaVista(v: Vista): (x: number, y: number) => { x: number
   return (x, y) => ({ x: v.a * x + v.c * y + v.e, y: v.b * x + v.d * y + v.f });
 }
 
-/** Folga (em pixels de tela) para a emenda dos blocos no mapa girado. */
+/** Folga (em pixels de tela) para a emenda dos blocos de mapa. */
 export const SANGRIA_PX = 0.5;
 
 /**
- * O retângulo em que um bloco de mapa é desenhado.
+ * O retângulo em que um bloco de mapa é desenhado: o exato, com meio pixel de
+ * folga em cada lado.
  *
- * Sem isto, cada bloco era desenhado no seu retângulo "matemático"
- * (`x·256` até `(x+1)·256` no mundo). Com o zoom quebrado (o `s` fracionário de
- * `vistaDe`), duas bordas vizinhas caem em coordenadas de tela quebradas, e a
- * cobertura de cada bloco no pixel da emenda pode somar **menos de 1**: o que
- * sobra é o fundo do mapa — a "linha preta na emenda das imagens" que o usuário
- * viu.
+ * Duas coisas dependem disto, e as duas foram medidas num banco de imagens com
+ * blocos de cor chapada — contando os pixels do fundo do mapa que sobravam no
+ * quadro:
  *
- * A correção é prender as bordas na **grade de pixels da tela**: as duas
- * fronteiras de um bloco são arredondadas uma vez cada, e um bloco e o seu
- * vizinho calculam a fronteira comum com a mesma conta — então eles compartilham
- * exatamente a mesma borda (sem fresta e sem sobreposição). Note que a largura
- * sai das bordas já presas (`x1 − x0`), e não de um arredondamento próprio: era
- * justamente isso que fazia duas medidas vizinhas discordarem.
+ * 1. **a fresta**: dois blocos desenhados no retângulo exato (o `x·256` até
+ *    `(x+1)·256` do mundo) se encostam, e ainda sobra a linha da emenda por
+ *    conta da cobertura de cada um no pixel da fronteira. O que ficava à mostra
+ *    era o fundo do mapa — a "linha preta na emenda das imagens" que o usuário
+ *    viu. Cada bloco cobrindo **meio pixel** além da sua borda fecha isso: o que
+ *    um deixa de cobrir, o vizinho cobre.
  *
- * Com o mapa **girado** não existe grade de tela a seguir (as bordas dos blocos
- * são oblíquas), e aí a folga é a saída: meio pixel de tela de sobra em cada
- * lado, para a emenda ficar coberta de qualquer jeito. Meio pixel (e não um) é o
- * que se pode sobrepor sem que a junção apareça.
+ * 2. **o degrau**: prender as bordas na grade de pixels da tela (`Math.round`)
+ *    fechava a fresta, mas fazia a **imagem** do mapa andar aos pulos — presa
+ *    por alguns quadros e pulando de 1 px de uma vez, enquanto a rota e o
+ *    personagem andavam liso. Medido: com a câmera andando 0,2 px por quadro, a
+ *    borda de um bloco andava 0,8 px e depois 0 px, em vez dos mesmos 0,2 px.
+ *
+ * A folga é pequena de propósito: meio pixel de sobreposição é o máximo que se
+ * pode cobrir sem a junção aparecer — a imagem de um bloco cobre a do vizinho
+ * nesse tanto, e o conteúdo das duas é contínuo.
  */
 export function retanguloDoBloco(
   v: Vista,
@@ -366,24 +369,11 @@ export function retanguloDoBloco(
   y: number,
   lado: number,
 ): { x: number; y: number; w: number; h: number } {
-  if (v.a === 0 || v.d === 0) return { x, y, w: lado, h: lado };
-  // girado: as bordas são oblíquas, então só resta cobrir a fresta com folga
-  if (v.b !== 0 || v.c !== 0) {
-    const det = Math.abs(v.a * v.d - v.b * v.c);
-    const folga = SANGRIA_PX;
-    const fx = (folga * (Math.abs(v.d) + Math.abs(v.c))) / det;
-    const fy = (folga * (Math.abs(v.a) + Math.abs(v.b))) / det;
-    return { x: x - fx, y: y - fy, w: lado + 2 * fx, h: lado + 2 * fy };
-  }
-  const x0 = Math.round(v.a * x + v.e);
-  const x1 = Math.round(v.a * (x + lado) + v.e);
-  const y0 = Math.round(v.d * y + v.f);
-  const y1 = Math.round(v.d * (y + lado) + v.f);
-  const wx0 = (x0 - v.e) / v.a;
-  const wx1 = (x1 - v.e) / v.a;
-  const wy0 = (y0 - v.f) / v.d;
-  const wy1 = (y1 - v.f) / v.d;
-  return { x: wx0, y: wy0, w: wx1 - wx0, h: wy1 - wy0 };
+  const det = Math.abs(v.a * v.d - v.b * v.c);
+  if (!(det > 0)) return { x, y, w: lado, h: lado };
+  const fx = (SANGRIA_PX * (Math.abs(v.d) + Math.abs(v.c))) / det;
+  const fy = (SANGRIA_PX * (Math.abs(v.a) + Math.abs(v.b))) / det;
+  return { x: x - fx, y: y - fy, w: lado + 2 * fx, h: lado + 2 * fy };
 }
 
 /** Os blocos que uma vista precisa — a caixa dela, com a folga pedida. */
@@ -975,7 +965,27 @@ export class SceneRenderer {
     ctx.save();
     ctx.fillStyle = bm.bg;
     ctx.fillRect(0, 0, width, height);
-    ctx.setTransform(vista.a, vista.b, vista.c, vista.d, vista.e, vista.f);
+    /*
+     * Os blocos são desenhados com a origem **no canto da vista**.
+     *
+     * As coordenadas do mundo no zoom do mapa são enormes (dezenas de milhões):
+     * somadas na matriz, elas estouram a precisão do rasterizador — a borda de
+     * dois blocos vizinhos cai fora do lugar e o fundo do mapa aparece como um
+     * fio de 1 px. Medido numa tela 1080x1920 com a inclinação da terceira
+     * pessoa: **uma linha inteira do quadro** (832 px de fundo à mostra numa
+     * emenda). Tirando a origem da conta, os números ficam na casa dos milhares
+     * e a emenda fecha.
+     */
+    const origemX = Math.floor(vista.x0 / TILE_SIZE) * TILE_SIZE;
+    const origemY = Math.floor(vista.y0 / TILE_SIZE) * TILE_SIZE;
+    ctx.setTransform(
+      vista.a,
+      vista.b,
+      vista.c,
+      vista.d,
+      vista.e + vista.a * origemX + vista.c * origemY,
+      vista.f + vista.b * origemX + vista.d * origemY,
+    );
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = "high";
     for (const [tz, tx, ty] of tilesDaVista(vista)) {
@@ -983,7 +993,13 @@ export class SceneRenderer {
       const img = this.store.get(tz, tx, ty);
       if (img) {
         const r = retanguloDoBloco(vista, tx * TILE_SIZE, ty * TILE_SIZE, TILE_SIZE);
-        ctx.drawImage(img as CanvasImageSource, r.x, r.y, r.w, r.h);
+        ctx.drawImage(
+          img as CanvasImageSource,
+          r.x - origemX,
+          r.y - origemY,
+          r.w,
+          r.h,
+        );
       }
     }
     ctx.restore();

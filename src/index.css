@@ -199,9 +199,12 @@ body {
   position: absolute;
   inset: 0;
   transform-origin: 50% 50%;
-  /* a virada é suavizada (o ângulo vem "desenrolado" do mapa): sem isto o
-     selo gira de uma vez a cada degrau do traçado */
-  transition: transform 0.3s linear;
+  /*
+   * A virada é suavizada e o ângulo vem "desenrolado" do mapa (ver `rumoRef`
+   * no MapView): sem isso o selo girava de uma vez a cada degrau do traçado.
+   * Meio segundo é o tempo de quem vira o corpo — 0,3 s ainda parecia seco.
+   */
+  transition: transform 0.5s linear;
 }
 .char-arrow {
   position: absolute;
@@ -221,7 +224,7 @@ body {
   font-size: 36px;
   line-height: 1;
   transform-origin: 50% 50%;
-  transition: transform 0.3s linear;
+  transition: transform 0.5s linear;
   filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.55));
 }
 
@@ -241,10 +244,10 @@ body {
 @keyframes charBalanco {
   0%,
   100% {
-    transform: translateX(-1.5%);
+    transform: translateX(-1%);
   }
   50% {
-    transform: translateX(1.5%);
+    transform: translateX(1%);
   }
 }
 

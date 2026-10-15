@@ -20,7 +20,7 @@ import {
   type ChaseConfig,
   type CinematicConfig,
 } from "./camera";
-import { routeEnd, timelineOr, type Timeline } from "./timeline";
+import { routeEnd, routeProgress, timelineOr, type Timeline } from "./timeline";
 import { NEUTRAL_COLOR, type ColoredRoute } from "./coloring";
 import type { KmMark } from "./km-marks";
 import { countPassed } from "./passages";
@@ -474,10 +474,28 @@ type Camera = { lat: number; lng: number; zoom: number };
 /**
  * Constante de tempo da virada do personagem (segundos de vídeo).
  *
- * ~0,25 s é o tempo de uma virada de cabeça: some o tranco de um quadro para o
- * outro sem que a resposta fique lenta.
+ * Começou em 0,25 s e o usuário ainda viu "brusco" — pediu para suavizar mais.
+ * Em 0,6 s a esquina é feita como quem realmente vira o corpo: o rumo começa a
+ * mudar antes de o traçado mudar de direção e termina depois.
  */
-const RUMO_TAU_S = 0.25;
+const RUMO_TAU_S = 0.6;
+
+/**
+ * Teto da velocidade de giro (graus por segundo de vídeo).
+ *
+ * O filtro sozinho responde rápido demais quando o rumo dá um salto grande (num
+ * zigue-zague do arquivo, o primeiro quadro levaria ~1/6 da virada inteira).
+ * Com o teto, nenhuma virada é mais rápida que ~1,2 volta por segundo: um
+ * giro de 90° leva no mínimo 0,75 s, sempre.
+ */
+const RUMO_MAX_GRAUS_S = 120;
+
+/** Constante de tempo da câmera que acompanha o personagem (segundos). */
+const CAM_TAU_FOLLOW = 0.24;
+/** A câmera parada ("Rota toda") não precisa de tanta pressa. */
+const CAM_TAU_FIT = 0.36;
+/** O zoom anda um pouco mais devagar que a posição (evita o "respiro" na parada). */
+const CAM_TAU_ZOOM = 0.2;
 
 export class SceneRenderer {
   private cam: Camera | null = null;
@@ -495,6 +513,18 @@ export class SceneRenderer {
 
   get tiles() {
     return this.store;
+  }
+
+  /**
+   * O rumo suavizado que o último quadro usou (graus; `null` antes do primeiro).
+   *
+   * É o estado por trás da virada do personagem. Exposto porque medir isso
+   * pelas chamadas de desenho mistura tudo o que gira no quadro — a seta, o
+   * emoji e a **inclinação da curva** —, e um teste que soma os três não
+   * consegue dizer qual deles mudou.
+   */
+  get rumoDoQuadro(): number | null {
+    return this.rumoSuave;
   }
 
   /** quantos tiles já estão prontos para desenhar */
@@ -523,10 +553,24 @@ export class SceneRenderer {
    * prévia e o vídeo gravado continuam idênticos, e o resultado não depende da
    * taxa de quadros (30 ou 60 quadros/s dão a mesma virada).
    */
-  private suavizarRumo(heading: number, elapsed: number): number {
+  /**
+   * Quanto tempo passou desde o quadro anterior, em segundos de vídeo.
+   *
+   * O filtro do rumo e a suavização da câmera mediam o tempo **em quadros**:
+   * com os mesmos números, o vídeo a 60 quadros/s virava suave e o de 30 ficava
+   * com o dobro do atraso — e a prévia (que roda a ~60) não batia com a
+   * gravação. Aqui o tempo é o do próprio `elapsed`, então o resultado é o
+   * mesmo em qualquer taxa (com teto de 0,5 s: um quadro perdido não pode
+   * virar um salto).
+   */
+  private avancarTempo(elapsed: number): number {
     const anterior = this.instanteAnterior;
     this.instanteAnterior = elapsed;
-    const dt = anterior === null ? 0 : Math.max(0, Math.min(0.5, elapsed - anterior));
+    if (anterior === null) return 0;
+    return Math.max(0, Math.min(0.5, elapsed - anterior));
+  }
+
+  private suavizarRumo(heading: number, dt: number): number {
     if (this.rumoSuave === null || dt <= 0) {
       this.rumoSuave = heading;
       return heading;
@@ -535,7 +579,10 @@ export class SceneRenderer {
     let d = heading - this.rumoSuave;
     while (d > 180) d -= 360;
     while (d <= -180) d += 360;
-    this.rumoSuave += d * k;
+    // o filtro dá o formato da virada; o teto impede o giro seco de um quadro
+    const passo = d * k;
+    const limite = RUMO_MAX_GRAUS_S * dt;
+    this.rumoSuave += Math.max(-limite, Math.min(limite, passo));
     return this.rumoSuave;
   }
 
@@ -613,7 +660,8 @@ export class SceneRenderer {
      * "robótico" que o usuário viu tem muito disso. Com o filtro, a virada
      * acontece em ~0,25 s: o mesmo caminho, sem o tranco.
      */
-    const rumo = this.suavizarRumo(sample.heading, input.elapsed);
+    const dt = this.avancarTempo(input.elapsed);
+    const rumo = this.suavizarRumo(sample.heading, dt);
 
     // --- câmera (alvo puro + suavização) ---
     const tl = timelineOr(input.timeline, input.duration);
@@ -631,13 +679,23 @@ export class SceneRenderer {
     });
 
     if (!this.cam) this.cam = { lat: target.lat, lng: target.lng, zoom: target.zoom };
-    // durante a abertura o alvo já é uma animação pronta: suavizar de novo só
-    // atrasaria o pouso, então a câmera vai junto
-    const k =
-      target.opening < 1 ? 1 : camera.mode === "follow" ? 0.16 : 0.1;
+    /*
+     * Suavização da câmera medida em **tempo**, não em quadros.
+     *
+     * O número era 0,16 por quadro: isso é um atraso de ~0,19 s a 30 quadros/s e
+     * de ~0,1 s a 60 — o mesmo vídeo saía diferente conforme o navegador. Agora
+     * a constante de tempo vale em segundos de vídeo (um pouco mais longa que
+     * antes, porque o movimento tinha tranco), e durante a abertura o alvo já é
+     * uma animação pronta: ali a câmera vai junto, sem suavizar de novo.
+     */
+    const abrindo = target.opening < 1;
+    const k = abrindo
+      ? 1
+      : 1 - Math.exp(-dt / (camera.mode === "follow" ? CAM_TAU_FOLLOW : CAM_TAU_FIT));
+    const kZoom = abrindo ? 1 : 1 - Math.exp(-dt / CAM_TAU_ZOOM);
     this.cam.lat += (target.lat - this.cam.lat) * k;
     this.cam.lng += (target.lng - this.cam.lng) * k;
-    this.cam.zoom += (target.zoom - this.cam.zoom) * (target.opening < 1 ? 1 : 0.12);
+    this.cam.zoom += (target.zoom - this.cam.zoom) * kZoom;
 
     /*
      * A vista do quadro — com o enquadramento e o giro da **terceira pessoa**.
@@ -648,10 +706,26 @@ export class SceneRenderer {
      * norte para cima, e o giro "pousa" com a câmera.
      */
     const chase = camera.mode === "follow" ? camera.chase ?? null : null;
+    /**
+     * Onde o quadro é ancorado.
+     *
+     * Na terceira pessoa o centro é a **posição do personagem**, e não a câmera
+     * suavizada: era isso que estragava o enquadramento. A suavização é um
+     * atraso de propósito — com ela no centro, o personagem voltava para o meio
+     * da tela e a "câmera atrás" desaparecia. Ancorado nele, o personagem fica
+     * **sempre** a 68% da altura, com a estrada à frente ocupando o resto do
+     * quadro; o movimento contínuo vem da própria posição do personagem, que já
+     * é uma amostra suave do traçado. O zoom continua suavizado.
+     *
+     * Durante o voo de abertura nada disso vale: a câmera segue o seu próprio
+     * caminho (é ele que pousa) e o enquadramento entra junto com o pouso.
+     */
+    const ancorarNoPersonagem = !!chase && target.opening >= 1;
+    const centro = ancorarNoPersonagem ? sample.pos : this.cam;
     /** o giro que o mapa recebe neste quadro (0 = norte para cima) */
     const anguloMapa = chase?.gira ? -rumo * target.opening : 0;
     const vista = vistaDe({
-      centro: this.cam,
+      centro,
       zoom: this.cam.zoom,
       width,
       height,
@@ -839,6 +913,17 @@ export class SceneRenderer {
     if (style.showEndpoints && track.pts.length > 1) {
       const fotoDoLocal = (mark?: import("./endpoints").EndpointMark | null) =>
         mark?.photo ? (input.photos?.get(mark.photo) ?? null) : null;
+      /*
+       * A onda de impacto das duas pontas, no mesmo instante do pipoco: é o que
+       * marca a largada e a chegada no chão da rota (a chegada com a mesma
+       * "batida" das paradas).
+       */
+      const ondaDaPonta = (p: number | null, at: LatLng, cor: string) => {
+        if (p === null || p >= 1) return;
+        drawImpacto(ctx, toXY(at), cor, p, sf);
+      };
+      ondaDaPonta(pipocoDaPonta(input, "a"), track.pts[0], "#22c55e");
+      ondaDaPonta(pipocoDaPonta(input, "b"), track.pts[track.pts.length - 1], "#f87171");
       drawPin(
         ctx,
         toXY(track.pts[0]),
@@ -988,12 +1073,14 @@ export function andar(
   /*
    * **Sem pulo.** O corpo não sobe e desce — o usuário pediu ("o personagem não
    * precisa ficar pulando"), e ele tinha razão: um selo de 62 px subindo 20 px
-   * a cada passo parece um ícone quicando, não alguém andando. O que fica é um
-   * balanço de peso **de leve** (5% do selo, menos de 3 px) e uma respiração de
-   * 2% — o suficiente para o personagem não parecer congelado. O movimento de
-   * verdade vem do rumo suavizado e da inclinação na curva.
+   * a cada passo parece um ícone quicando, não alguém andando.
+   *
+   * E o balanço que sobrou foi **reduzido** (5% → 3% do selo, menos de 2 px):
+   * com o rumo ainda curtinho, o vaivém lateral chamava mais atenção que o
+   * andar. Aqui ele é só o peso trocando de pé — quem dá o movimento é o rumo
+   * suavizado e a inclinação na curva.
    */
-  return { sobe: 0, lado: 0.05 * onda * ganho, estica: 0.02 * onda * ganho };
+  return { sobe: 0, lado: 0.03 * onda * ganho, estica: 0.014 * onda * ganho };
 }
 
 /** O rumo (graus) de `a` para `b` passando por `b` até `c`, em (-180, 180]. */
@@ -1218,20 +1305,61 @@ function drawPhotoInsidePin(
 export const PINO_CRESCE_S = 0.7;
 
 /**
- * O quanto o pino de uma ponta já cresceu.
+ * O quanto do "pipoco" da ponta já aconteceu (0 = ainda não cresceu, 1 = pronto).
  *
- * A **partida** cresce a partir do pouso do voo (o pino nasce enquanto o
- * personagem arranca) e a **chegada** cresce **até** o instante em que o
- * personagem chega — o mesmo "aumentar" que o usuário viu na partida, do outro
- * lado do percurso. Antes de crescer, o pino fica em 0,7: exatamente o tamanho
- * do pino "fantasma" das paradas, para as três coisas falarem a mesma língua.
+ * `null` = ainda não é a vez desta ponta (o pipoco dela nem começou).
+ *
+ * A **partida** pipoca a partir do pouso do voo (o pino nasce enquanto o
+ * personagem arranca) e a **chegada** pipoca **até** o instante em que o
+ * personagem chega, de modo que ela está inteira no quadro da chegada.
+ */
+export function pipocoDaPonta(input: FrameState, ponta: "a" | "b"): number | null {
+  const tl = timelineOr(input.timeline, input.duration);
+  if (ponta === "a") {
+    const desde = input.elapsed - tl.voo;
+    return desde < 0 ? null : Math.max(0, Math.min(1, desde / PINO_CRESCE_S));
+  }
+  const falta = routeEnd(tl) - input.elapsed;
+  if (falta > PINO_CRESCE_S) return null;
+  return Math.max(0, Math.min(1, 1 - Math.max(0, falta) / PINO_CRESCE_S));
+}
+
+/**
+ * O tamanho do pino de uma ponta (1 = tamanho cheio).
+ *
+ * É o **mesmo pipoco das paradas**, que é o que o usuário pediu ("o ponto B não
+ * está com o efeito de aumentar e diminuir, igual o A"): antes da vez, o pino
+ * fica em 0,7, do tamanho do pino "fantasma" de uma parada que ainda não foi
+ * alcançada; na hora, ele encolhe e volta **passando do tamanho cheio** (a
+ * sobra do `easeOutBack`, que é o "aumenta e diminui").
+ *
+ * O que ele viu antes era 0,7 → 1 (30% de crescimento, `easeOutBack` achatado
+ * contra o 1): um efeito que existia no código e não existia na tela.
  */
 export function crescimentoDoPino(input: FrameState, ponta: "a" | "b"): number {
-  const tl = timelineOr(input.timeline, input.duration);
-  const desde = ponta === "a" ? input.elapsed - tl.voo : routeEnd(tl) - input.elapsed;
-  const cru = ponta === "a" ? desde / PINO_CRESCE_S : 1 - desde / PINO_CRESCE_S;
-  const p = Math.max(0, Math.min(1, cru));
-  return 0.7 + 0.3 * easeOutBack(p);
+  const p = pipocoDaPonta(input, ponta);
+  if (p === null) return 0.7;
+  return Math.max(0.15, easeOutBack(p));
+}
+
+/**
+ * Onda de impacto de um pino que acabou de pipocar — a mesma das paradas.
+ *
+ * Desenhada no chão (a âncora), não no pino: ela cresce a partir do ponto da
+ * rota e some quando o pino chega ao tamanho cheio.
+ */
+function drawImpacto(
+  ctx: CanvasRenderingContext2D,
+  at: { x: number; y: number },
+  color: string,
+  p: number,
+  sf: number,
+) {
+  ctx.beginPath();
+  ctx.arc(at.x, at.y, (15 + 54 * p) * sf, 0, Math.PI * 2);
+  ctx.strokeStyle = hexA(color, (1 - p) * 0.6);
+  ctx.lineWidth = (3.4 * (1 - p) + 0.4) * sf;
+  ctx.stroke();
 }
 
 /** Quanto um pino precisa subir para não ficar debaixo da cartela final. */
@@ -1372,6 +1500,15 @@ function drawPin(
 type ToastEvent = {
   /** posição do evento na rota (0..1) */
   at: number;
+  /**
+   * Quanto a notificação dura, em fração da rota.
+   *
+   * As paradas e a partida são medidas em **metros** (o aviso acompanha o
+   * lugar); a chegada é medida em **segundos de vídeo**, para o aviso ter
+   * sempre a mesma duração na tela — em metros, numa rota longa ele passava
+   * depressa demais e numa curta ficava demais.
+   */
+  hold: number;
   emoji: string;
   title: string;
   sub: string;
@@ -1397,6 +1534,14 @@ function drawEventToast(
 
   // duração do toast em metros percorridos
   const holdMeters = Math.max(90, Math.min(600, total * 0.07));
+  /**
+   * Quanto tempo o aviso da chegada fica na tela (segundos de vídeo).
+   *
+   * Ele termina **no instante da chegada**: o pino do B chega ao tamanho cheio
+   * exatamente ali, e o aviso já saiu — quem anuncia a chegada é o pino (com a
+   * foto, quando existe), não um retângulo no topo.
+   */
+  const TOAST_CHEGADA_S = 2.5;
 
   /*
    * Quem tem foto pronta não vira toast: o círculo com a foto (e o nome embaixo
@@ -1417,6 +1562,7 @@ function drawEventToast(
   if (!anunciadoPelaFoto(endpoints.a?.photo)) {
     events.push({
       at: 0,
+      hold: holdMeters / total,
       emoji: endpoints.a?.emoji.trim() || "🚩",
       title: endpoints.a?.label.trim() || "Partida",
       sub: "Início do percurso",
@@ -1431,6 +1577,7 @@ function drawEventToast(
       const km = (ts * total) / 1000;
       events.push({
         at: ts,
+        hold: holdMeters / total,
         emoji: s.emoji,
         title: s.label.trim() || "Parada",
         sub: `📍 ${km < 10 ? km.toFixed(2) : km.toFixed(1)} km do início`,
@@ -1439,18 +1586,21 @@ function drawEventToast(
     }
   }
   /*
-   * Chegada: o aviso dispara **holdMeters** antes do fim e termina exatamente
-   * quando o percurso termina.
+   * Chegada: o aviso entra nos **últimos 2,5 s de vídeo** do percurso e termina
+   * no instante em que o personagem chega.
    *
-   * Antes ele disparava a 40% dessa distância e sobrava vida para depois do
-   * fim — mas aí o `t` fica parado em 1 (a cartela) e um aviso medido em metros
-   * nunca chegava ao fim da própria barra: ficava congelado na tela. Foi o
-   * "continua o toast" que o usuário viu. Agora ele sai junto com o percurso.
+   * Já foi medido em metros como as paradas, e dava dois problemas: numa rota
+   * longa passava rápido demais, numa curta ficava demais — e, disparando antes
+   * do fim do percurso com sobra para depois, ficava congelado na tela quando o
+   * `t` parava em 1 (a cartela). Em segundos de vídeo ele tem sempre a mesma
+   * duração e sai antes do quadro da chegada.
    */
-  const endAt = Math.max(0, 1 - holdMeters / total);
+  const tl = timelineOr(input.timeline, input.duration);
   if (!anunciadoPelaFoto(endpoints.b?.photo)) {
+    const at = routeProgress(tl, routeEnd(tl) - TOAST_CHEGADA_S);
     events.push({
-      at: endAt,
+      at,
+      hold: Math.max(0.01, 1 - at),
       emoji: endpoints.b?.emoji.trim() || "🏁",
       title: endpoints.b?.label.trim() || "Chegada",
       sub: `Percurso completo · ${formatDistance(total)}`,
@@ -1460,17 +1610,20 @@ function drawEventToast(
 
   // evento ativo = o mais recente dentro da janela
   let active: ToastEvent | null = null;
-  let passedM = 0;
+  let decorrido = 0;
   for (const ev of events) {
-    const d = (t - ev.at) * total;
-    if (d >= 0 && d <= holdMeters && (!active || ev.at >= active.at)) {
+    const d = t - ev.at;
+    if (d >= 0 && d <= ev.hold && (!active || ev.at >= active.at)) {
       active = ev;
-      passedM = d;
+      decorrido = d;
     }
   }
   if (!active) return;
 
-  const p = passedM / holdMeters; // 0..1
+  const p = Math.max(0, Math.min(1, decorrido / active.hold)); // 0..1
+  // vida acabada: não desenha nem o quadro de saída (com a janela fechando no
+  // fim do percurso, o `p` chega a 1 exatamente ali e o aviso já saiu)
+  if (p >= 1) return;
   const appear = Math.min(1, p / 0.1);
   const fade = p > 0.78 ? Math.max(0, (1 - p) / 0.22) : 1;
   const alpha = appear * fade;
@@ -1651,13 +1804,7 @@ function drawStops(
     }
 
     // onda de impacto no instante em que é alcançada
-    if (!upcoming && p < 1) {
-      ctx.beginPath();
-      ctx.arc(px, py, (15 + 54 * p) * sf, 0, Math.PI * 2);
-      ctx.strokeStyle = hexA(stop.color, (1 - p) * 0.6);
-      ctx.lineWidth = (3.4 * (1 - p) + 0.4) * sf;
-      ctx.stroke();
-    }
+    if (!upcoming && p < 1) drawImpacto(ctx, { x: px, y: py }, stop.color, p, sf);
 
     const scale = upcoming ? 0.7 : Math.max(0.15, easeOutBack(p));
     ctx.globalAlpha = upcoming ? 0.55 : Math.min(1, 0.3 + p * 1.2);

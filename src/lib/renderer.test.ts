@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { buildTrack, cumulative } from "./geo";
+import { buildTrack, cumulative, sampleTrack } from "./geo";
 import { formatPace } from "./hud";
-import { buildTimeline, routeEnd, type Timeline } from "./timeline";
+import { buildTimeline, routeEnd, routeProgress, type Timeline } from "./timeline";
 import { colorizeRoute, NEUTRAL_COLOR } from "./coloring";
 import { formatClock, timesOf } from "./hud";
 import { type PhotoImage, type PhotoLookup } from "./photos";
@@ -10,8 +10,10 @@ import { kmMarks } from "./km-marks";
 import { findCharacter, gaitOf } from "./characters";
 import {
   SceneRenderer,
+  PINO_CRESCE_S,
   andar,
   crescimentoDoPino,
+  pipocoDaPonta,
   inclinacaoDaCurva,
   liftToClear,
   overlapsCard,
@@ -1583,19 +1585,182 @@ describe("o andar do personagem", () => {
       { lat: 0.0004, lng: 0.0004, ele: 0, t: 4 },
     ]);
     const r = new SceneRenderer("dark");
-    const giroDe = (t: number) => {
+    const giroDe = (t: number, elapsed?: number) => {
       const f = fakeCtx();
-      r.render(f.ctx as never, 1280, 720, { ...estado(t, 14, null), track: esquina });
-      return f.giros.reduce((a, b) => a + b, 0);
+      r.render(f.ctx as never, 1280, 720, {
+        ...estado(t, 14, null),
+        track: esquina,
+        ...(elapsed === undefined ? {} : { elapsed }),
+      });
+      return r.rumoDoQuadro as number;
     };
     // 420 quadros = os 14 s do percurso a 30 quadros/s (é assim que o vídeo sai)
     const N = 420;
     const serie = Array.from({ length: N }, (_, i) => giroDe((i + 1) / N));
     // a esquina é de 90°: sem o filtro, um único quadro levaria os 90°
     const saltos = serie.slice(1).map((v, i) => Math.abs(v - serie[i]));
-    expect(Math.max(...saltos)).toBeLessThan(20);
+    // 6° num quadro de 30 quadros/s = 180°/s: acima disso a virada se vê
+    expect(Math.max(...saltos)).toBeLessThan(6);
     // e mesmo assim a virada acontece inteira ao longo do percurso
     expect(Math.abs(serie[serie.length - 1] - serie[0])).toBeGreaterThan(60);
+  });
+
+  it("nenhuma virada é mais rápida que o teto, nem num zigue-zague do arquivo", () => {
+    /*
+     * O filtro sozinho responde rápido demais a um salto grande: o arquivo tem
+     * pontos que voltam sobre si (GPS com ruído) e o rumo pode virar 180° de um
+     * ponto para o outro. Sem o teto, o primeiro quadro levaria 1/6 da virada
+     * inteira e o personagem dava um giro seco.
+     */
+    const ziguezague = buildTrack([
+      { lat: 0, lng: 0, ele: 0, t: 0 },
+      { lat: 0, lng: 0.0004, ele: 0, t: 1 },
+      { lat: 0, lng: 0.0008, ele: 0, t: 2 },
+      { lat: 0, lng: 0.0003, ele: 0, t: 3 },
+    ]);
+    const r = new SceneRenderer("dark");
+    const serie: number[] = [];
+    for (let i = 0; i <= 60; i++) {
+      const f = fakeCtx();
+      r.render(f.ctx as never, 1280, 720, {
+        ...estado(i / 60, 14, null),
+        track: ziguezague,
+        elapsed: i / 30,
+      });
+      serie.push(r.rumoDoQuadro as number);
+    }
+    const saltos = serie.slice(1).map((v, i) => Math.abs(v - serie[i]));
+    /*
+     * 4° = 120°/s a 30 quadros/s. O maior salto é **exatamente** o teto: sem
+     * ele, o filtro daria 9,7° de uma vez (180° × 0,054) no quadro em que o
+     * rumo inverte — era esse o giro seco.
+     */
+    const maior = Math.max(...saltos);
+    expect(maior).toBeLessThanOrEqual(4.001);
+    expect(maior).toBeGreaterThan(3.5);
+    // e a volta acontece (o zigue-zague é curto: um pouco mais de um segundo)
+    expect(Math.abs(serie[serie.length - 1] - serie[0])).toBeGreaterThan(60);
+  });
+
+  it("a câmera também é suavizada por tempo (o mesmo quadro em 30 e 60 quadros/s)", () => {
+    /*
+     * O atraso da câmera era 0,16 **por quadro**: a 30 quadros/s isso é 0,19 s
+     * de atraso e a 60 é 0,1 s — o mesmo vídeo saía diferente conforme o
+     * navegador. Aqui o teste roda a mesma cena nas duas taxas e compara onde o
+     * personagem cai na tela (a câmera é o que decide isso).
+     */
+    const semTimeline = buildTimeline(14, { voo: false, cartela: false });
+    const camera = { mode: "follow" as const, followZoom: 15 };
+    const ondeEsta = (fps: number) => {
+      const r = new SceneRenderer("dark");
+      const N = Math.round(semTimeline.percurso * fps);
+      const out: number[] = [];
+      for (let i = 0; i <= N; i++) {
+        const instante = i / fps;
+        const f = fakeCtx();
+        r.render(f.ctx as never, 1280, 720, {
+          ...estado(Math.min(1, instante / semTimeline.percurso), 14, null, null, null, semTimeline),
+          camera,
+          elapsed: instante,
+        });
+        out.push(seloNaTela(f)?.[1] ?? NaN);
+      }
+      return out;
+    };
+    const a30 = ondeEsta(30);
+    const a60 = ondeEsta(60);
+    for (let i = 0; i < a30.length; i++) {
+      expect(Math.abs(a30[i] - a60[i * 2])).toBeLessThan(2);
+    }
+  });
+
+  it("uma curva suave é feita no tempo de quem vira o corpo (~0,4 s até a metade)", () => {
+    /*
+     * É o "suavizar mais" que o usuário pediu. O teto de giro só governa as
+     * viradas grandes; nas curvas suaves (a maioria num arquivo de GPS) quem
+     * manda é a constante de tempo — e ela subiu de 0,25 s para 0,6 s.
+     */
+    const rad = (10 * Math.PI) / 180;
+    const pts = [{ lat: 0, lng: 0 }];
+    let x = 0;
+    let y = 0;
+    const G = 1 / 111320;
+    for (let i = 0; i < 12; i++) {
+      x += 150;
+      pts.push({ lat: y * G, lng: x * G });
+    }
+    for (let i = 0; i < 12; i++) {
+      x += 150 * Math.cos(rad);
+      y += 150 * Math.sin(rad);
+      pts.push({ lat: y * G, lng: x * G });
+    }
+    const curva = buildTrack(pts);
+    // onde o traçado começa a virar (o "degrau" que o filtro recebe)
+    let tDoDegrau = 1;
+    for (let i = 0; i <= 2000; i++) {
+      if (Math.abs(sampleTrack(curva, i / 2000).heading - 90) > 2.5) {
+        tDoDegrau = i / 2000;
+        break;
+      }
+    }
+    const tl = buildTimeline(14, { voo: false, cartela: false });
+    const instanteDoDegrau = tDoDegrau * tl.percurso;
+    const r = new SceneRenderer("dark");
+    let cruzouEm: number | null = null;
+    for (let i = 0; i <= Math.round(3.5 * 30); i++) {
+      const instante = instanteDoDegrau - 0.5 + i / 30;
+      const f = fakeCtx();
+      r.render(f.ctx as never, 1280, 720, {
+        ...estado(Math.min(1, Math.max(0, instante / tl.percurso)), 14, null, null, null, tl),
+        track: curva,
+        elapsed: instante,
+      });
+      const rumo = r.rumoDoQuadro as number;
+      if (cruzouEm === null && Math.abs(rumo - 90) >= 5) {
+        cruzouEm = instante - instanteDoDegrau; // metade dos 10° da curva
+      }
+    }
+    expect(cruzouEm).not.toBeNull();
+    expect(cruzouEm as number).toBeGreaterThan(0.3);
+    expect(cruzouEm as number).toBeLessThan(0.65);
+  });
+
+  it("a suavização é por tempo: 30 e 60 quadros/s dão a mesma virada", () => {
+    /*
+     * O filtro media o tempo em quadros (0,16 por quadro): o mesmo vídeo saía
+     * mais suave a 60 quadros/s que a 30. Agora o tempo vem do `elapsed`, então
+     * a taxa do gravador não muda o desenho.
+     */
+    const esquina = buildTrack([
+      { lat: 0, lng: 0, ele: 0, t: 0 },
+      { lat: 0, lng: 0.0002, ele: 0, t: 1 },
+      { lat: 0, lng: 0.0004, ele: 0, t: 2 },
+      { lat: 0.0002, lng: 0.0004, ele: 0, t: 3 },
+      { lat: 0.0004, lng: 0.0004, ele: 0, t: 4 },
+    ]);
+    const serie = (fps: number) => {
+      const r = new SceneRenderer("dark");
+      const N = Math.round(semVoo.percurso * fps);
+      const out: number[] = [];
+      for (let i = 0; i <= N; i++) {
+        const instante = i / fps;
+        const f = fakeCtx();
+        r.render(f.ctx as never, 1280, 720, {
+          ...estado(Math.min(1, instante / semVoo.percurso), 14, null, null, null, semVoo),
+          track: esquina,
+          elapsed: instante,
+          timeline: semVoo,
+        });
+        out.push(r.rumoDoQuadro as number);
+      }
+      return out;
+    };
+    const a30 = serie(30);
+    const a60 = serie(60);
+    expect(a30.length).toBeGreaterThan(200);
+    for (let i = 0; i < a30.length; i++) {
+      expect(Math.abs(a30[i] - a60[i * 2])).toBeLessThan(2);
+    }
   });
 
   it("na curva o corpo se inclina; na reta, não", () => {
@@ -1665,13 +1830,45 @@ describe("a ponta cresce quando o personagem chega", () => {
     expect(escalaDoPino(arrancando)).toBeCloseTo(1, 2);
   });
 
-  it("a curva do crescimento passa pelo “pipoco” (passa do tamanho cheio e volta)", () => {
-    const meio = crescimentoDoPino(
-      { ...estado(0, 14, null), elapsed: 0.45 } as FrameState,
-      "a",
-    );
-    expect(meio).toBeGreaterThan(1); // a sobra do easeOutBack
-    expect(meio).toBeLessThan(1.06);
+  it("a curva do crescimento é a das paradas: encolhe, passa do cheio e volta", () => {
+    /*
+     * O usuário não via efeito nenhum porque o A/B crescia de 0,7 para 1 (30%,
+     * com o `easeOutBack` achatado contra o 1). Uma parada, quando o personagem
+     * passa, vai de 0,15 até passar do tamanho cheio e voltar — e é essa a curva
+     * que as pontas usam agora.
+     */
+    const em = (elapsed: number) =>
+      crescimentoDoPino({ ...estado(0, 14, null), elapsed } as FrameState, "a");
+    expect(em(0)).toBeLessThan(0.2); // pequeno no começo
+    let topo = 0;
+    for (let i = 0; i <= 40; i++) topo = Math.max(topo, em((i / 40) * PINO_CRESCE_S));
+    expect(topo).toBeGreaterThan(1.05); // a sobra do easeOutBack (o "aumenta")
+    expect(em(PINO_CRESCE_S)).toBeCloseTo(1, 6); // e fecha no tamanho exato
+    expect(em(3)).toBeCloseTo(1, 6); // e fica nele (o "diminui" é só a volta)
+  });
+
+  it("o pipoco da chegada termina exatamente no instante em que o personagem chega", () => {
+    const tl = buildTimeline(14, { voo: true, cartela: true });
+    const fim = routeEnd(tl);
+    const em = (elapsed: number) =>
+      pipocoDaPonta({ ...estado(1, 14, null, null, null, tl), elapsed } as FrameState, "b");
+    expect(em(fim - PINO_CRESCE_S - 0.2)).toBeNull(); // ainda é o pino fantasma
+    expect(em(fim - PINO_CRESCE_S)).toBeCloseTo(0, 6); // começa a crescer
+    expect(em(fim - PINO_CRESCE_S / 2)).toBeCloseTo(0.5, 6);
+    expect(em(fim)).toBeCloseTo(1, 6); // inteiro na chegada
+    expect(em(fim + 1)).toBeCloseTo(1, 6); // e fica inteiro na cartela
+  });
+
+  it("a largada também tem onda de impacto no chão da rota", () => {
+    // a onda das paradas, desenhada na âncora da ponta
+    const f = fakeCtx();
+    desenhar(f.ctx, {
+      ...estado(0, 14, null),
+      elapsed: PINO_CRESCE_S * 0.4,
+      endpoints: { a: LOCAL_A, b: null },
+    });
+    const onda = f.arcosPos.filter((a) => a[2] > 20 && a[2] < 90);
+    expect(onda.length).toBeGreaterThan(0);
   });
 
   it("o nome e a foto saem junto com o pino (não ficam soltos)", () => {
@@ -1720,6 +1917,46 @@ describe("o aviso do topo não fica preso na tela", () => {
       timeline: tl,
     });
     expect(avisoDaChegada(naCartela)).toBe(false);
+  });
+
+  it("o aviso da chegada dura o mesmo em rota curta e em rota longa", () => {
+    /*
+     * Ele é medido em **segundos de vídeo**, não em metros: numa rota de 40 km
+     * os mesmos 600 m passavam em meio segundo (ninguém lê) e numa de 2 km
+     * ficavam uma eternidade. Aqui, nos dois casos, ele entra faltando ~2,5 s
+     * para o fim do percurso.
+     */
+    const tl = buildTimeline(14, { voo: false, cartela: false });
+    const curta = buildTrack([
+      { lat: -23.5, lng: -48.4, ele: 700, t: T0 },
+      { lat: -23.512, lng: -48.412, ele: 720, t: T0 + 600_000 },
+    ]);
+    const longa = buildTrack([
+      { lat: -23.5, lng: -48.4, ele: 700, t: T0 },
+      { lat: -23.86, lng: -48.76, ele: 900, t: T0 + 5400_000 },
+    ]);
+    const entradaDoAviso = (trk: typeof curta) => {
+      for (let ms = 0; ms <= 26000; ms += 100) {
+        const instante = routeEnd(tl) - 4 + ms / 1000;
+        if (instante < 0) continue;
+        const f = fakeCtx();
+        desenhar(
+          f.ctx,
+          {
+            ...estado(routeProgress(tl, instante), 14, null, null, null, tl),
+            elapsed: instante,
+          },
+          trk,
+        );
+        if (f.textos.some((x) => x.includes("Percurso completo"))) return instante;
+      }
+      return NaN;
+    };
+    const antesCurta = routeEnd(tl) - entradaDoAviso(curta);
+    const antesLonga = routeEnd(tl) - entradaDoAviso(longa);
+    expect(antesCurta).toBeCloseTo(2.5, 1);
+    expect(antesLonga).toBeCloseTo(2.5, 1);
+    expect(Math.abs(antesCurta - antesLonga)).toBeLessThan(0.3);
   });
 
   it("mas ele aparece antes, para dar tempo de ler", () => {
@@ -1783,6 +2020,57 @@ describe("terceira pessoa", () => {
     }
     const p = project(centro.lat, centro.lng, com.z);
     expect(Math.abs(projeta(p.x, p.y).x - 640)).toBeLessThan(1e-6);
+  });
+
+  /**
+   * Onde o personagem cai na tela, quadro a quadro, com **um** renderizador.
+   *
+   * A câmera é suavizada em relação ao alvo, então o atraso só aparece numa
+   * sequência de quadros: medir um quadro isolado (com renderizador novo) daria
+   * a câmera já em cima do alvo, e nenhuma diferença.
+   */
+  const alturasNaTela = (camera: { mode: "follow"; followZoom: number; chase?: { gira: boolean } }) => {
+    const tl = buildTimeline(14, { voo: false, cartela: false });
+    const r = new SceneRenderer("dark");
+    const N = Math.round(tl.percurso * 30);
+    const alturas: number[] = [];
+    for (let i = 0; i <= N; i++) {
+      const instante = i / 30;
+      const f = fakeCtx();
+      r.render(f.ctx as never, 1280, 720, {
+        ...estado(Math.min(1, instante / tl.percurso), 14, null, null, null, tl),
+        camera,
+        elapsed: instante,
+      });
+      if (i % 30 === 0) alturas.push(seloNaTela(f)?.[1] ?? NaN);
+    }
+    return alturas;
+  };
+
+  it("o personagem fica sempre na mesma altura, mesmo com a câmera atrasada", () => {
+    /*
+     * O defeito que o usuário viu ("a terceira pessoa não ficou atrás do
+     * personagem"): a suavização da câmera é um **atraso** de propósito, e com
+     * ela no centro do quadro o personagem voltava para o meio da tela — o
+     * deslocamento para baixo era comido pelo atraso. Ancorado na posição dele,
+     * a altura é a mesma do começo ao fim.
+     */
+    const alturas = alturasNaTela({
+      mode: "follow",
+      followZoom: 15,
+      chase: { gira: false },
+    });
+    expect(alturas.length).toBeGreaterThan(10);
+    for (const y of alturas) expect(y).toBeCloseTo(720 * CHASE_ALTURA, 0);
+  });
+
+  it("sem terceira pessoa, a câmera atrasada leva o personagem para cima da tela", () => {
+    // contraste que dá sentido ao teste anterior: sem a âncora, a altura varia
+    // (é a câmera chegando depois, que na terceira pessoa estragaria o quadro)
+    const alturas = alturasNaTela({ mode: "follow", followZoom: 15 });
+    const amplitude = Math.max(...alturas) - Math.min(...alturas);
+    // poucos pixels neste traçado curto, mas é o que a âncora elimina por completo
+    expect(amplitude).toBeGreaterThan(5);
   });
 
   it("no vídeo, o personagem desce na tela e a seta aponta para cima", () => {

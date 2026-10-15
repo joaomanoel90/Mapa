@@ -43,6 +43,8 @@ const SHARED_KEYS = [
   "characterId",
   "accent",
   "rotate",
+  "thirdPerson",
+  "spinMap",
   "duration",
   "cameraMode",
   "followZoom",

@@ -73,7 +73,12 @@ export function tilesNeeded(
  * resolve, e é isso que a tela diz.
  */
 export function maxFollowZoom(
-  input: BudgetInput & { budget?: number; minFollowZoom?: number },
+  input: BudgetInput & {
+    /** a câmera do painel: a terceira pessoa (e o giro) mudam a conta */
+    camera?: CameraConfig;
+    budget?: number;
+    minFollowZoom?: number;
+  },
 ): number | null {
   const budget = input.budget ?? TILE_BUDGET;
   const min = input.minFollowZoom ?? MIN_FOLLOW_ZOOM;
@@ -88,7 +93,10 @@ export function maxFollowZoom(
   const cabe = (zoom: number) =>
     tilesNeeded({
       ...input,
-      camera: { mode: "follow", followZoom: zoom },
+      // a busca mexe só no zoom: o resto da câmera (a terceira pessoa, o giro)
+      // continua o que o painel mandou — senão a sugestão valeria para outra
+      // câmera e o vídeo estouraria o teto
+      camera: { ...(input.camera ?? {}), mode: "follow", followZoom: zoom },
     }) <= budget;
 
   if (cabe(opcoes[0])) return opcoes[0];

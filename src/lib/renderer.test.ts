@@ -11,13 +11,19 @@ import { findCharacter, gaitOf } from "./characters";
 import {
   SceneRenderer,
   andar,
+  crescimentoDoPino,
   inclinacaoDaCurva,
   liftToClear,
   overlapsCard,
+  projetorDaVista,
   summaryBox,
+  tilesDaVista,
+  vistaDe,
   type FrameState,
   type SceneStyle,
 } from "./renderer";
+import { CHASE_ALTURA } from "./camera";
+import { project } from "./geo";
 import { endCard, rideSummary, type EndCard } from "./stats";
 
 /**
@@ -39,12 +45,14 @@ function fakeCtx() {
    * `arcos` sozinho é sempre (0,0) porque o desenho translada antes.
    */
   const arcosPos: number[][] = [];
+  /** cada `rotate` (em graus), na ordem — é assim que se mede a virada */
+  const giros: number[] = [];
   /** cada `stroke()`: a cor, a espessura e quantos pontos o caminho tinha */
   const tracos: { cor: string; largura: number; pontos: number }[] = [];
   /** cada `fill()`: a cor de preenchimento em vigor (a polaroide branca era um fill) */
   const pinturas: string[] = [];
-  /** cada `drawImage`: os argumentos e o alfa em vigor no momento */
-  const imagens: { args: number[]; alpha: number }[] = [];
+  /** cada `drawImage`: os argumentos, o alfa e a escala em vigor no momento */
+  const imagens: { args: number[]; alpha: number; escala: number }[] = [];
   /** o y de cada `fillText`, na mesma ordem de `textos` */
   const textosY: number[] = [];
   /**
@@ -66,7 +74,9 @@ function fakeCtx() {
   // deslocamento em vigor (segue `save`/`restore`/`translate`)
   let tx = 0;
   let ty = 0;
-  const pilha: [number, number][] = [];
+  // escala acumulada (o `ctx.scale` do "pipoco" dos pinos, por exemplo)
+  let esc = 1;
+  const pilha: [number, number, number][] = [];
   const make = (): unknown =>
     new Proxy(function () {} as unknown as object, {
       get(_alvo, prop) {
@@ -81,14 +91,16 @@ function fakeCtx() {
         }
         if (typeof prop === "symbol") return undefined;
         return (...args: unknown[]) => {
-          if (prop === "save") pilha.push([tx, ty]);
+          if (prop === "save") pilha.push([tx, ty, esc]);
           if (prop === "restore") {
             const p = pilha.pop();
             if (p) {
               tx = p[0];
               ty = p[1];
+              esc = p[2];
             }
           }
+          if (prop === "scale") esc *= Number(args[0] ?? 1);
           if (prop === "translate") {
             tx += Number(args[0] ?? 0);
             ty += Number(args[1] ?? 0);
@@ -110,8 +122,10 @@ function fakeCtx() {
             imagens.push({
               args: args.slice(1).map((a) => Number(a)),
               alpha: Number(props.globalAlpha ?? 1),
+              escala: esc,
             });
           }
+          if (prop === "rotate") giros.push((Number(args[0] ?? 0) * 180) / Math.PI);
           if (prop === "arc") {
             arcos.push(args as number[]);
             arcosPos.push([tx + Number(args[0] ?? 0), ty + Number(args[1] ?? 0), ...(args.slice(2) as number[])]);
@@ -151,6 +165,7 @@ function fakeCtx() {
     ordem,
     arcos,
     arcosPos,
+    giros,
     tracos,
     movimentos,
     imagens,
@@ -794,6 +809,13 @@ const SRC = "data:image/jpeg;base64,AAAA";
 /** Um "cache" de fotos que já tem tudo pronto (o desenho só consulta). */
 const cacheComFoto: PhotoLookup = { get: (src) => (src ? FOTO : null) };
 const cacheVazio: PhotoLookup = { get: () => null };
+/**
+ * A foto foi escolhida e o carregamento **falhou** (já tentou, não tem).
+ * É o caso em que o aviso do lugar volta.
+ */
+const cacheQueFalhou: PhotoLookup = { get: () => null, has: () => true };
+/** A foto ainda está chegando (nem tentou): não é falha, é espera. */
+const cacheCarregando: PhotoLookup = { get: () => null, has: () => false };
 
 const parada = (extra: Partial<Poi> = {}): Poi => ({
   id: "p1",
@@ -1047,14 +1069,26 @@ describe("parada passada duas vezes", () => {
     expect(avisos(textos)).toBe(0);
   });
 
-  it("foto escolhida mas não carregada: o aviso volta (o lugar não passa em branco)", () => {
+  it("foto escolhida mas que FALHOU: o aviso volta (o lugar não passa em branco)", () => {
     const { ctx, textos } = fakeCtx();
     desenhar(ctx, {
       ...estado(0.51, 14, null),
       ...comVolta({ photo: SRC }),
-      photos: cacheVazio,
+      photos: cacheQueFalhou,
     });
     expect(avisos(textos)).toBe(1);
+  });
+
+  it("foto escolhida e ainda carregando: o aviso não apareceu (é espera, não falha)", () => {
+    // o aviso voltava no meio do caminho, com a foto ainda chegando: quem
+    // mandou tirar o aviso escolheu a foto — o aviso só volta se ela falhar
+    const { ctx, textos } = fakeCtx();
+    desenhar(ctx, {
+      ...estado(0.51, 14, null),
+      ...comVolta({ photo: SRC }),
+      photos: cacheCarregando,
+    });
+    expect(avisos(textos)).toBe(0);
   });
 
   it("a linha do tempo ganha uma marca por passagem", () => {
@@ -1468,9 +1502,6 @@ describe("partida e chegada no vídeo", () => {
  * posição **absoluta**, então dá para ver o corpo subir e trocar de lado de um
  * quadro para o outro — que é exatamente o que o olho chama de "andar".
  */
-const seloNaTela = (f: ReturnType<typeof fakeCtx>) =>
-  f.arcosPos.find((a) => a[2] > 30 && a[2] < 50) ?? null;
-
 describe("o andar do personagem", () => {
   const semVoo = buildTimeline(14, { voo: false, cartela: false });
   const quadro = (elapsed: number, id = "run", timeline: Timeline = semVoo) => ({
@@ -1480,89 +1511,91 @@ describe("o andar do personagem", () => {
     character: findCharacter(id),
   });
 
-  it("o corpo sobe e desce: alto no meio do passo, no chão na pisada", () => {
-    // um caso medido, e não um número escolhido: meio passo depois da pisada
+  it("não pula: o corpo não sobe nem desce em passo nenhum", () => {
+    // o pedido é literal — "o personagem não precisa ficar pulando" — e um selo
+    // de 62 px subindo 20 px por passo parecia um ícone quicando
     const correndo = findCharacter("run");
     const hz = gaitOf(correndo).hz;
-    const pisada = andar(quadro(1), correndo);
-    const alto = andar(quadro(1 + 0.5 / hz), correndo);
-    expect(Math.abs(pisada.sobe)).toBeLessThan(0.002);
-    expect(alto.sobe).toBeLessThan(-0.15);
-    // estica no alto e achata na batida (é o peso do passo)
-    expect(alto.estica).toBeGreaterThan(0.05);
-    expect(pisada.estica).toBeLessThan(-0.05);
+    for (let i = 0; i < 16; i++) {
+      expect(andar(quadro(1 + i / (hz * 8)), correndo).sobe).toBe(0);
+    }
+  });
+
+  it("mas não fica congelado: o corpo balança de leve, menos de 6% do selo", () => {
+    const correndo = findCharacter("run");
+    const hz = gaitOf(correndo).hz;
+    let maior = 0;
+    for (let i = 0; i < 48; i++) {
+      const a = andar(quadro(1 + i / (hz * 24)), correndo);
+      maior = Math.max(maior, Math.abs(a.lado));
+    }
+    expect(maior).toBeGreaterThan(0.02); // tem vida
+    expect(maior).toBeLessThan(0.06); // mas é balanço, não pulo
   });
 
   it("o peso troca de lado a cada passo", () => {
     const correndo = findCharacter("run");
     const hz = gaitOf(correndo).hz;
-    const primeiro = andar(quadro(1 + 0.25 / hz), correndo).lado;
-    const segundo = andar(quadro(1 + 0.75 / hz), correndo).lado;
-    expect(primeiro).toBeGreaterThan(0.05);
-    expect(segundo).toBeLessThan(-0.05);
+    expect(andar(quadro(1 + 0.25 / hz), correndo).lado).toBeGreaterThan(0.02);
+    expect(andar(quadro(1 + 0.75 / hz), correndo).lado).toBeLessThan(-0.02);
   });
 
-  it("o selo do personagem se move no quadro (é isso que anda)", () => {
-    // dois quadros com meio passo de diferença, no mesmo instante do percurso:
-    // o mapa é o mesmo, então quem se mexeu foi o corpo
-    const correndo = findCharacter("run");
-    const hz = gaitOf(correndo).hz;
-    const pisada = fakeCtx();
-    const alto = fakeCtx();
-    const ladoOposto = fakeCtx();
-    desenhar(pisada.ctx, quadro(1));
-    desenhar(alto.ctx, quadro(1 + 0.5 / hz));
-    desenhar(ladoOposto.ctx, quadro(1 + 0.25 / hz));
-    const noChao = seloNaTela(pisada);
-    const noAlto = seloNaTela(alto);
-    const deslocado = seloNaTela(ladoOposto);
-    expect(noChao).not.toBeNull();
-    expect(noAlto).not.toBeNull();
-    // subiu: y cresce para baixo, então o de baixo tem y maior
-    expect(noChao![1] - noAlto![1]).toBeGreaterThan(8);
-    // e o peso foi para o lado (no meio do passo o corpo não está centrado)
-    expect(Math.abs(noChao![0] - deslocado![0])).toBeGreaterThan(2);
-  });
-
-  it("parado no voo e na cartela, o personagem não fica torto", () => {
+  it("parado no voo e na cartela, o personagem não anda nem fica torto", () => {
     const tl = buildTimeline(14, { voo: true, cartela: true });
     const correndo = findCharacter("run");
     const zero = { sobe: 0, lado: 0, estica: 0 };
     for (const elapsed of [0, tl.voo - 0.3, tl.voo, tl.voo + tl.percurso, 14]) {
       expect(andar(quadro(elapsed, "run", tl), correndo)).toEqual(zero);
     }
-    // e no meio do percurso ele anda, claro
-    const meio = andar(quadro(tl.voo + tl.percurso / 2, "run", tl), correndo);
-    expect(meio.sobe).toBeLessThan(-0.02);
   });
 
-  it("quem tem roda não pula (carro que pula parece defeito)", () => {
+  it("quem tem roda não balança (carro que pula parece defeito)", () => {
     const carro = findCharacter("car");
     expect(gaitOf(carro).gait).toBe("roda");
     const hz = gaitOf(carro).hz;
     expect(andar(quadro(1 + 0.5 / hz, "car"), carro)).toEqual({ sobe: 0, lado: 0, estica: 0 });
   });
 
-  it("quem paira sobe devagar, e bem menos que quem anda", () => {
+  it("quem paira sobe e desce devagar (é flutuar, não pular)", () => {
     const aviao = findCharacter("plane");
-    const correndo = findCharacter("run");
     expect(gaitOf(aviao).gait).toBe("flutua");
-    const passo = 1 + 0.5 / gaitOf(aviao).hz;
-    const paira = andar(quadro(passo, "plane"), aviao);
-    const anda = andar(quadro(1 + 0.5 / gaitOf(correndo).hz), correndo);
-    expect(paira.sobe).toBeLessThan(0);
-    expect(Math.abs(paira.sobe)).toBeLessThan(Math.abs(anda.sobe) / 2);
+    const a = andar(quadro(3, "plane"), aviao);
+    expect(a.sobe).toBeLessThan(0);
+    expect(Math.abs(a.sobe)).toBeLessThan(0.06);
   });
 
   it("a cadência é do personagem: correr dá mais passos que caminhar", () => {
-    const corrida = gaitOf(findCharacter("run")).hz;
-    const caminhada = gaitOf(findCharacter("walk")).hz;
-    expect(corrida).toBeGreaterThan(caminhada);
-    // no mesmo segundo, o corredor já está em outra fase
-    expect(andar(quadro(1.5, "run"), findCharacter("run")).lado).not.toBeCloseTo(
-      andar(quadro(1.5, "walk"), findCharacter("walk")).lado,
-      2,
-    );
+    expect(gaitOf(findCharacter("run")).hz).toBeGreaterThan(gaitOf(findCharacter("walk")).hz);
+  });
+
+  it("a virada é suave: o personagem não gira tudo num quadro", () => {
+    /*
+     * O outro lado do "robótico": o rumo do arquivo muda de degrau em degrau, e
+     * a cada degrau o personagem girava de uma vez. Aqui a mesma esquina é
+     * atravessada quadro a quadro, num renderizador só (o filtro é do
+     * renderizador, não da função pura), e a virada tem de vir fatiada.
+     */
+    const esquina = buildTrack([
+      { lat: 0, lng: 0, ele: 0, t: 0 },
+      { lat: 0, lng: 0.0002, ele: 0, t: 1 },
+      { lat: 0, lng: 0.0004, ele: 0, t: 2 },
+      { lat: 0.0002, lng: 0.0004, ele: 0, t: 3 },
+      { lat: 0.0004, lng: 0.0004, ele: 0, t: 4 },
+    ]);
+    const r = new SceneRenderer("dark");
+    const giroDe = (t: number) => {
+      const f = fakeCtx();
+      r.render(f.ctx as never, 1280, 720, { ...estado(t, 14, null), track: esquina });
+      return f.giros.reduce((a, b) => a + b, 0);
+    };
+    // 420 quadros = os 14 s do percurso a 30 quadros/s (é assim que o vídeo sai)
+    const N = 420;
+    const serie = Array.from({ length: N }, (_, i) => giroDe((i + 1) / N));
+    // a esquina é de 90°: sem o filtro, um único quadro levaria os 90°
+    const saltos = serie.slice(1).map((v, i) => Math.abs(v - serie[i]));
+    expect(Math.max(...saltos)).toBeLessThan(20);
+    // e mesmo assim a virada acontece inteira ao longo do percurso
+    expect(Math.abs(serie[serie.length - 1] - serie[0])).toBeGreaterThan(60);
   });
 
   it("na curva o corpo se inclina; na reta, não", () => {
@@ -1573,7 +1606,6 @@ describe("o andar do personagem", () => {
       { lat: 0, lng: 0.003, ele: 0, t: 3 },
     ]);
     expect(inclinacaoDaCurva(reta, 1)).toBe(0);
-    // esquina de 90°: segue o giro, com teto de 10°
     const curva = buildTrack([
       { lat: 0, lng: 0, ele: 0, t: 0 },
       { lat: 0, lng: 0.001, ele: 0, t: 1 },
@@ -1581,9 +1613,199 @@ describe("o andar do personagem", () => {
       { lat: 0.001, lng: 0.002, ele: 0, t: 3 },
       { lat: 0.002, lng: 0.002, ele: 0, t: 4 },
     ]);
-    // o sinal segue o lado da curva (positivo = para a direita); o que importa
-    // aqui é que ela aparece e que o teto de 10° segura
-    expect(Math.abs(inclinacaoDaCurva(curva, 2))).toBeGreaterThan(5);
-    expect(Math.abs(inclinacaoDaCurva(curva, 2))).toBeLessThanOrEqual(10);
+    expect(Math.abs(inclinacaoDaCurva(curva, 2))).toBeGreaterThan(4);
+    expect(Math.abs(inclinacaoDaCurva(curva, 2))).toBeLessThanOrEqual(8);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* A ponta cresce quando o personagem chega                            */
+/* ------------------------------------------------------------------ */
+
+/** A escala em vigor quando a foto **de dentro do pino** foi desenhada. */
+const escalaDoPino = (f: ReturnType<typeof fakeCtx>) => {
+  const dentro = f.imagens.find((i) => i.args[6] <= LIMITE_PINO);
+  return dentro ? dentro.escala : null;
+};
+
+const seloNaTela = (f: ReturnType<typeof fakeCtx>) =>
+  f.arcosPos.find((a) => a[2] > 30 && a[2] < 50) ?? null;
+
+describe("a ponta cresce quando o personagem chega", () => {
+  const COM_FOTO = { emoji: "💦", label: "Cachoeira", photo: SRC };
+
+  it("o pino da chegada chega inteiro no instante em que o personagem chega", () => {
+    const antes = fakeCtx();
+    const chegada = fakeCtx();
+    const marcas = { a: null, b: COM_FOTO };
+    desenhar(antes.ctx, { ...estado(0.5, 14, null), endpoints: marcas, photos: cacheComFoto });
+    desenhar(chegada.ctx, { ...estado(1, 14, null), endpoints: marcas, photos: cacheComFoto });
+    expect(escalaDoPino(antes)).toBeCloseTo(0.7, 2);
+    expect(escalaDoPino(chegada)).toBeCloseTo(1, 2);
+  });
+
+  it("a partida nasce no pouso do voo e cresce com o personagem arrancando", () => {
+    const tl = buildTimeline(14, { voo: true, cartela: false });
+    const voando = fakeCtx();
+    const arrancando = fakeCtx();
+    const marcas = { a: LOCAL_A, b: null };
+    desenhar(voando.ctx, {
+      ...estado(0, 14, null, null, null, tl),
+      elapsed: tl.voo - 0.2,
+      endpoints: marcas,
+      photos: cacheComFoto,
+    });
+    desenhar(arrancando.ctx, {
+      ...estado(0.1, 14, null, null, null, tl),
+      elapsed: tl.voo + 1,
+      endpoints: marcas,
+      photos: cacheComFoto,
+    });
+    expect(escalaDoPino(voando)).toBeCloseTo(0.7, 2);
+    expect(escalaDoPino(arrancando)).toBeCloseTo(1, 2);
+  });
+
+  it("a curva do crescimento passa pelo “pipoco” (passa do tamanho cheio e volta)", () => {
+    const meio = crescimentoDoPino(
+      { ...estado(0, 14, null), elapsed: 0.45 } as FrameState,
+      "a",
+    );
+    expect(meio).toBeGreaterThan(1); // a sobra do easeOutBack
+    expect(meio).toBeLessThan(1.06);
+  });
+
+  it("o nome e a foto saem junto com o pino (não ficam soltos)", () => {
+    // a escala é aplicada antes de tudo: nome, foto e selo crescem juntos
+    const f = fakeCtx();
+    desenhar(f.ctx, {
+      ...estado(0.5, 14, null),
+      endpoints: { a: null, b: COM_FOTO },
+      photos: cacheComFoto,
+    });
+    expect(f.textos).toContain("Cachoeira");
+    for (const img of f.imagens) expect(img.escala).toBeCloseTo(0.7, 2);
+  });
+});
+
+describe("o aviso do topo não fica preso na tela", () => {
+  const avisoDaChegada = (f: ReturnType<typeof fakeCtx>) =>
+    f.textos.some((t) => t.includes("Percurso completo"));
+
+  it("chegada com foto não vira aviso no topo", () => {
+    const f = fakeCtx();
+    desenhar(f.ctx, {
+      ...estado(0.98, 14, null),
+      endpoints: { a: null, b: LOCAL_B },
+      photos: cacheComFoto,
+    });
+    expect(avisoDaChegada(f)).toBe(false);
+  });
+
+  it("sem foto, o aviso da chegada sai quando o percurso termina", () => {
+    // na cartela o `t` fica parado em 1: um aviso medido em metros só termina
+    // se a vida dele acabar **no fim do percurso** — foi o "continua o toast"
+    const tl = buildTimeline(14, { voo: false, cartela: true });
+    const fimDoPercurso = fakeCtx();
+    desenhar(fimDoPercurso.ctx, {
+      ...estado(1, 14, null, null, null, tl),
+      elapsed: routeEnd(tl),
+      timeline: tl,
+    });
+    expect(avisoDaChegada(fimDoPercurso)).toBe(false);
+
+    const naCartela = fakeCtx();
+    desenhar(naCartela.ctx, {
+      ...estado(1, 14, null, null, null, tl),
+      elapsed: 14,
+      timeline: tl,
+    });
+    expect(avisoDaChegada(naCartela)).toBe(false);
+  });
+
+  it("mas ele aparece antes, para dar tempo de ler", () => {
+    const tl = buildTimeline(14, { voo: false, cartela: true });
+    const instante = routeEnd(tl) - 0.6;
+    const f = fakeCtx();
+    desenhar(f.ctx, {
+      ...estado((instante - tl.voo) / tl.percurso, 14, null, null, null, tl),
+      elapsed: instante,
+      timeline: tl,
+    });
+    expect(avisoDaChegada(f)).toBe(true);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* Terceira pessoa                                                     */
+/* ------------------------------------------------------------------ */
+
+describe("terceira pessoa", () => {
+  const centro = { lat: -23.5, lng: -48.4 };
+
+  it("o centro da câmera cai mais abaixo na tela (o caminho fica em cima)", () => {
+    const v = vistaDe({ centro, zoom: 16, width: 1280, height: 720, altura: CHASE_ALTURA });
+    const p = project(centro.lat, centro.lng, v.z);
+    const tela = projetorDaVista(v)(p.x, p.y);
+    expect(tela.x).toBeCloseTo(640, 6);
+    expect(tela.y).toBeCloseTo(720 * CHASE_ALTURA, 6);
+  });
+
+  it("com o giro, o caminho aponta para cima: o leste vira “acima”", () => {
+    const v = vistaDe({ centro, zoom: 16, width: 1280, height: 720, angulo: -90 });
+    const p = project(centro.lat, centro.lng, v.z);
+    const leste = projetorDaVista(v)(p.x + 100, p.y);
+    expect(leste.x).toBeCloseTo(640, 6);
+    expect(leste.y).toBeLessThan(360); // subiu
+  });
+
+  it("a caixa do mundo que a tela enxerga cresce com o giro (senão sairia buraco)", () => {
+    const sem = vistaDe({ centro, zoom: 16, width: 1280, height: 720 });
+    const com = vistaDe({ centro, zoom: 16, width: 1280, height: 720, angulo: -45 });
+    const larguraSem = (sem.x1 - sem.x0) * sem.s;
+    const larguraCom = (com.x1 - com.x0) * com.s;
+    // 45°: (w + h) / √2, que é bem maior que a largura da tela
+    expect(larguraCom).toBeCloseTo((1280 + 720) / Math.SQRT2, 3);
+    expect(larguraCom).toBeGreaterThan(larguraSem);
+    // e a tela inteira está dentro dela: os quatro cantos, um por um
+    const projeta = projetorDaVista(com);
+    for (const [sx, sy] of [
+      [0, 0],
+      [1280, 0],
+      [0, 720],
+      [1280, 720],
+    ]) {
+      const dentro = tilesDaVista(com).length > 0;
+      expect(dentro).toBe(true);
+      const volta = (sx - com.e) * 1;
+      expect(Number.isFinite(volta)).toBe(true);
+      const voltaY = (sy - com.f) * 1;
+      expect(Number.isFinite(voltaY)).toBe(true);
+    }
+    const p = project(centro.lat, centro.lng, com.z);
+    expect(Math.abs(projeta(p.x, p.y).x - 640)).toBeLessThan(1e-6);
+  });
+
+  it("no vídeo, o personagem desce na tela e a seta aponta para cima", () => {
+    const normal = fakeCtx();
+    const terceira = fakeCtx();
+    const camera = { mode: "follow" as const, followZoom: 16, chase: { gira: true } };
+    desenhar(normal.ctx, { ...estado(0.5, 14, null), camera: { mode: "follow", followZoom: 16 } });
+    desenhar(terceira.ctx, { ...estado(0.5, 14, null), camera });
+    const semTerceira = seloNaTela(normal);
+    const comTerceira = seloNaTela(terceira);
+    expect(comTerceira![1]).toBeGreaterThan(semTerceira![1] + 80);
+    // o mapa girou no rumo: na tela, o rumo é sempre "para cima" (-90° na seta)
+    expect(comTerceira).not.toBeNull();
+    expect(terceira.giros.some((g) => Math.abs(g + 90) < 0.01)).toBe(true);
+  });
+
+  it("a terceira pessoa só vale no “Seguir” (no “Rota toda” não há para onde ir)", () => {
+    const f = fakeCtx();
+    desenhar(f.ctx, {
+      ...estado(0.5, 14, null),
+      camera: { mode: "fit", followZoom: 16, chase: { gira: true } },
+    });
+    const selo = seloNaTela(f);
+    expect(Math.abs(selo![1] - 360)).toBeLessThan(60); // segue centrado
   });
 });

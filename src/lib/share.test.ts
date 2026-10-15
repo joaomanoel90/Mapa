@@ -259,6 +259,16 @@ describe("sharedSettingsOverrides", () => {
     expect(over.cinematic).toBe(true);
   });
 
+  it("leva junto a terceira pessoa e o giro do mapa", () => {
+    const over = sharedSettingsOverrides({
+      ...DEFAULT_SETTINGS,
+      thirdPerson: true,
+      spinMap: true,
+    });
+    expect(over.thirdPerson).toBe(true);
+    expect(over.spinMap).toBe(true);
+  });
+
   it("a cor da rota sobrevive à ida e à volta pelo link", () => {
     const url = buildShareUrl(
       base({ settings: { ...DEFAULT_SETTINGS, colorBy: "speed", cinematic: true } }),
@@ -266,6 +276,15 @@ describe("sharedSettingsOverrides", () => {
     const r = decodeShare(url);
     expect(r?.settings.colorBy).toBe("speed");
     expect(r?.settings.cinematic).toBe(true);
+  });
+
+  it("a terceira pessoa sobrevive à ida e à volta pelo link", () => {
+    const url = buildShareUrl(
+      base({ settings: { ...DEFAULT_SETTINGS, thirdPerson: true, spinMap: true } }),
+    );
+    const r = decodeShare(url);
+    expect(r?.settings.thirdPerson).toBe(true);
+    expect(r?.settings.spinMap).toBe(true);
   });
 
   it("as fotos NÃO entram no link (nem a da cartela, nem a das paradas)", () => {

@@ -12,7 +12,14 @@ import {
 } from "./tiles";
 import type { EndCard } from "./stats";
 import { averagePace, elapsedAt, formatClock, formatPace, speedAt } from "./hud";
-import { cameraTarget, STOP_BOOST, type CinematicConfig } from "./camera";
+import {
+  cameraTarget,
+  CHASE_ALTURA,
+  STOP_BOOST,
+  zoomEfetivo,
+  type ChaseConfig,
+  type CinematicConfig,
+} from "./camera";
 import { routeEnd, timelineOr, type Timeline } from "./timeline";
 import { NEUTRAL_COLOR, type ColoredRoute } from "./coloring";
 import type { KmMark } from "./km-marks";
@@ -33,7 +40,6 @@ import {
   type Bounds,
   type IndexRange,
   type LatLng,
-  type Sample,
   type Track,
 } from "./geo";
 
@@ -44,6 +50,8 @@ export type CameraConfig = {
   followZoom: number;
   /** abertura sobrevoando a região e aproximação nas paradas */
   cinematic?: CinematicConfig;
+  /** câmera de terceira pessoa (personagem mais abaixo, opcionalmente girando o mapa) */
+  chase?: ChaseConfig;
 };
 
 export type SceneStyle = {
@@ -221,6 +229,100 @@ function viewFrom(
   return { z, s, ox: c.x - width / 2 / s, oy: c.y - height / 2 / s };
 }
 
+/**
+ * A vista de um quadro: a matriz que leva do pixel do mundo para a tela (escala
+ * e **giro**) e a caixa do mundo que a tela enxerga.
+ *
+ * Sem giro e com o centro na metade da altura, é exatamente o `viewFrom` de
+ * sempre (o `ox`/`oy` dele sai da caixa devolvida aqui). Com a **terceira
+ * pessoa**, ela muda duas coisas:
+ *
+ * - `altura`: onde o centro cai na altura da tela. Em 0,68 o personagem fica
+ *   abaixo do meio, com o caminho à frente ocupando a parte de cima — é o que
+ *   dá a sensação de câmera atrás do personagem, e não em cima dele;
+ * - `angulo`: gira o mapa de verdade (os blocos, a rota, tudo). É assim que o
+ *   caminho fica sempre "para cima" numa câmera de perseguição.
+ *
+ * Nada disso é chute de posição: a caixa devolvida é o **inverso** dos quatro
+ * cantos da tela, então ela contém exatamente o que a tela mostra — e é ela que
+ * pede os blocos de mapa e corta o traçado.
+ */
+export type Vista = {
+  z: number;
+  s: number;
+  /** matriz: tela = (a·x + c·y + e, b·x + d·y + f) em pixels do mundo no zoom `z` */
+  a: number;
+  b: number;
+  c: number;
+  d: number;
+  e: number;
+  f: number;
+  x0: number;
+  y0: number;
+  x1: number;
+  y1: number;
+};
+
+export function vistaDe(input: {
+  centro: LatLng;
+  zoom: number;
+  width: number;
+  height: number;
+  maxZoom?: number;
+  /** 0..1: onde o centro cai na altura da tela (0,5 = centro) */
+  altura?: number;
+  /** graus: gira o mapa (o rumo do personagem para cima) */
+  angulo?: number;
+}): Vista {
+  const { centro, width, height, maxZoom = 19 } = input;
+  const altura = input.altura ?? 0.5;
+  const rad = ((input.angulo ?? 0) * Math.PI) / 180;
+  const clamped = Math.max(1, Math.min(maxZoom, input.zoom));
+  const z = Math.max(0, Math.floor(clamped));
+  const s = Math.pow(2, clamped - z);
+  const P = project(centro.lat, centro.lng, z);
+  const cos = Math.cos(rad);
+  const sin = Math.sin(rad);
+  const a = s * cos;
+  const b = s * sin;
+  const c = -s * sin;
+  const d = s * cos;
+  const e = width / 2 - (a * P.x + c * P.y);
+  const f = height * altura - (b * P.x + d * P.y);
+  const det = a * d - b * c;
+  const inverso = (sx: number, sy: number) => ({
+    x: (d * (sx - e) - c * (sy - f)) / det,
+    y: (a * (sy - f) - b * (sx - e)) / det,
+  });
+  const cantos = [inverso(0, 0), inverso(width, 0), inverso(0, height), inverso(width, height)];
+  return {
+    z,
+    s,
+    a,
+    b,
+    c,
+    d,
+    e,
+    f,
+    x0: Math.min(...cantos.map((p) => p.x)),
+    y0: Math.min(...cantos.map((p) => p.y)),
+    x1: Math.max(...cantos.map((p) => p.x)),
+    y1: Math.max(...cantos.map((p) => p.y)),
+  };
+}
+
+/** A projeção de um ponto do mundo (no zoom da vista) para a tela. */
+export function projetorDaVista(v: Vista): (x: number, y: number) => { x: number; y: number } {
+  return (x, y) => ({ x: v.a * x + v.c * y + v.e, y: v.b * x + v.d * y + v.f });
+}
+
+/** Os blocos que uma vista precisa — a caixa dela, com a folga pedida. */
+export function tilesDaVista(v: Vista, margin = 0): [number, number, number][] {
+  const largura = (v.x1 - v.x0) * v.s;
+  const altura = (v.y1 - v.y0) * v.s;
+  return tilesInView({ z: v.z, s: v.s, ox: v.x0, oy: v.y0 }, largura, altura, margin);
+}
+
 export function targetView(input: {
   track: Track;
   t: number;
@@ -232,7 +334,7 @@ export function targetView(input: {
   const { track, t, camera, width, height, maxZoom = 19 } = input;
   if (camera.mode === "follow") {
     const { pos } = sampleTrack(track, t);
-    return viewFrom(pos, camera.followZoom, width, height, maxZoom);
+    return viewFrom(pos, zoomEfetivo(camera), width, height, maxZoom);
   }
   const b = boundsOf(track.pts);
   const zoom = fitZoom(b, width, height, 0.16);
@@ -286,49 +388,52 @@ export function tilesForAnimation(
   const bm = BASEMAPS[basemap];
   const maxZoom = bm.maxZoom;
   const map = new Map<string, TileRef>();
-  const push = (v: View) => {
-    for (const [z, x, y] of tilesInView(v, width, height, 1)) {
+  const chase = camera.mode === "follow" ? camera.chase ?? null : null;
+  /**
+   * Pede os blocos que uma vista precisa.
+   *
+   * O giro da terceira pessoa entra na conta: com o mapa rodado, a tela mostra
+   * um retângulo **deitado** no mundo, e a caixa que o contém (a mesma que o
+   * render usa) é maior que a tela. Sem isso, o vídeo sairia com buracos nas
+   * diagonais.
+   */
+  const push = (centro: LatLng, zoom: number, rumo: number, gira: boolean) => {
+    const v = vistaDe({
+      centro,
+      zoom,
+      width,
+      height,
+      maxZoom,
+      altura: chase ? CHASE_ALTURA : 0.5,
+      angulo: chase?.gira && gira ? -rumo : 0,
+    });
+    for (const [z, x, y] of tilesDaVista(v, 1)) {
       const k = `${z}/${x}/${y}`;
       if (!map.has(k)) map.set(k, { url: tileUrl(bm, z, x, y), z, x, y });
     }
   };
-  const paraView = (alvo: { lat: number; lng: number; zoom: number }): View =>
-    viewFrom(alvo, alvo.zoom, width, height, maxZoom);
+
+  const b = boundsOf(track.pts);
+  const centro = { lat: (b.north + b.south) / 2, lng: (b.east + b.west) / 2 };
 
   if (camera.mode === "fit") {
-    push(targetView({ track, t: 0, camera, width, height, maxZoom }));
+    push(centro, fitZoom(b, width, height, 0.16), 0, false);
     return Array.from(map.values());
   }
 
   const cine = cinematic ?? camera.cinematic ?? null;
-  if (cine?.opening) {
-    // o enquadramento da abertura é o do "Rota toda", no meio do traçado
-    push(
-      paraView(
-        cameraTarget({
-          track,
-          t: 0,
-          camera: { mode: "fit", followZoom: camera.followZoom },
-          width,
-          height,
-          maxZoom,
-          elapsed: 0,
-          duration: 1,
-        }),
-      ),
-    );
-  }
+  // o enquadramento da abertura é o do "Rota toda", no meio do traçado
+  if (cine?.opening) push(centro, fitZoom(b, width, height, 0.16), 0, false);
 
+  const zoom = Math.min(zoomEfetivo(camera), maxZoom);
   // amostra por distância: um tile de folga cobre o atraso da câmera suavizada
   const stepMeters = 140;
   const byDistance = Math.round(track.total / stepMeters);
   const steps = Math.max(2, Math.min(500, byDistance));
   for (let i = 0; i <= steps; i++) {
-    push(targetView({ track, t: i / steps, camera, width, height, maxZoom }));
+    const s = sampleTrack(track, i / steps);
+    push(s.pos, zoom, s.heading, true);
   }
-  // início e fim garantidos
-  push(targetView({ track, t: 0, camera, width, height, maxZoom }));
-  push(targetView({ track, t: 1, camera, width, height, maxZoom }));
 
   if (cine?.stops && cine.stopTs.length > 0) {
     // no máximo oito paradas: numa rota com cinquenta, o ganho de zoom em
@@ -336,10 +441,10 @@ export function tilesForAnimation(
     // reparasse nas do meio
     const validas = cine.stopTs.filter((ts) => Number.isFinite(ts));
     const escolhidas = validas.length <= 8 ? validas : spread(validas, 8);
-    const zoomParada = Math.min(camera.followZoom + STOP_BOOST, maxZoom);
+    const zoomParada = Math.min(zoomEfetivo(camera) + STOP_BOOST, maxZoom);
     for (const ts of escolhidas) {
-      const pos = sampleTrack(track, ts).pos;
-      push(viewFrom(pos, zoomParada, width, height, maxZoom));
+      const s = sampleTrack(track, ts);
+      push(s.pos, zoomParada, s.heading, true);
     }
   }
   return Array.from(map.values());
@@ -366,8 +471,19 @@ export const TILE_BUDGET = 1400;
 
 type Camera = { lat: number; lng: number; zoom: number };
 
+/**
+ * Constante de tempo da virada do personagem (segundos de vídeo).
+ *
+ * ~0,25 s é o tempo de uma virada de cabeça: some o tranco de um quadro para o
+ * outro sem que a resposta fique lenta.
+ */
+const RUMO_TAU_S = 0.25;
+
 export class SceneRenderer {
   private cam: Camera | null = null;
+  /** o rumo do quadro anterior (ver `suavizarRumo`) */
+  private rumoSuave: number | null = null;
+  private instanteAnterior: number | null = null;
   private store: TileStore;
   /** pontos visíveis já projetados, reaproveitados entre os quadros */
   private px = new Float64Array(0);
@@ -393,6 +509,34 @@ export class SceneRenderer {
 
   reset() {
     this.cam = null;
+    this.rumoSuave = null;
+    this.instanteAnterior = null;
+  }
+
+  /**
+   * O rumo do traçado, virado **suave**.
+   *
+   * O rumo entre dois pontos do arquivo muda de degrau em degrau; desenhado
+   * cru, o personagem (e o mapa, na terceira pessoa) girava de uma vez a cada
+   * degrau — é boa parte do "robótico" que o usuário viu. Aqui a virada é
+   * distribuída em ~0,25 s de vídeo, e o tempo vem do próprio `elapsed`: a
+   * prévia e o vídeo gravado continuam idênticos, e o resultado não depende da
+   * taxa de quadros (30 ou 60 quadros/s dão a mesma virada).
+   */
+  private suavizarRumo(heading: number, elapsed: number): number {
+    const anterior = this.instanteAnterior;
+    this.instanteAnterior = elapsed;
+    const dt = anterior === null ? 0 : Math.max(0, Math.min(0.5, elapsed - anterior));
+    if (this.rumoSuave === null || dt <= 0) {
+      this.rumoSuave = heading;
+      return heading;
+    }
+    const k = 1 - Math.exp(-dt / RUMO_TAU_S);
+    let d = heading - this.rumoSuave;
+    while (d > 180) d -= 360;
+    while (d <= -180) d += 360;
+    this.rumoSuave += d * k;
+    return this.rumoSuave;
   }
 
   /** pré-carrega as imagens usadas na animação (retorna promise que resolve ao final) */
@@ -460,6 +604,17 @@ export class SceneRenderer {
     const bm = BASEMAPS[style.basemap];
     const maxZoom = bm.maxZoom;
 
+    const sample = sampleTrack(track, t);
+    /*
+     * O rumo que vale no quadro: o do traçado, mas **suavizado**.
+     *
+     * O rumo entre dois pontos do arquivo muda de degrau em degrau, e a cada
+     * degrau o personagem (e o mapa, na terceira pessoa) virava de uma vez — o
+     * "robótico" que o usuário viu tem muito disso. Com o filtro, a virada
+     * acontece em ~0,25 s: o mesmo caminho, sem o tranco.
+     */
+    const rumo = this.suavizarRumo(sample.heading, input.elapsed);
+
     // --- câmera (alvo puro + suavização) ---
     const tl = timelineOr(input.timeline, input.duration);
     const target = cameraTarget({
@@ -484,11 +639,31 @@ export class SceneRenderer {
     this.cam.lng += (target.lng - this.cam.lng) * k;
     this.cam.zoom += (target.zoom - this.cam.zoom) * (target.opening < 1 ? 1 : 0.12);
 
-    const view = viewFrom(this.cam, this.cam.zoom, width, height, maxZoom);
-    const { z, s, ox, oy } = view;
+    /*
+     * A vista do quadro — com o enquadramento e o giro da **terceira pessoa**.
+     *
+     * `altura` desce o personagem na tela (a câmera fica atrás e acima dele) e
+     * `angulo` gira o mapa de verdade (o caminho sempre "para cima"). Os dois
+     * entram junto com a abertura: o voo panorâmico continua centrado e de
+     * norte para cima, e o giro "pousa" com a câmera.
+     */
+    const chase = camera.mode === "follow" ? camera.chase ?? null : null;
+    /** o giro que o mapa recebe neste quadro (0 = norte para cima) */
+    const anguloMapa = chase?.gira ? -rumo * target.opening : 0;
+    const vista = vistaDe({
+      centro: this.cam,
+      zoom: this.cam.zoom,
+      width,
+      height,
+      maxZoom,
+      altura: 0.5 + (CHASE_ALTURA - 0.5) * (chase ? target.opening : 0),
+      angulo: anguloMapa,
+    });
+    const { z, s, x0, y0, x1, y1 } = vista;
+    const projeta = projetorDaVista(vista);
     const toXY = (p: LatLng) => {
       const w = project(p.lat, p.lng, z);
-      return { x: (w.x - ox) * s, y: (w.y - oy) * s };
+      return projeta(w.x, w.y);
     };
 
     /** estilos escuros precisam de contraste claro nas linhas */
@@ -504,15 +679,17 @@ export class SceneRenderer {
      * folga para o traço grosso e o brilho não cortarem na borda.
      */
     const margemPx = 20 * sf;
-    const cantoA = unproject(ox, oy, z);
-    const cantoB = unproject(ox + width / s, oy + height / s, z);
+    const larguraJanela = (x1 - x0) * s;
+    const alturaJanela = (y1 - y0) * s;
+    const cantoA = unproject(x0, y0, z);
+    const cantoB = unproject(x1, y1, z);
     const dLat = cantoA.lat - cantoB.lat;
     const dLng = cantoB.lng - cantoA.lng;
     const janela: Bounds = {
-      north: cantoA.lat + (margemPx * dLat) / height,
-      south: cantoB.lat - (margemPx * dLat) / height,
-      west: cantoA.lng - (margemPx * dLng) / width,
-      east: cantoB.lng + (margemPx * dLng) / width,
+      north: cantoA.lat + (margemPx * dLat) / alturaJanela,
+      south: cantoB.lat - (margemPx * dLat) / alturaJanela,
+      west: cantoA.lng - (margemPx * dLng) / larguraJanela,
+      east: cantoB.lng + (margemPx * dLng) / larguraJanela,
     };
 
 
@@ -520,10 +697,10 @@ export class SceneRenderer {
     ctx.save();
     ctx.fillStyle = bm.bg;
     ctx.fillRect(0, 0, width, height);
-    ctx.setTransform(s, 0, 0, s, -ox * s, -oy * s);
+    ctx.setTransform(vista.a, vista.b, vista.c, vista.d, vista.e, vista.f);
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = "high";
-    for (const [tz, tx, ty] of tilesInView(view, width, height)) {
+    for (const [tz, tx, ty] of tilesDaVista(vista)) {
       this.store.request(tz, tx, ty);
       const img = this.store.get(tz, tx, ty);
       if (img) {
@@ -531,8 +708,6 @@ export class SceneRenderer {
       }
     }
     ctx.restore();
-
-    const sample = sampleTrack(track, t);
 
   /*
    * A cartela final é **medida** antes de qualquer desenho: o pino da chegada
@@ -646,7 +821,7 @@ export class SceneRenderer {
     }
 
     // --- personagem ---
-    drawCharacter(ctx, sample, toXY, input, sf);
+    drawCharacter(ctx, toXY(sample.pos), rumo + anguloMapa, input, sf, sample.index);
 
     /*
      * --- pontos de partida e chegada ---
@@ -674,6 +849,7 @@ export class SceneRenderer {
         fotoDoLocal(input.endpoints.a),
         photoWindowAlpha(input.elapsed - tl.voo + PHOTO_FADE_IN_S),
         cartao ? retanguloDaCartela(cartao) : null,
+        crescimentoDoPino(input, "a"),
       );
       drawPin(
         ctx,
@@ -685,6 +861,7 @@ export class SceneRenderer {
         fotoDoLocal(input.endpoints.b),
         photoWindowAlpha(routeEnd(tl) - input.elapsed + PHOTO_FADE_IN_S),
         cartao ? retanguloDaCartela(cartao) : null,
+        crescimentoDoPino(input, "b"),
       );
     }
 
@@ -798,24 +975,25 @@ export function andar(
   const tl = timelineOr(input.timeline, input.duration);
   const seg = Math.max(0, Math.min(tl.percurso, input.elapsed - tl.voo));
   /*
-   * Sai andando e chega parando: a passada entra e sai suave nas pontas. Sem
-   * isso o personagem já aparecia com o corpo no meio do passo durante o voo de
-   * abertura (parado e torto), e a cartela final pegava o passo congelado no ar.
+   * Sai andando e chega parando: o balanço entra e sai suave nas pontas (sem
+   * isso o personagem já aparecia em movimento durante o voo de abertura).
    */
-  const entra = Math.min(1, seg / 0.45);
-  const sai = Math.min(1, (tl.percurso - seg) / 0.45);
+  const entra = Math.min(1, seg / 0.5);
+  const sai = Math.min(1, (tl.percurso - seg) / 0.5);
   const ganho = Math.max(0, Math.min(entra, sai));
   if (ganho === 0) return { sobe: 0, lado: 0, estica: 0 };
   const fase = hz * seg; // passos dados desde a largada
-  // 0 na pisada (pé no chão), 1 no meio do passo (corpo no alto)
-  const meio = 0.5 - 0.5 * Math.cos(fase * Math.PI * 2);
-  if (gait === "flutua")
-    return { sobe: -0.09 * meio * ganho, lado: 0, estica: 0.05 * (meio - 0.5) * ganho };
-  return {
-    sobe: -0.2 * meio * ganho,
-    lado: 0.13 * Math.sin(fase * Math.PI * 2) * ganho,
-    estica: 0.13 * (meio - 0.5) * ganho,
-  };
+  const onda = Math.sin(fase * Math.PI * 2);
+  if (gait === "flutua") return { sobe: -0.05 * ganho, lado: 0, estica: 0.015 * onda * ganho };
+  /*
+   * **Sem pulo.** O corpo não sobe e desce — o usuário pediu ("o personagem não
+   * precisa ficar pulando"), e ele tinha razão: um selo de 62 px subindo 20 px
+   * a cada passo parece um ícone quicando, não alguém andando. O que fica é um
+   * balanço de peso **de leve** (5% do selo, menos de 3 px) e uma respiração de
+   * 2% — o suficiente para o personagem não parecer congelado. O movimento de
+   * verdade vem do rumo suavizado e da inclinação na curva.
+   */
+  return { sobe: 0, lado: 0.05 * onda * ganho, estica: 0.02 * onda * ganho };
 }
 
 /** O rumo (graus) de `a` para `b` passando por `b` até `c`, em (-180, 180]. */
@@ -847,22 +1025,26 @@ export function inclinacaoDaCurva(track: Track, i: number): number {
   let b = Math.max(0, Math.min(i, pts.length - 1));
   while (b < pts.length - 1 && haversine(pts[i], pts[b]) < janelaM) b++;
   if (a === i || b === i) return 0;
-  return Math.max(-10, Math.min(10, giroEntre(pts[a], pts[i], pts[b]) * 0.25));
+  return Math.max(-8, Math.min(8, giroEntre(pts[a], pts[i], pts[b]) * 0.22));
 }
 
 function drawCharacter(
   ctx: CanvasRenderingContext2D,
-  sample: Sample,
-  toXY: (p: LatLng) => { x: number; y: number },
+  at: { x: number; y: number },
+  /**
+   * O rumo **na tela** (o do traçado já virando suave, mais o giro do mapa na
+   * terceira pessoa): é ele que aponta a seta e gira o emoji.
+   */
+  rumo: number,
   input: FrameState,
   sf: number,
+  indice: number,
 ) {
   const { character, style, rotate, elapsed } = input;
-  const at = toXY(sample.pos);
   const badge = Math.round(Math.max(38, Math.min(86, 62 * sf)) * (character.size ?? 1));
   const respira = 1 + 0.05 * Math.sin(elapsed * 4);
   const { sobe, lado, estica } = andar(input, character);
-  const inclina = inclinacaoDaCurva(input.track, sample.index);
+  const inclina = inclinacaoDaCurva(input.track, indice);
 
   ctx.save();
   ctx.translate(at.x + lado * badge, at.y + sobe * badge);
@@ -890,7 +1072,7 @@ function drawCharacter(
   ctx.stroke();
 
   // seta de direção
-  const arrowAngle = ((sample.heading - 90) * Math.PI) / 180;
+  const arrowAngle = ((rumo - 90) * Math.PI) / 180;
   ctx.save();
   ctx.rotate(arrowAngle);
   ctx.globalAlpha = 0.9;
@@ -924,7 +1106,7 @@ function drawCharacter(
    * ficava pequena dentro de um aro grande — o conjunto parecia ícone de painel,
    * não personagem.
    */
-  ctx.rotate(rotate ? ((sample.heading + (character.baseAngle ?? 0)) * Math.PI) / 180 : 0);
+  ctx.rotate(rotate ? ((rumo + (character.baseAngle ?? 0)) * Math.PI) / 180 : 0);
   ctx.font = `${Math.round(badge * 0.78)}px ${EMOJI_FONT}`;
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
@@ -1032,6 +1214,26 @@ function drawPhotoInsidePin(
   ctx.restore();
 }
 
+/** Segundos de vídeo que o pino da ponta leva para crescer ("pipoco"). */
+export const PINO_CRESCE_S = 0.7;
+
+/**
+ * O quanto o pino de uma ponta já cresceu.
+ *
+ * A **partida** cresce a partir do pouso do voo (o pino nasce enquanto o
+ * personagem arranca) e a **chegada** cresce **até** o instante em que o
+ * personagem chega — o mesmo "aumentar" que o usuário viu na partida, do outro
+ * lado do percurso. Antes de crescer, o pino fica em 0,7: exatamente o tamanho
+ * do pino "fantasma" das paradas, para as três coisas falarem a mesma língua.
+ */
+export function crescimentoDoPino(input: FrameState, ponta: "a" | "b"): number {
+  const tl = timelineOr(input.timeline, input.duration);
+  const desde = ponta === "a" ? input.elapsed - tl.voo : routeEnd(tl) - input.elapsed;
+  const cru = ponta === "a" ? desde / PINO_CRESCE_S : 1 - desde / PINO_CRESCE_S;
+  const p = Math.max(0, Math.min(1, cru));
+  return 0.7 + 0.3 * easeOutBack(p);
+}
+
 /** Quanto um pino precisa subir para não ficar debaixo da cartela final. */
 export function liftToClear(
   bottomY: number,
@@ -1055,6 +1257,8 @@ function drawPin(
   fotoAlpha = 0,
   /** retângulo que o pino não pode invadir (a cartela final, no fim do vídeo) */
   esquiva?: { x: number; y: number; w: number; h: number; forca: number } | null,
+  /** 1 = tamanho cheio; menos = o pino ainda está nascendo ("pipoco") */
+  crescimento = 1,
 ) {
   const marked = hasMark(mark ?? null);
   // mesmo tamanho do pino das paradas — a ideia é que os dois sejam o mesmo pino
@@ -1078,6 +1282,13 @@ function drawPin(
     ? liftToClear(at.y + r, esquiva!.y, esquiva!.forca, 10 * sf)
     : 0;
   if (subida > 0) ctx.translate(0, -subida);
+  /*
+   * O "pipoco" da ponta: o pino (com a foto, o nome e tudo) cresce até o
+   * tamanho cheio. É o mesmo efeito das paradas — o pino delas fica em 0,7 até
+   * o personagem passar e aí cresce —, e é o que o usuário pediu para a
+   * chegada ("igual o A quando inicia").
+   */
+  if (crescimento !== 1) ctx.scale(crescimento, crescimento);
 
   drawPinBadge(ctx, r, color, sf);
 
@@ -1193,8 +1404,13 @@ function drawEventToast(
    * informação. Se a foto foi escolhida mas **não** carregou, o toast continua
    * aparecendo — melhor repetir do que o lugar passar em branco.
    */
-  const anunciadoPelaFoto = (foto: string | undefined) =>
-    Boolean(foto) && Boolean(input.photos?.get(foto));
+  const anunciadoPelaFoto = (foto: string | undefined) => {
+    if (!foto) return false;
+    if (input.photos?.get(foto)) return true;
+    // escolhida e ainda carregando também cala o aviso: ele só volta quando o
+    // carregamento **falhou** de verdade (`has` diz que já tentou)
+    return !input.photos?.has?.(foto);
+  };
 
   const events: ToastEvent[] = [];
   // partida
@@ -1222,8 +1438,16 @@ function drawEventToast(
       });
     }
   }
-  // chegada (dispara um pouco antes do fim para dar tempo de ler)
-  const endAt = Math.max(0, 1 - (holdMeters * 0.4) / total);
+  /*
+   * Chegada: o aviso dispara **holdMeters** antes do fim e termina exatamente
+   * quando o percurso termina.
+   *
+   * Antes ele disparava a 40% dessa distância e sobrava vida para depois do
+   * fim — mas aí o `t` fica parado em 1 (a cartela) e um aviso medido em metros
+   * nunca chegava ao fim da própria barra: ficava congelado na tela. Foi o
+   * "continua o toast" que o usuário viu. Agora ele sai junto com o percurso.
+   */
+  const endAt = Math.max(0, 1 - holdMeters / total);
   if (!anunciadoPelaFoto(endpoints.b?.photo)) {
     events.push({
       at: endAt,

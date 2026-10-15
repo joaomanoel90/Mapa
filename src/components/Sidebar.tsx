@@ -464,6 +464,35 @@ function Sidebar(props: Props) {
               value={s.cameraMode}
               onChange={(v) => update("cameraMode", v)}
             />
+            <div className="mt-1.5 space-y-1">
+              <Toggle
+                icon="🧍"
+                label="Terceira pessoa"
+                checked={s.thirdPerson}
+                onChange={(v) => update("thirdPerson", v)}
+              />
+              {s.thirdPerson &&
+                (s.cameraMode === "follow" ? (
+                  <>
+                    <Toggle
+                      icon="🧭"
+                      label="Girar o mapa com o rumo"
+                      checked={s.spinMap}
+                      onChange={(v) => update("spinMap", v)}
+                    />
+                    <p className="text-[10.5px] leading-snug text-zinc-500">
+                      A câmera vem para trás do personagem: ele fica abaixo do centro e o
+                      caminho à frente ocupa a parte de cima do quadro. Com o giro, o
+                      caminho fica sempre “para cima” e o mapa roda no rumo.
+                    </p>
+                  </>
+                ) : (
+                  <p className="text-[10.5px] leading-snug text-amber-300/80">
+                    Só vale na câmera “Seguir”: no “Rota toda” a rota já está inteira na
+                    tela.
+                  </p>
+                ))}
+            </div>
           </div>
           {s.cameraMode === "follow" && (
             <div>

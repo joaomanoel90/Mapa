@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { buildTrack, fitZoom, boundsOf } from "./geo";
 import {
+  CHASE_ZOOM,
   OPEN_CAP_S,
   STOP_BOOST,
   cameraTarget,
@@ -9,6 +10,7 @@ import {
   stopBoost,
   stopFocus,
   stopSpan,
+  zoomEfetivo,
   type CinematicConfig,
 } from "./camera";
 
@@ -34,7 +36,12 @@ const cine = (patch: Partial<CinematicConfig> = {}): CinematicConfig => ({
 const alvo = (
   t: number,
   elapsed: number,
-  patch: { cinematic?: Partial<CinematicConfig>; followZoom?: number; mode?: "fit" | "follow" } = {},
+  patch: {
+    cinematic?: Partial<CinematicConfig>;
+    followZoom?: number;
+    mode?: "fit" | "follow";
+    chase?: { gira: boolean };
+  } = {},
   extra: { routeSeconds?: number; stopPos?: (ts: number) => { lat: number; lng: number } | null } = {},
 ) =>
   cameraTarget({
@@ -44,6 +51,7 @@ const alvo = (
       mode: patch.mode ?? "follow",
       followZoom: patch.followZoom ?? 16,
       cinematic: cine(patch.cinematic),
+      chase: patch.chase,
     },
     width: W,
     height: H,
@@ -229,5 +237,55 @@ describe("foco na parada (9:16)", () => {
     expect(entre.forca).toBeCloseTo(1, 6);
     expect(stopFocus(0.9, [0.2, PARADA], 14)).toEqual({ forca: 0, ts: null });
     expect(stopBoost(PARADA, [PARADA], 14)).toBeCloseTo(1, 6);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* Chegada com ênfase e terceira pessoa                                */
+/* ------------------------------------------------------------------ */
+
+describe("a chegada tem o seu momento de câmera", () => {
+  it("com `chegada`, o fim do percurso aproxima como uma parada", () => {
+    const sem = alvo(1, 20, { cinematic: { stops: true, stopTs: [0.5] } });
+    const com = alvo(1, 20, { cinematic: { stops: true, stopTs: [0.5], chegada: true } });
+    expect(sem.boost).toBe(0);
+    expect(com.boost).toBeCloseTo(1, 2);
+    expect(com.zoom).toBeCloseTo(sem.zoom + STOP_BOOST, 2);
+  });
+
+  it("e o ênfase da chegada só aparece perto do fim", () => {
+    const meio = alvo(0.5, 20, { cinematic: { stops: true, stopTs: [], chegada: true } });
+    expect(meio.boost).toBe(0);
+    const chegando = alvo(
+      0.97,
+      20,
+      { cinematic: { stops: true, stopTs: [], chegada: true } },
+      { routeSeconds: 20 },
+    );
+    expect(chegando.boost).toBeGreaterThan(0.5);
+  });
+
+  it("desligado, nada muda", () => {
+    const a = alvo(1, 20, { cinematic: { stops: true, stopTs: [0.5], chegada: false } });
+    const b = alvo(1, 20, { cinematic: { stops: true, stopTs: [0.5] } });
+    expect(a.zoom).toBe(b.zoom);
+  });
+});
+
+describe("terceira pessoa", () => {
+  it("a câmera chega mais perto (é o que dá o “atrás”)", () => {
+    expect(zoomEfetivo({ followZoom: 16 })).toBe(16);
+    expect(zoomEfetivo({ followZoom: 16, chase: { gira: false } })).toBeCloseTo(16 + CHASE_ZOOM, 6);
+  });
+
+  it("e o alvo segue o personagem, como no acompanhamento de sempre", () => {
+    const normal = alvo(0.4, 6, { cinematic: { stops: true, stopTs: [] } });
+    const terceira = alvo(0.4, 6, {
+      cinematic: { stops: true, stopTs: [] },
+      chase: { gira: true },
+    });
+    expect(terceira.lat).toBeCloseTo(normal.lat, 6);
+    expect(terceira.lng).toBeCloseTo(normal.lng, 6);
+    expect(terceira.zoom).toBeCloseTo(normal.zoom + CHASE_ZOOM, 6);
   });
 });

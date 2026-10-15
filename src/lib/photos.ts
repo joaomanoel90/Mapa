@@ -47,6 +47,14 @@ export type PhotoImage = HTMLImageElement | ImageBitmap;
  */
 export type PhotoLookup = {
   get(src: string | null | undefined): PhotoImage | null;
+  /**
+   * Já **tentou** carregar esta foto? (com ou sem sucesso)
+   *
+   * É o que distingue "ainda está chegando" de "não vai vir": com foto
+   * escolhida o aviso do lugar não aparece, mas se o carregamento falhou ele
+   * volta — e para saber disso não basta o `get`.
+   */
+  has?(src: string | null | undefined): boolean;
 };
 
 /* ------------------------------------------------------------------ */

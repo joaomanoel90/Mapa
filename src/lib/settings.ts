@@ -83,6 +83,13 @@ export type Settings = {
   /** abertura sobrevoando a região + aproximação nas paradas */
   cinematic: boolean;
   /**
+   * Câmera de **terceira pessoa**: mais perto, com o personagem abaixo do
+   * centro e o caminho à frente ocupando a parte de cima do quadro.
+   */
+  thirdPerson: boolean;
+  /** na terceira pessoa, gira o mapa no rumo (o caminho sempre "para cima") */
+  spinMap: boolean;
+  /**
    * Os números da cartela são **digitados**, não medidos.
    *
    * O arquivo de GPS é a sugestão (o painel mostra o valor do arquivo como
@@ -141,6 +148,8 @@ export const DEFAULT_SETTINGS: Settings = {
   colorBy: "solid",
   showKmMarks: false,
   cinematic: false,
+  thirdPerson: false,
+  spinMap: false,
   cardDistance: "",
   cardElevation: "",
   cardTime: "",
@@ -181,6 +190,8 @@ export function sanitizeSettings(raw: Partial<Settings>): Partial<Settings> {
   }
   if (typeof out.showKmMarks !== "boolean") delete out.showKmMarks;
   if (typeof out.cinematic !== "boolean") delete out.cinematic;
+  if (typeof out.thirdPerson !== "boolean") delete out.thirdPerson;
+  if (typeof out.spinMap !== "boolean") delete out.spinMap;
   for (const key of ["cardDistance", "cardElevation", "cardTime", "cardNote"] as const) {
     if (typeof out[key] !== "string") delete out[key];
   }

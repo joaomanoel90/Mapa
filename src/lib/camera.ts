@@ -29,7 +29,37 @@ export type CinematicConfig = {
   stops: boolean;
   /** posições (0..1) das paradas ao longo do traçado */
   stopTs: number[];
+  /**
+   * A **chegada** ganha a mesma aproximação das paradas.
+   *
+   * O fim do percurso é uma ponta do trajeto como a partida — e a partida já
+   * tem o seu momento de câmera (o pouso do voo). Sem isto, a chegada era a
+   * única parada "sem ênfase": o usuário viu e cobrou ("o ponto B não está com
+   * efeito de aumentar quando chega nele, igual o A quando inicia").
+   */
+  chegada?: boolean;
 };
+
+/**
+ * Câmera de terceira pessoa: o personagem desce na tela (a câmera fica atrás e
+ * acima dele, olhando para a frente) e, se `gira`, o mapa roda no rumo — o
+ * caminho fica sempre "para cima".
+ */
+export type ChaseConfig = {
+  /** gira o mapa no rumo do personagem (0 = norte para cima) */
+  gira: boolean;
+};
+
+/** Onde o personagem cai na tela na terceira pessoa (0 = topo, 1 = base). */
+export const CHASE_ALTURA = 0.68;
+
+/** Quantos níveis de zoom a mais na terceira pessoa (é o que dá o "atrás"). */
+export const CHASE_ZOOM = 1.5;
+
+/** O zoom de acompanhamento de verdade (a terceira pessoa chega mais perto). */
+export function zoomEfetivo(camera: { followZoom: number; chase?: ChaseConfig }): number {
+  return camera.followZoom + (camera.chase ? CHASE_ZOOM : 0);
+}
 
 export type CameraTarget = {
   lat: number;
@@ -135,7 +165,12 @@ export function stopFocus(
 export function cameraTarget(input: {
   track: Track;
   t: number;
-  camera: { mode: "fit" | "follow"; followZoom: number; cinematic?: CinematicConfig };
+  camera: {
+    mode: "fit" | "follow";
+    followZoom: number;
+    cinematic?: CinematicConfig;
+    chase?: ChaseConfig;
+  };
   width: number;
   height: number;
   maxZoom: number;
@@ -172,9 +207,19 @@ export function cameraTarget(input: {
    * centro é o que garante que ela, a foto e o nome apareçam inteiros.
    */
   const rotaSec = input.routeSeconds && input.routeSeconds > 0 ? input.routeSeconds : duration;
-  const foco = cine?.stops ? stopFocus(t, cine.stopTs, rotaSec) : { forca: 0, ts: null };
+  /*
+   * A chegada entra na mesma lista de focos (t = 1): o fim do percurso recebe a
+   * aproximação que as paradas recebem — e que a partida já tem, com o pouso do
+   * voo de abertura.
+   */
+  const focos = cine?.stops
+    ? cine.chegada
+      ? [...cine.stopTs, 1]
+      : cine.stopTs
+    : [];
+  const foco = focos.length > 0 ? stopFocus(t, focos, rotaSec) : { forca: 0, ts: null };
   const ponto = foco.ts !== null ? input.stopPos?.(foco.ts) ?? null : null;
-  const alvo = Math.min(camera.followZoom + foco.forca * STOP_BOOST, maxZoom);
+  const alvo = Math.min(zoomEfetivo(camera) + foco.forca * STOP_BOOST, maxZoom);
   const focoLat = ponto ? pos.lat + (ponto.lat - pos.lat) * foco.forca : pos.lat;
   const focoLng = ponto ? pos.lng + (ponto.lng - pos.lng) * foco.forca : pos.lng;
 

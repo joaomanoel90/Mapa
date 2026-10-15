@@ -128,6 +128,19 @@ describe("aproximação nas paradas", () => {
     expect(meio.zoom).toBeLessThan(16 + STOP_BOOST);
   });
 
+  it("a aproximação é forte o bastante para o ponto chegar perto", () => {
+    /*
+     * O pedido: "a visão cinematográfica mais perto do ponto com um zoom". O
+     * número tem de ser **absoluto** aqui — um teste que só compare com
+     * `STOP_BOOST` passa com qualquer valor, inclusive com uma aproximação que
+     * não se percebe (era 1,4: 1,4x mais perto, que o usuário não viu).
+     */
+    expect(STOP_BOOST).toBeGreaterThanOrEqual(2);
+    const emCima = alvo(0.5, 5, { cinematic: { stops: true, stopTs: [0.5] } });
+    // cada nível de zoom dobra a escala: 2 níveis = 4x maior na tela
+    expect(emCima.zoom - 16).toBeGreaterThanOrEqual(2);
+  });
+
   it("duas paradas vizinhas não somam zoom", () => {
     const duas = alvo(0.5, 5, { cinematic: { stops: true, stopTs: [0.5, 0.52] } });
     expect(duas.zoom).toBeCloseTo(16 + STOP_BOOST, 5);

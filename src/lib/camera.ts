@@ -107,8 +107,18 @@ export const OPEN_CAP_S = 2.6;
 /** Quanto do vídeo a abertura pode ocupar (o resto é a rota). */
 export const OPEN_SHARE = 0.25;
 
-/** Quantos níveis de zoom a mais em cima de uma parada. */
-export const STOP_BOOST = 1.4;
+/**
+ * Quantos níveis de zoom a mais em cima de uma parada.
+ *
+ * Era 1,4 — o pedido é "a visão cinematográfica mais perto do ponto com um
+ * zoom". Com 2,2 a parada chega a ser ~1,7x maior na tela do que era (o zoom
+ * dobra a cada nível), e o teto do mapa continua respeitado (`maxZoom`).
+ *
+ * O custo é de blocos de mapa (cada nível acima é mais um nível de blocos no
+ * aquecimento): o renderizador só reserva a vista extra de uma parada enquanto
+ * ela couber no teto, então o número pôde subir sem estourar o orçamento.
+ */
+export const STOP_BOOST = 2.2;
 
 /** Duração da abertura para um vídeo de `duration` segundos. */
 export function openingSeconds(duration: number): number {

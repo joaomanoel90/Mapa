@@ -366,6 +366,59 @@ export function sampleTrack(track: Track, t: number): Sample {
   return { pos, heading: head, index: idx - 1, distance: target };
 }
 
+/**
+ * O rumo do traçado **suavizado** numa janela de metros.
+ *
+ * `sampleTrack` devolve a direção do **segmento atual**, que muda de degrau em
+ * degrau a cada ponto do arquivo. Num traçado com quinas (todo GPX tem), isso é
+ * uma escada: o personagem e — na terceira pessoa — o mapa inteiro recebiam um
+ * salto de rumo por quina e o vídeo ficava com a imagem "pulando" a cada curva
+ * (medido: o teto de giro do renderizador era atingido em 21% dos quadros de uma
+ * rota em zigue-zague).
+ *
+ * Aqui o rumo é a **direção média** de um pedaço do caminho em volta do ponto,
+ * ponderada pelo comprimento de cada segmento dentro da janela. É uma média
+ * deslizante exata (não uma amostragem), então o resultado é contínuo: o rumo
+ * varia suavemente enquanto a janela atravessa uma quina, sem degrau nenhum.
+ *
+ * A janela é dada em metros e quem chama escolhe o tamanho — o renderizador usa
+ * uma janela medida em **segundos de vídeo** (a rota inteira cabe no vídeo, e é
+ * o tempo de tela que importa para o giro parecer suave).
+ */
+export function rumoSuave(track: Track, t: number, janelaM: number): number {
+  const pts = track.pts;
+  if (pts.length === 0) return 0;
+  if (pts.length === 1) return 0;
+  const total = track.total;
+  if (!(total > 0)) return bearing(pts[0], pts[1]);
+  const janela = Math.max(1e-6, Number.isFinite(janelaM) ? janelaM : 0);
+  const alvo = Math.max(0, Math.min(1, isFinite(t) ? t : 0)) * total;
+  const a = Math.max(0, alvo - janela / 2);
+  const b = Math.min(total, alvo + janela / 2);
+
+  // média das direções (como vetores, para a volta circular sair certa)
+  let sx = 0;
+  let sy = 0;
+  const cum = track.cum;
+  // primeiro segmento que contém `a`
+  let i = 0;
+  while (i < cum.length - 2 && cum[i + 1] <= a) i++;
+  let pos = Math.max(a, cum[i]);
+  while (pos < b && i < pts.length - 1) {
+    const fim = Math.min(cum[i + 1], b);
+    const peso = fim - pos;
+    if (peso > 0) {
+      const ang = (bearing(pts[i], pts[i + 1]) * Math.PI) / 180;
+      sx += Math.cos(ang) * peso;
+      sy += Math.sin(ang) * peso;
+    }
+    pos = cum[i + 1];
+    i++;
+  }
+  if (sx === 0 && sy === 0) return bearing(pts[0], pts[1]);
+  return (Math.atan2(sy, sx) * 180) / Math.PI;
+}
+
 /* ---------- Web Mercator ---------- */
 
 export function project(lat: number, lng: number, zoom: number) {

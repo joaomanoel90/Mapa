@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildTrack, cumulative, sampleTrack } from "./geo";
+import { buildTrack, cumulative, rumoSuave, sampleTrack } from "./geo";
 import { formatPace } from "./hud";
 import { buildTimeline, routeEnd, routeProgress, type Timeline } from "./timeline";
 import { colorizeRoute, NEUTRAL_COLOR } from "./coloring";
@@ -17,7 +17,9 @@ import {
   crescimentoDoPino,
   pipocoDaPonta,
   inclinacaoDaCurva,
+  janelaDoRumo,
   liftToClear,
+  lugarDoBloco,
   overlapsCard,
   projetorDaVista,
   summaryBox,
@@ -1031,9 +1033,224 @@ describe("foto da parada no vídeo", () => {
     const base = { ...estado(0.51, 14, null), stops: [parada({ photo: SRC })] };
     desenhar(comFoto.ctx, { ...base, photos: cacheComFoto });
     desenhar(semFoto.ctx, { ...base, stops: [parada()], photos: cacheVazio });
-    const y = (f: typeof comFoto) => f.textosY[f.textos.indexOf("Ponte")];
+    // y **na tela** (não no espaço do bloco): é a posição que o usuário vê
+    const y = (f: typeof comFoto) => f.textosYAbs[f.textos.indexOf("Ponte")];
     // y menor = mais para cima (o canvas cresce para baixo)
     expect(y(comFoto)).toBeLessThan(y(semFoto));
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* A parada perto do fim do vídeo                                      */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Um quadro do fim do vídeo: `t` é o progresso do percurso e `elapsed` é o
+ * relógio **do vídeo**, como na exportação (a cartela reserva a sua fatia).
+ */
+const quadroDoFim = (
+  t: number,
+  stops: Poi[],
+  extra: Partial<FrameState> = {},
+): { st: FrameState; tl: Timeline } => {
+  const tl = buildTimeline(14, { voo: false, cartela: true });
+  return {
+    st: {
+      ...estado(Math.min(1, t), 14, cartela, null, null, tl),
+      elapsed: Math.min(1, t) * tl.percurso,
+      stops,
+      ...extra,
+    },
+    tl,
+  };
+};
+
+/** A caixa de um bloco na tela não encosta na caixa da cartela. */
+const encostaNaCartela = (
+  e: { x0: number; y0: number; x1: number; y1: number },
+  c: { boxX: number; boxY: number; boxW: number; boxH: number },
+) =>
+  e.x0 < c.boxX + c.boxW && e.x1 > c.boxX && e.y0 < c.boxY + c.boxH && e.y1 > c.boxY;
+
+describe("a parada perto do fim do vídeo", () => {
+  const pertoDoFim = parada({ t: 0.97 });
+  /**
+   * A última perna **sobe** (vai para o norte): no quadro, o selo da chegada
+   * fica em cima da parada do fim — que é o caso do usuário (a última parada é
+   * praticamente a chegada), e o que faz o pino tapar o nome da parada.
+   */
+  const ROTA_FINAL_QUE_SOBE = buildTrack([
+    { lat: -23.5, lng: -48.4, ele: 700, t: 0 },
+    { lat: -23.52, lng: -48.42, ele: 780, t: 900_000 },
+    { lat: -23.5195, lng: -48.42, ele: 780, t: 930_000 },
+  ]);
+  // a parada tem lugar próprio, ~30 m ao sul da chegada: como o ponto está fora
+  // da linha (mais de 12 m), o pino não é empurrado para o lado e cai logo
+  // abaixo do selo da chegada — é o que o usuário vê na última parada
+  const coladaNaChegada = parada({
+    t: 0.98,
+    pos: { lat: -23.5195 - 0.00027, lng: -48.42 },
+  });
+  /** os selos de pino no quadro (os A/B têm 17 px de raio, como o da parada) */
+  const selosNaTela = (f: ReturnType<typeof fakeCtx>) =>
+    f.arcosPos.filter((a) => a[2] > 15 && a[2] < 20);
+  const encostaNoSelo = (e: { x0: number; y0: number; x1: number; y1: number }, s: number[]) =>
+    e.x0 < s[0] + s[2] && e.x1 > s[0] - s[2] && e.y0 < s[1] + s[2] && e.y1 > s[1] - s[2];
+
+  it("a etiqueta entra logo depois da passagem — em segundos, não em metros", () => {
+    /*
+     * O defeito que o usuário viu ("no ponto de parada perto do final, ele
+     * aparece como toast, como ele ficou em baixo da tela"): a etiqueta era
+     * medida em **metros**, como o pino, e a desaceleração da parada faz os
+     * últimos metros durarem muito tempo de vídeo. Numa parada perto do fim ela
+     * nascia depois de o vídeo acabar — e o que sobrava era só o aviso do topo.
+     *
+     * Aqui: 0,4 s de vídeo depois da passagem, a etiqueta está na tela.
+     */
+    const tl = buildTimeline(14, { voo: false, cartela: true });
+    const noMeio = parada({ t: 0.9 });
+    const antes = fakeCtx();
+    desenhar(antes.ctx, quadroDoFim(0.9 - 0.4 / tl.percurso, [noMeio]).st);
+    expect(etiquetasNaTela(antes, ["Ponte"]).length).toBe(0); // ainda não chegou
+    const depois = fakeCtx();
+    desenhar(depois.ctx, quadroDoFim(0.9 + 0.4 / tl.percurso, [noMeio]).st);
+    expect(etiquetasNaTela(depois, ["Ponte"]).length).toBeGreaterThan(0);
+  });
+
+  it("num trajeto curto, a parada colada no fim também se anuncia no mapa", () => {
+    /*
+     * A regra antiga media a etiqueta em **metros** (a mesma janela do pino).
+     * Num trajeto curto essa janela é uma fatia enorme do caminho: numa volta de
+     * 60 m, os 28 m da janela do pino são quase metade dele — e a parada a 97%
+     * nunca acendia a etiqueta antes de o vídeo acabar. Só sobrava o aviso do
+     * topo, que é o que o usuário via ("ele aparece como toast").
+     */
+    const curto = buildTrack([
+      { lat: 0, lng: 0, ele: 0, t: 0 },
+      { lat: 0, lng: 0.00027, ele: 0, t: 30_000 },
+      { lat: 0, lng: 0.00054, ele: 0, t: 60_000 },
+    ]);
+    expect(curto.total).toBeLessThan(80);
+    const f = fakeCtx();
+    desenhar(f.ctx, quadroDoFim(1, [parada({ t: 0.97 })]).st, curto);
+    expect(etiquetasNaTela(f, ["Ponte"]).length).toBeGreaterThan(0);
+  });
+
+  it("a parada colada na chegada não fica atrás do pino da chegada", () => {
+    /*
+     * Sem o desvio, o bloco da parada era desenhado por baixo dos pinos (que
+     * entram depois no quadro): a chegada fica a poucos metros da última parada,
+     * e o selo dela tapava metade do nome.
+     */
+    // a câmera que acompanha põe o fim do trajeto no centro da tela: a parada
+    // do fim (98%) cai a poucos pixels do selo da chegada
+    const st = quadroDoFim(1, [coladaNaChegada], {
+      camera: { mode: "follow", followZoom: 16 },
+      style: { ...style, showSummary: false },
+    }).st;
+    const f = fakeCtx();
+    desenhar(f.ctx, st, ROTA_FINAL_QUE_SOBE);
+    const etiquetas = etiquetasNaTela(f, ["Ponte"]);
+    expect(etiquetas.length).toBeGreaterThan(0);
+    const selos = selosNaTela(f);
+    expect(selos.length).toBeGreaterThan(1); // a partida e a chegada no quadro
+    for (const e of etiquetas) {
+      for (const sel of selos) expect(encostaNoSelo(e, sel)).toBe(false);
+    }
+  });
+
+  it("a parada que cai em cima da cartela não fica atrás dela", () => {
+    // a câmera acompanha e o fim do trajeto cai no meio da tela, que é onde a
+    // cartela nasce. Sem os pinos no quadro, a cartela sai exatamente onde o
+    // `summaryBox` diz — dá para comparar as duas caixas.
+    const st = quadroDoFim(1, [coladaNaChegada], {
+      camera: { mode: "follow", followZoom: 16 },
+      style: { ...style, showEndpoints: false },
+    }).st;
+    const f = fakeCtx();
+    desenhar(f.ctx, st, ROTA_FINAL_QUE_SOBE);
+    const etiquetas = etiquetasNaTela(f, ["Ponte"]);
+    expect(etiquetas.length).toBeGreaterThan(0);
+    const caixa = summaryBox(fakeCtx().ctx, 1280, 720, st, 1, []);
+    expect(caixa).not.toBeNull();
+    for (const e of etiquetas) expect(encostaNaCartela(e, caixa!)).toBe(false);
+  });
+
+  it("na última cena a etiqueta está na tela inteira — e fora da cartela", () => {
+    // sem partida/chegada no quadro, a cartela fica exatamente onde o
+    // `summaryBox` diz: assim dá para comparar a caixa dela com a da etiqueta
+    const semPontas = { style: { ...style, showEndpoints: false } };
+    const { st } = quadroDoFim(1, [pertoDoFim], semPontas);
+    const f = fakeCtx();
+    desenhar(f.ctx, st);
+
+    const etiquetas = etiquetasNaTela(f, ["Ponte"]);
+    expect(etiquetas.length).toBeGreaterThan(0);
+    const caixa = summaryBox(fakeCtx().ctx, 1280, 720, st, 1, []);
+    expect(caixa).not.toBeNull();
+    const selos = selosNaTela(f);
+    expect(selos.length).toBeGreaterThan(0); // a chegada está na tela
+    for (const e of etiquetas) {
+      for (const sel of selos) expect(encostaNoSelo(e, sel)).toBe(false);
+      // dentro da moldura, sem encostar na cartela (que é desenhada por cima)
+      expect(e.x0).toBeGreaterThanOrEqual(0);
+      expect(e.y0).toBeGreaterThanOrEqual(0);
+      expect(e.x1).toBeLessThanOrEqual(1280);
+      expect(e.y1).toBeLessThanOrEqual(720);
+      expect(encostaNaCartela(e, caixa!)).toBe(false);
+    }
+  });
+
+  it("em retrato e na terceira pessoa, a etiqueta também fica no quadro", () => {
+    // o caso mais apertado: a parada cai na parte de baixo do quadro, que é
+    // onde a câmera em terceira pessoa põe o personagem
+    const { st } = quadroDoFim(1, [pertoDoFim], {
+      camera: { mode: "follow", followZoom: 16, chase: { gira: false, tilt: true } },
+    });
+    const f = fakeCtx();
+    desenhar(f.ctx, st, track, 1080, 1920);
+    const etiquetas = etiquetasNaTela(f, ["Ponte"]);
+    expect(etiquetas.length).toBeGreaterThan(0);
+    for (const e of etiquetas) {
+      expect(e.x0).toBeGreaterThanOrEqual(0);
+      expect(e.y0).toBeGreaterThanOrEqual(0);
+      expect(e.x1).toBeLessThanOrEqual(1080);
+      expect(e.y1).toBeLessThanOrEqual(1920);
+    }
+  });
+});
+
+describe("o lugar do bloco de uma parada", () => {
+  const quadro = { width: 1080, height: 1920 };
+  const largura = 420;
+  const altura = 220;
+
+  it("fica acima do pino; sem chão acima, desce", () => {
+    expect(lugarDoBloco({ x: 540, y: 120 }, largura, altura, 26, 8, quadro, 10).acima).toBe(false);
+    expect(lugarDoBloco({ x: 540, y: 960 }, largura, altura, 26, 8, quadro, 10).acima).toBe(true);
+  });
+
+  it("nunca sai do quadro — nem em cima, nem embaixo, nem de lado", () => {
+    for (const y of [10, 60, 960, 1900, 1960]) {
+      const l = lugarDoBloco({ x: 20, y }, largura, altura, 26, 8, quadro, 10);
+      expect(l.y).toBeGreaterThanOrEqual(10);
+      expect(l.y + altura).toBeLessThanOrEqual(1920 - 10);
+      expect(l.x - largura / 2).toBeGreaterThanOrEqual(10);
+      expect(l.x + largura / 2).toBeLessThanOrEqual(1080 - 10);
+    }
+  });
+
+  it("sai de baixo da cartela final (ela é desenhada por cima)", () => {
+    const carta = { x: 240, y: 700, w: 600, h: 520 };
+    const l = lugarDoBloco({ x: 540, y: 1180 }, largura, altura, 26, 8, quadro, 10, [carta]);
+    const encosta =
+      l.x - largura / 2 < carta.x + carta.w &&
+      l.x + largura / 2 > carta.x &&
+      l.y < carta.y + carta.h &&
+      l.y + altura > carta.y;
+    expect(encosta).toBe(false);
+    expect(l.y).toBeGreaterThanOrEqual(10);
+    expect(l.y + altura).toBeLessThanOrEqual(1910);
   });
 });
 
@@ -1744,13 +1961,18 @@ describe("o andar do personagem", () => {
     }
     const saltos = serie.slice(1).map((v, i) => Math.abs(v - serie[i]));
     /*
-     * 4° = 120°/s a 30 quadros/s. O maior salto é **exatamente** o teto: sem
-     * ele, o filtro daria 9,7° de uma vez (180° × 0,054) no quadro em que o
-     * rumo inverte — era esse o giro seco.
+     * 3° = 90°/s a 30 quadros/s. Um traçado que **volta sobre si** (o pior caso:
+     * 180° de mudança de direção) ainda encosta no teto — é para isso que ele
+     * existe. Sem ele, o filtro daria 9,7° de uma vez (180° × 0,054) no quadro
+     * da inversão, que era o giro seco.
+     *
+     * O valor caiu de 120°/s para 90°/s junto com a suavização do rumo **na
+     * distância**: o teto deixou de ser o mecanismo e virou rede de segurança —
+     * numa curva comum do traçado ele não entra mais (é o teste seguinte).
      */
     const maior = Math.max(...saltos);
-    expect(maior).toBeLessThanOrEqual(4.001);
-    expect(maior).toBeGreaterThan(3.5);
+    expect(maior).toBeLessThanOrEqual(3.001);
+    expect(maior).toBeGreaterThan(2.8);
     // e a volta acontece (o zigue-zague é curto: um pouco mais de um segundo)
     expect(Math.abs(serie[serie.length - 1] - serie[0])).toBeGreaterThan(60);
   });
@@ -2064,6 +2286,87 @@ describe("a ponta cresce quando o personagem chega", () => {
     });
     expect(f.textos).toContain("Cachoeira");
     for (const img of f.imagens) expect(img.escala).toBeCloseTo(0.7, 2);
+  });
+});
+
+describe("a virada nas curvas do traçado", () => {
+  /**
+   * Uma rota em zigue-zague: cada quina é uma mudança de 90° no rumo do
+   * segmento — exatamente o que existe num GPX com pontos a cada poucos metros.
+   */
+  const zigue = (() => {
+    const G = 1 / 111320;
+    const pts: { lat: number; lng: number }[] = [];
+    let x = 0;
+    let y = 0;
+    for (const [dx, dy] of [
+      [800, 0],
+      [0, 800],
+      [-800, 0],
+      [0, 800],
+      [800, 0],
+      [0, 800],
+    ] as [number, number][]) {
+      for (let i = 1; i <= 40; i++) {
+        x += dx / 40;
+        y += dy / 40;
+        pts.push({ lat: -23.5 + y * G, lng: -46.6 + x * G });
+      }
+    }
+    return buildTrack(pts);
+  })();
+
+  it("o rumo do traçado em quina não salta: é contínuo na distância", () => {
+    // o defeito: a direção do segmento muda de um degrau só na quina
+    const total = zigue.total;
+    const degrau = (janela: number) => {
+      let maior = 0;
+      for (let i = 1; i <= 2000; i++) {
+        const a = rumoSuave(zigue, (i - 1) / 2000, janela);
+        const b = rumoSuave(zigue, i / 2000, janela);
+        let d = Math.abs(b - a);
+        if (d > 180) d = 360 - d;
+        maior = Math.max(maior, d);
+      }
+      return maior;
+    };
+    // sem janela (o rumo do segmento) o salto na quina é de 90°
+    expect(degrau(0)).toBeGreaterThan(60);
+    // com a janela do vídeo, o maior passo entre dois pontos vizinhos é pequeno
+    const janela = janelaDoRumo(total, 20);
+    expect(degrau(janela)).toBeLessThan(3);
+  });
+
+  it("numa curva comum o teto de giro não entra: a virada é uma rampa", () => {
+    /*
+     * O "a cada curva parece que está pulando a imagem" era isto: com o alvo em
+     * degraus, o teto de giro entrava em 21% dos quadros e o mapa girava em
+     * rampa reta (a velocidade de giro pulava de 0 para o teto, e do teto para
+     * 0). Com o rumo contínuo, a virada vira uma curva: o pico fica abaixo do
+     * teto e a aceleração é pequena.
+     */
+    const r = new SceneRenderer("dark");
+    const fps = 30;
+    const serie: number[] = [];
+    const N = 20 * fps;
+    for (let i = 0; i <= N; i++) {
+      const f = fakeCtx();
+      r.render(f.ctx as never, 1280, 720, {
+        ...estado(i / N, 20, null),
+        track: zigue,
+        elapsed: i / fps,
+      });
+      serie.push(r.rumoDoQuadro as number);
+    }
+    const saltos = serie.slice(1).map((v, i) => Math.abs(v - serie[i]));
+    const maior = Math.max(...saltos);
+    const teto = (75 / fps) * 1.001; // RUMO_MAX_GRAUS_S a 30 quadros/s
+    expect(maior).toBeLessThan(teto * 0.8);
+    // e nenhum quadro gira muito mais que o vizinho (a aceleração é pequena)
+    const aceleracoes = saltos.slice(1).map((v, i) => Math.abs(v - saltos[i]));
+    expect(Math.max(...aceleracoes)).toBeLessThan(0.35);
+    // a rota é percorrida: o rumo passa pelas direções das pernas do zigue-zague
+    expect(Math.abs(serie[serie.length - 1] - serie[0])).toBeGreaterThan(30);
   });
 });
 

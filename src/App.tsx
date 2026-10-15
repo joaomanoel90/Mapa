@@ -19,6 +19,7 @@ import { colorizeRoute, dataCoverage } from "./lib/coloring";
 import { kmMarks } from "./lib/km-marks";
 import { parseDuration } from "./lib/duration";
 import { buildTimeline, routeProgress } from "./lib/timeline";
+import { curvaDePacing } from "./lib/pacing";
 import {
   buildTrack,
   formatDistance,
@@ -195,17 +196,6 @@ function App() {
     () => ASPECTS.find((a) => a.id === settings.aspect) ?? ASPECTS[0],
     [settings.aspect],
   );
-
-  /**
-   * Progresso em passos de 1%, para o painel lateral.
-   *
-   * O painel só precisa saber quais paradas já ficaram para trás — não precisa
-   * de 60 quadros por segundo. Como o `Sidebar` é memoizado e todos os seus
-   * outros props são estáveis (`useCallback`/`useMemo`), arredondar aqui evita
-   * re-renderizar o painel (e o `StopEditor` dentro dele) a cada quadro da
-   * animação. O mapa e a linha do tempo continuam recebendo o valor cheio.
-   */
-  const sidebarProgress = Math.round(progress * 100) / 100;
 
   const activeFormat =
     formats.find((f) => f.id === settings.formatId) ?? formats[0] ?? {
@@ -510,6 +500,49 @@ function App() {
       }),
     [settings.duration, settings.cinematic, settings.cameraMode, settings.endCard, cartela],
   );
+
+  /**
+   * A desaceleração nos pontos — **uma** curva para a prévia e para o vídeo.
+   *
+   * O pedido: "quando ele passar por pontos, dar uma desacelerada e focar no
+   * ponto". A curva anda com o mesmo relógio do vídeo (`routeProgress`) e a
+   * posição visual passa a ser `posicao(t)`: perto de cada parada o passo
+   * diminui, e entre elas o caminhar acelera o quanto precisa para o percurso
+   * inteiro caber na mesma duração.
+   *
+   * Vem junto com a chave da câmera cinematográfica: é o mesmo "modo" — o foco
+   * do zoom é dela, e a freada é o que dá tempo de ver o foco. Desligada, a
+   * posição é a de sempre (a curva sem paradas é a identidade).
+   */
+  const pacing = useMemo(
+    () =>
+      curvaDePacing(
+        settings.cinematic ? passageTimes(pois, passagens) : [],
+        linhaDoTempo.percurso,
+      ),
+    [settings.cinematic, pois, passagens, linhaDoTempo.percurso],
+  );
+
+  /**
+   * Onde a personagem está **na rota** no instante atual (0..1).
+   *
+   * `progress` é a fração do **vídeo** (é o que a barra da linha do tempo
+   * mostra); tudo o que fala da rota — o mapa, o "já passou por aqui" do
+   * painel, a distância percorrida — usa esta posição, que é a mesma do
+   * desenho. Sem a desaceleração as duas são a mesma coisa.
+   */
+  const rotaDoVideo = pacing.posicao(progress);
+
+  /**
+   * Posição na rota em passos de 1%, para o painel lateral.
+   *
+   * O painel só precisa saber quais paradas já ficaram para trás — não precisa
+   * de 60 quadros por segundo. Como o `Sidebar` é memoizado e todos os seus
+   * outros props são estáveis (`useCallback`/`useMemo`), arredondar aqui evita
+   * re-renderizar o painel (e o `StopEditor` dentro dele) a cada quadro da
+   * animação. O mapa e a linha do tempo continuam recebendo o valor cheio.
+   */
+  const sidebarProgress = Math.round(rotaDoVideo * 100) / 100;
 
 
   /* reinicia a animação quando a rota muda */
@@ -1079,7 +1112,8 @@ function App() {
           // o gravador fala em tempo de vídeo; o desenho, em progresso do percurso
           const seg = t * settings.duration;
           void elapsed;
-          paint(routeProgress(linhaDoTempo, seg), seg);
+          // a freada entra aqui: o vídeo desenha a **posição**, não a fração do vídeo
+          paint(pacing.posicao(routeProgress(linhaDoTempo, seg)), seg);
         },
       };
 
@@ -1261,7 +1295,7 @@ function App() {
           <MapView
             waypoints={waypoints}
             track={track}
-            progress={progress}
+            progress={rotaDoVideo}
             playing={playing}
             flyTo={flyTo}
             fitRequest={fitRequest}
@@ -1397,6 +1431,8 @@ function App() {
 
           <Timeline
             progress={progress}
+            rota={rotaDoVideo}
+            tempoDoPonto={pacing.tempoDe}
             playing={playing}
             duration={settings.duration}
             track={track}

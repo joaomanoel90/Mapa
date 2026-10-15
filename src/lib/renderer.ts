@@ -334,6 +334,57 @@ export function projetorDaVista(v: Vista): (x: number, y: number) => { x: number
   return (x, y) => ({ x: v.a * x + v.c * y + v.e, y: v.b * x + v.d * y + v.f });
 }
 
+/** Folga (em pixels de tela) para a emenda dos blocos no mapa girado. */
+export const SANGRIA_PX = 0.5;
+
+/**
+ * O retângulo em que um bloco de mapa é desenhado.
+ *
+ * Sem isto, cada bloco era desenhado no seu retângulo "matemático"
+ * (`x·256` até `(x+1)·256` no mundo). Com o zoom quebrado (o `s` fracionário de
+ * `vistaDe`), duas bordas vizinhas caem em coordenadas de tela quebradas, e a
+ * cobertura de cada bloco no pixel da emenda pode somar **menos de 1**: o que
+ * sobra é o fundo do mapa — a "linha preta na emenda das imagens" que o usuário
+ * viu.
+ *
+ * A correção é prender as bordas na **grade de pixels da tela**: as duas
+ * fronteiras de um bloco são arredondadas uma vez cada, e um bloco e o seu
+ * vizinho calculam a fronteira comum com a mesma conta — então eles compartilham
+ * exatamente a mesma borda (sem fresta e sem sobreposição). Note que a largura
+ * sai das bordas já presas (`x1 − x0`), e não de um arredondamento próprio: era
+ * justamente isso que fazia duas medidas vizinhas discordarem.
+ *
+ * Com o mapa **girado** não existe grade de tela a seguir (as bordas dos blocos
+ * são oblíquas), e aí a folga é a saída: meio pixel de tela de sobra em cada
+ * lado, para a emenda ficar coberta de qualquer jeito. Meio pixel (e não um) é o
+ * que se pode sobrepor sem que a junção apareça.
+ */
+export function retanguloDoBloco(
+  v: Vista,
+  x: number,
+  y: number,
+  lado: number,
+): { x: number; y: number; w: number; h: number } {
+  if (v.a === 0 || v.d === 0) return { x, y, w: lado, h: lado };
+  // girado: as bordas são oblíquas, então só resta cobrir a fresta com folga
+  if (v.b !== 0 || v.c !== 0) {
+    const det = Math.abs(v.a * v.d - v.b * v.c);
+    const folga = SANGRIA_PX;
+    const fx = (folga * (Math.abs(v.d) + Math.abs(v.c))) / det;
+    const fy = (folga * (Math.abs(v.a) + Math.abs(v.b))) / det;
+    return { x: x - fx, y: y - fy, w: lado + 2 * fx, h: lado + 2 * fy };
+  }
+  const x0 = Math.round(v.a * x + v.e);
+  const x1 = Math.round(v.a * (x + lado) + v.e);
+  const y0 = Math.round(v.d * y + v.f);
+  const y1 = Math.round(v.d * (y + lado) + v.f);
+  const wx0 = (x0 - v.e) / v.a;
+  const wx1 = (x1 - v.e) / v.a;
+  const wy0 = (y0 - v.f) / v.d;
+  const wy1 = (y1 - v.f) / v.d;
+  return { x: wx0, y: wy0, w: wx1 - wx0, h: wy1 - wy0 };
+}
+
 /** Os blocos que uma vista precisa — a caixa dela, com a folga pedida. */
 export function tilesDaVista(v: Vista, margin = 0): [number, number, number][] {
   const largura = (v.x1 - v.x0) * v.s;
@@ -844,7 +895,8 @@ export class SceneRenderer {
       this.store.request(tz, tx, ty);
       const img = this.store.get(tz, tx, ty);
       if (img) {
-        ctx.drawImage(img as CanvasImageSource, tx * TILE_SIZE, ty * TILE_SIZE, TILE_SIZE, TILE_SIZE);
+        const r = retanguloDoBloco(vista, tx * TILE_SIZE, ty * TILE_SIZE, TILE_SIZE);
+        ctx.drawImage(img as CanvasImageSource, r.x, r.y, r.w, r.h);
       }
     }
     ctx.restore();

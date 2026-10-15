@@ -195,6 +195,25 @@ ponta a ponta, e o anel brigava com ela):
 | sem hora, com **tempo na cartela** | `média` (distância ÷ tempo escrito), com o rótulo | conta até o tempo escrito |
 | sem hora e sem tempo | `—` | **nenhum** |
 
+**A pé (Corrida e Caminhada), o centro do anel mostra o ritmo**, não a
+velocidade — é a unidade de quem vai a pé, e é o número que corredor olha:
+
+```
+              ╭─────────╮
+           ╭──┤  5:24   ├──╮    o arco = andamento do percurso
+           │  │ min/km  │  │    o centro = ritmo médio do percurso
+           ╰──┤  média  ├──╯
+              ╰─────────╯
+            5,0 km · 27:00
+```
+
+O ritmo é **sempre a média do percurso** (tempo total ÷ distância), e não o
+ritmo do instante: num clipe de 14 s o ritmo instantâneo não quer dizer nada. O
+tempo sai da mesma fonte honesta do relógio — hora do arquivo, ou o tempo
+escrito na cartela. Sem os dois, um traço com o rótulo `sem arquivo`; num
+percurso com menos de 50 m (ritmo sobre 30 m é ruído de GPS), um traço com
+`percurso curto`. A atividade escolhida no painel viaja no link.
+
 A terceira linha existe porque a reserva antiga era o tempo do vídeo, e isso
 confundia: o HUD parecia mostrar o tempo da pedalada e mostrava a duração do
 clipe — que a barra de progresso já representa. Número que não existe, o HUD não
@@ -620,7 +639,7 @@ ou cortados.
 
 ```bash
 npm run typecheck  # tsc --noEmit
-npm test           # Vitest (550 casos)
+npm test           # Vitest (566 casos)
 npm run check:dist # o build saiu autocontido e sem /src/?
 ```
 
@@ -671,7 +690,7 @@ src/
    ├─ pins.ts               quando o pino vira ponto no mapa
    ├─ pois.ts               paradas do percurso
    ├─ stats.ts              distância, elevação (com corte de ruído), tempo e cartela
-   ├─ hud.ts                velocidade e relógio do HUD (com janela anti-ruído)
+   ├─ hud.ts                velocidade, ritmo (min/km) e relógio do HUD
    ├─ duration.ts           lê o tempo digitado na cartela ('3 h 19 min', '199 min')
    ├─ passages.ts           quantas vezes a rota passa por cada parada (ida e volta)
    ├─ photos.ts             reduz, valida e decodifica as fotos (cache com prazo)

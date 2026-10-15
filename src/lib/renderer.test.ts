@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { buildTrack, cumulative } from "./geo";
+import { formatPace } from "./hud";
 import { buildTimeline, routeEnd, type Timeline } from "./timeline";
 import { colorizeRoute, NEUTRAL_COLOR } from "./coloring";
 import { formatClock, timesOf } from "./hud";
@@ -176,6 +177,7 @@ const fotosDoPino = (f: ReturnType<typeof fakeCtx>) =>
   f.imagens.filter((i) => i.args[6] <= LIMITE_PINO);
 
 const style: SceneStyle = {
+  // (o HUD em ritmo entra por `pace`; sem ele é km/h, o de sempre)
   accent: "#a3e635",
   basemap: "dark",
   showRoute: true,
@@ -392,6 +394,86 @@ describe("HUD no vídeo", () => {
     expect(textos).toContain("—");
     expect(textos).toContain("sem arquivo");
     expect(textos).toContain("km/h");
+  });
+
+  it("a pé mostra o ritmo médio (min/km) no lugar da velocidade", () => {
+    /*
+     * Percurso de 900 m com ritmo **variável**: os primeiros 500 m em 50 s e os
+     * últimos 400 m em 120 s. Assim a média é bem diferente do ritmo do instante
+     * — um percurso uniforme daria o mesmo número nos dois casos, e o teste não
+     * teria dentes.
+     */
+    const pts = GPS_PTS.map((p, i) => ({ ...p, t: T0 + (i <= 5 ? i * 10_000 : 50_000 + (i - 5) * 30_000) }));
+    const variavel = buildTrack(pts);
+    const horasVariaveis = pts.map((p) => p.t);
+    const totalSeg = (pts[pts.length - 1].t - pts[0].t) / 1000; // 170 s
+    const mediaSeg = totalSeg / (variavel.total / 1000); // média do percurso, s/km
+
+    const { ctx, textos } = fakeCtx();
+    new SceneRenderer("dark").render(ctx, 1280, 720, {
+      ...estado(0.5, 14, null, horasVariaveis),
+      track: variavel,
+      style: { ...style, pace: true },
+    });
+    expect(textos).toContain(formatPace(mediaSeg));
+    expect(textos).toContain("min/km");
+    expect(textos).not.toContain("km/h");
+    expect(textos).toContain("média"); // é média, sempre — e o rótulo diz
+    // e não é o ritmo do instante (no meio, 100 m em 10 s = 1:40/km)
+    expect(textos).not.toContain(formatPace(100));
+  });
+
+  it("a pé sem relógio (nem arquivo, nem cartela) mostra um traço", () => {
+    const { ctx, textos } = fakeCtx();
+    new SceneRenderer("dark").render(ctx, 1280, 720, {
+      ...estado(0.5, 14, null, null),
+      track: gpsTrack,
+      style: { ...style, pace: true },
+    });
+    expect(textos).toContain("—");
+    expect(textos).toContain("min/km");
+    expect(textos).toContain("sem arquivo");
+    expect(textos).not.toContain("média");
+  });
+
+  it("a pé, o tempo da cartela também serve de relógio", () => {
+    // sem hora no arquivo, o tempo escrito na cartela dá a média (900 m em 300 s)
+    const { ctx, textos } = fakeCtx();
+    new SceneRenderer("dark").render(ctx, 1280, 720, {
+      ...estado(0.5, 14, null, null, 300),
+      track: gpsTrack,
+      style: { ...style, pace: true },
+    });
+    expect(textos).toContain(formatPace(300 / (gpsTrack.total / 1000)));
+    expect(textos).toContain("min/km");
+    expect(textos).toContain("média");
+  });
+
+  it("a pé, percurso curto demais não vira número inventado", () => {
+    const { ctx, textos } = fakeCtx();
+    const curto = buildTrack([
+      { lat: 0, lng: 0, t: T0 },
+      { lat: 0, lng: 20 / 111_320, t: T0 + 60_000 }, // 20 m
+    ]);
+    new SceneRenderer("dark").render(ctx, 1280, 720, {
+      ...estado(0.5, 14, null, [T0, T0 + 60_000]),
+      track: curto,
+      style: { ...style, pace: true },
+    });
+    expect(textos).toContain("—");
+    expect(textos).toContain("percurso curto");
+  });
+
+  it("pedal continua em km/h mesmo depois de a atividade existir", () => {
+    const { ctx, textos } = fakeCtx();
+    new SceneRenderer("dark").render(ctx, 1280, 720, {
+      ...estado(0.5, 14, null, horas),
+      track: gpsTrack,
+      style: { ...style, pace: false },
+    });
+    expect(textos).toContain("36");
+    expect(textos).toContain("km/h");
+    expect(textos).not.toContain("min/km");
   });
 
   it("parado no percurso mostra 0 km/h, e não um traço", () => {

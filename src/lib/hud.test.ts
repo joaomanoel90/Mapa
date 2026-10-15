@@ -1,6 +1,15 @@
 import { describe, expect, it } from "vitest";
 import { buildTrack, type LatLng } from "./geo";
-import { MAX_SPEED_KMH, elapsedAt, formatClock, speedAt, timesOf } from "./hud";
+import {
+  MAX_SPEED_KMH,
+  PACE_MIN_M,
+  averagePace,
+  elapsedAt,
+  formatClock,
+  formatPace,
+  speedAt,
+  timesOf,
+} from "./hud";
 
 /**
  * Percurso reto para leste, medido em graus, com as horas dadas.
@@ -166,5 +175,48 @@ describe("formatClock", () => {
 
   it("não deixa passar tempo negativo", () => {
     expect(formatClock(-10)).toBe("00:00");
+  });
+});
+
+describe("ritmo (min/km)", () => {
+  it("formata no padrão de corredor: 5:24 por km", () => {
+    expect(formatPace(324)).toBe("5:24");
+    expect(formatPace(300)).toBe("5:00");
+    expect(formatPace(59)).toBe("0:59");
+    expect(formatPace(0)).toBe("0:00");
+    // ritmo absurdo (dado esquisito) não vira número ambíguo
+    expect(formatPace(3725)).toBe("1:02:05");
+  });
+
+  it("arredonda para o segundo, como o relógio de corrida", () => {
+    expect(formatPace(324.4)).toBe("5:24");
+    expect(formatPace(324.6)).toBe("5:25");
+  });
+
+  it("calcula a média do percurso: tempo total dividido pela distância", () => {
+    // 5 km em 25 min = 5:00/km
+    expect(averagePace(1500, 5000)).toBeCloseTo(300, 6);
+    // 10 km em 1 h
+    expect(averagePace(3600, 10_000)).toBeCloseTo(360, 6);
+  });
+
+  it("não inventa ritmo sem tempo nem em percurso curto demais", () => {
+    expect(averagePace(null, 5000)).toBeNull();
+    expect(averagePace(undefined, 5000)).toBeNull();
+    expect(averagePace(0, 5000)).toBeNull();
+    expect(averagePace(-10, 5000)).toBeNull();
+    expect(averagePace(Number.NaN, 5000)).toBeNull();
+    // ritmo sobre 30 m é ruído de GPS, não ritmo
+    expect(averagePace(1200, PACE_MIN_M - 1)).toBeNull();
+    expect(averagePace(1200, 0)).toBeNull();
+    expect(averagePace(1200, PACE_MIN_M)).toBeCloseTo(24_000, 6);
+  });
+
+  it("o ritmo é o inverso da velocidade média", () => {
+    // 12 km/h = 5:00/km
+    const seg = averagePace(600, 2000)!; // 2 km em 10 min
+    const kmh = (2000 / 600) * 3.6;
+    expect(kmh).toBeCloseTo(12, 6);
+    expect(formatPace(seg)).toBe("5:00");
   });
 });

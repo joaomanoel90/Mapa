@@ -24,6 +24,25 @@ export const ASPECTS: { id: AspectId; label: string; hint: string; w: number; h:
   { id: "4:5", label: "4:5", hint: "Instagram", w: 864, h: 1080 },
 ];
 
+/**
+ * O que o vídeo está mostrando: pedal, corrida ou caminhada.
+ *
+ * Muda a unidade do HUD: a pé, o número que interessa é o **ritmo** (min/km),
+ * não a velocidade. É a única coisa que a atividade muda hoje.
+ */
+export type ActivityId = "pedal" | "corrida" | "caminhada";
+
+export const ACTIVITIES: { id: ActivityId; label: string; icon: string; hint: string }[] = [
+  { id: "pedal", label: "Pedal", icon: "🚴", hint: "HUD em velocidade (km/h)" },
+  { id: "corrida", label: "Corrida", icon: "🏃", hint: "HUD em ritmo (min/km)" },
+  { id: "caminhada", label: "Caminhada", icon: "🚶", hint: "HUD em ritmo (min/km)" },
+];
+
+/** A pé (corrida/caminhada), o HUD mostra ritmo em vez de velocidade. */
+export function usaRitmo(activity: ActivityId): boolean {
+  return activity !== "pedal";
+}
+
 export type Settings = {
   profile: Profile;
   /** ignora mão única: o traçado não dá voltas para "entrar na mão certa" */
@@ -52,6 +71,8 @@ export type Settings = {
   endCard: boolean;
   /** painel de números no vídeo (velocidade, andamento, distância, relógio) */
   showHud: boolean;
+  /** pedal, corrida ou caminhada — muda a unidade do HUD (km/h ou min/km) */
+  activity: ActivityId;
   /**
    * Cor da linha: sólida (o de sempre), por velocidade ou por inclinação.
    * Depende de o arquivo ter hora/elevação — sem o dado a linha sai cinza.
@@ -116,6 +137,7 @@ export const DEFAULT_SETTINGS: Settings = {
   showProgress: true,
   endCard: true,
   showHud: true,
+  activity: "pedal",
   colorBy: "solid",
   showKmMarks: false,
   cinematic: false,
@@ -153,6 +175,7 @@ export function sanitizeSettings(raw: Partial<Settings>): Partial<Settings> {
   if (typeof out.showStopCounter !== "boolean") delete out.showStopCounter;
   if (typeof out.endCard !== "boolean") delete out.endCard;
   if (typeof out.showHud !== "boolean") delete out.showHud;
+  if (!ACTIVITIES.some((a) => a.id === out.activity)) delete out.activity;
   if (out.colorBy !== "solid" && out.colorBy !== "speed" && out.colorBy !== "slope") {
     delete out.colorBy;
   }

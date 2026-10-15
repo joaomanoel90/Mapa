@@ -420,3 +420,26 @@ describe("decodeShare com entrada inválida", () => {
     expect(r?.settings.followZoom).toBe(DEFAULT_SETTINGS.followZoom);
   });
 });
+
+describe("atividade no link", () => {
+  it("vai e volta na url compartilhada", () => {
+    const url = buildShareUrl(
+      base({ settings: { ...DEFAULT_SETTINGS, activity: "corrida" } }),
+    );
+    const lido = decodeShare(url);
+    expect(lido?.settings.activity).toBe("corrida");
+  });
+
+  it("pedal (o padrão) não muda o link de quem não mexeu", () => {
+    const comPadrao = buildShareUrl(base());
+    const explicito = buildShareUrl(
+      base({ settings: { ...DEFAULT_SETTINGS, activity: "pedal" } }),
+    );
+    expect(explicito).toBe(comPadrao);
+  });
+
+  it("um link antigo (sem atividade) abre em pedal, sem quebrar", () => {
+    const lido = decodeShare(buildShareUrl(base()));
+    expect(lido?.settings.activity).toBe("pedal");
+  });
+});

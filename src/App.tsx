@@ -6,7 +6,7 @@ import Sidebar from "./components/Sidebar";
 import Timeline from "./components/Timeline";
 import ExportModal, { type ExportPhase } from "./components/ExportModal";
 import {
-  ASPECTS,
+  ASPECTS, usaRitmo,
   DEFAULT_SETTINGS,
   MAX_WAYPOINTS,
   maxZoomFor,
@@ -943,6 +943,8 @@ function App() {
       showProgress: settings.showProgress,
       showSummary: settings.endCard,
       showHud: settings.showHud,
+      // a pé o HUD mostra ritmo (min/km) em vez de velocidade
+      pace: usaRitmo(settings.activity),
       title: settings.title,
       subtitle: settings.subtitle,
     };

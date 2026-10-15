@@ -48,6 +48,17 @@ export type CinematicConfig = {
 export type ChaseConfig = {
   /** gira o mapa no rumo do personagem (0 = norte para cima) */
   gira: boolean;
+  /**
+   * Inclina o quadro para "ver o horizonte".
+   *
+   * O mapa 2D não tem horizonte: numa vista de cima, perto e longe ocupam a
+   * mesma altura. Com a inclinação, a parte de cima do quadro é comprimida,
+   * como o chão visto de um ângulo baixo — a estrada à frente "sobe" para o
+   * horizonte e o que está longe aparece menor. É o truque de sempre das vistas
+   * de GPS, e o usuário pediu pelo nome ("dar uma inclinação para enxergar o
+   * horizonte").
+   */
+  tilt?: boolean;
 };
 
 /** Onde o personagem cai na tela na terceira pessoa (0 = topo, 1 = base). */
@@ -56,9 +67,28 @@ export const CHASE_ALTURA = 0.68;
 /** Quantos níveis de zoom a mais na terceira pessoa (é o que dá o "atrás"). */
 export const CHASE_ZOOM = 1.5;
 
+/**
+ * O quanto a vista é comprimida na vertical com a inclinação (1 = sem ela).
+ *
+ * 0,62 = a metade de cima do quadro mostra o chão visto de raspão, como quem
+ * olha o horizonte de uma janela alta. Testado no lab nesta faixa: menos que
+ * ~0,5 a rota fica espremida demais, mais que ~0,8 não se percebe a inclinação.
+ */
+export const CHASE_TILT = 0.62;
+
 /** O zoom de acompanhamento de verdade (a terceira pessoa chega mais perto). */
 export function zoomEfetivo(camera: { followZoom: number; chase?: ChaseConfig }): number {
   return camera.followZoom + (camera.chase ? CHASE_ZOOM : 0);
+}
+
+/**
+ * O fator de compressão vertical da vista (1 = quadro de cima, sem horizonte).
+ *
+ * Vale para quem desenha e para quem conta blocos: a inclinação faz a vista
+ * olhar mais longe, então a mesma rota precisa de mais blocos de mapa.
+ */
+export function fatorDeTilt(camera: { chase?: ChaseConfig }): number {
+  return camera.chase?.tilt ? CHASE_TILT : 1;
 }
 
 export type CameraTarget = {

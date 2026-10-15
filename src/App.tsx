@@ -408,7 +408,7 @@ function App() {
       },
       chase:
         settings.cameraMode === "follow" && settings.thirdPerson
-          ? { gira: settings.spinMap }
+          ? { gira: settings.spinMap, tilt: settings.tiltHorizonte }
           : undefined,
     }),
     [
@@ -417,6 +417,7 @@ function App() {
       settings.cinematic,
       settings.thirdPerson,
       settings.spinMap,
+      settings.tiltHorizonte,
       passagens,
     ],
   );

@@ -480,11 +480,19 @@ function Sidebar(props: Props) {
                       checked={s.spinMap}
                       onChange={(v) => update("spinMap", v)}
                     />
+                    <Toggle
+                      icon="🏔️"
+                      label="Inclinar o horizonte"
+                      checked={s.tiltHorizonte}
+                      onChange={(v) => update("tiltHorizonte", v)}
+                    />
                     <p className="text-[10.5px] leading-snug text-zinc-500">
                       A câmera vem para trás do personagem: ele fica abaixo do centro, com o
                       caminho à frente ocupando a parte de cima do quadro. O mapa continua
                       com o norte para cima; ligando o giro, o caminho fica sempre “para
-                      cima” e o mapa roda no rumo.
+                      cima” e o mapa roda no rumo. A inclinação comprime a parte de cima do
+                      quadro, como o chão visto de rasão: é o que dá a sensação de
+                      horizonte (não vale na pré-visualização do mapa, só no vídeo).
                     </p>
                   </>
                 ) : (

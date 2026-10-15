@@ -259,14 +259,16 @@ describe("sharedSettingsOverrides", () => {
     expect(over.cinematic).toBe(true);
   });
 
-  it("leva junto a terceira pessoa e o giro do mapa", () => {
+  it("leva junto a terceira pessoa, o giro do mapa e a inclinação", () => {
     const over = sharedSettingsOverrides({
       ...DEFAULT_SETTINGS,
       thirdPerson: true,
       spinMap: true,
+      tiltHorizonte: false,
     });
     expect(over.thirdPerson).toBe(true);
     expect(over.spinMap).toBe(true);
+    expect(over.tiltHorizonte).toBe(false);
   });
 
   it("a cor da rota sobrevive à ida e à volta pelo link", () => {

@@ -90,6 +90,11 @@ export type Settings = {
   /** na terceira pessoa, gira o mapa no rumo (o caminho sempre "para cima") */
   spinMap: boolean;
   /**
+   * Na terceira pessoa, **inclina o horizonte**: a parte de cima do quadro é
+   * comprimida, como o chão visto de rasão, e o que está longe aparece menor.
+   */
+  tiltHorizonte: boolean;
+  /**
    * Os números da cartela são **digitados**, não medidos.
    *
    * O arquivo de GPS é a sugestão (o painel mostra o valor do arquivo como
@@ -150,6 +155,9 @@ export const DEFAULT_SETTINGS: Settings = {
   cinematic: false,
   thirdPerson: false,
   spinMap: false,
+  // a inclinação é o que faz a terceira pessoa parecer uma câmera atrás: vem
+  // ligada junto com ela (quem não gostar desliga no painel)
+  tiltHorizonte: true,
   cardDistance: "",
   cardElevation: "",
   cardTime: "",
@@ -192,6 +200,7 @@ export function sanitizeSettings(raw: Partial<Settings>): Partial<Settings> {
   if (typeof out.cinematic !== "boolean") delete out.cinematic;
   if (typeof out.thirdPerson !== "boolean") delete out.thirdPerson;
   if (typeof out.spinMap !== "boolean") delete out.spinMap;
+  if (typeof out.tiltHorizonte !== "boolean") delete out.tiltHorizonte;
   for (const key of ["cardDistance", "cardElevation", "cardTime", "cardNote"] as const) {
     if (typeof out[key] !== "string") delete out[key];
   }

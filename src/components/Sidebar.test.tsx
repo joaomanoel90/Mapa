@@ -230,12 +230,21 @@ describe("painel: terceira pessoa", () => {
     expect(botao("Girar o mapa com o rumo").getAttribute("aria-checked")).toBe("true");
   });
 
+  it("a inclinação do horizonte vem ligada e pode ser desligada", () => {
+    montar(<Painel />);
+    clicar(botao("Terceira pessoa"));
+    expect(botao("Inclinar o horizonte").getAttribute("aria-checked")).toBe("true");
+    clicar(botao("Inclinar o horizonte"));
+    expect(botao("Inclinar o horizonte").getAttribute("aria-checked")).toBe("false");
+  });
+
   it("explica o que muda no quadro", () => {
     montar(<Painel />);
     clicar(botao("Terceira pessoa"));
     const texto = container.textContent ?? "";
     expect(texto).toContain("abaixo do centro");
     expect(texto).toContain("roda no rumo");
+    expect(texto).toContain("horizonte");
   });
 
   it("no “Rota toda” avisa que ela não vale", () => {

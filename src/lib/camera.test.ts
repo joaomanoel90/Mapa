@@ -5,6 +5,7 @@ import {
   OPEN_CAP_S,
   STOP_BOOST,
   cameraTarget,
+  janelaDaEnfase,
   openingProgress,
   openingSeconds,
   stopBoost,
@@ -159,6 +160,45 @@ describe("aproximação nas paradas", () => {
     expect(stopBoost(0.5, [], 14)).toBe(0);
     expect(stopBoost(0.9, [0.5], 14)).toBe(0);
     expect(stopBoost(0.5, [Number.NaN, 0.5], 14)).toBeCloseTo(1, 6);
+  });
+
+  it("com muitas paradas a janela encolhe — e sobra rota sem ênfase entre elas", () => {
+    /*
+     * O caso que o usuário viu ("a parada cinematográfica está sendo muito antes
+     * do ponto"): oito paradas numa rota de 21 km e um vídeo de 14 s (percurso de
+     * 7,2 s). A janela pedida (~1,6 s de percurso) dava **12% da rota** — 2,5 km
+     * de cada lado, mais largo que a distância entre as paradas. Medido na
+     * bancada: o zoom entrava em 2,6 s e ia até o fim do vídeo, com o máximo em
+     * todas as paradas e ~56% de zoom ainda entre elas — a visão aproximada já
+     * estava na tela muito antes de o personagem chegar em qualquer ponto.
+     *
+     * Com o teto pela contagem, cada parada ocupa ~4% de cada lado e o zoom
+     * **volta a zero** no meio do caminho entre duas paradas.
+     */
+    const percurso = 7.2;
+    const oito = Array.from({ length: 8 }, (_, i) => (i + 1) / 9);
+    const janela = janelaDaEnfase(percurso, oito.length);
+    expect(janela).toBeLessThan(stopSpan(percurso)); // era a pedida: 12% da rota
+    expect(2 * janela).toBeLessThan(1 / oito.length); // e cabe entre duas paradas
+
+    // em cima do ponto, a ênfase é inteira
+    expect(stopFocus(oito[0], oito, percurso).forca).toBeCloseTo(1, 6);
+    // no meio do caminho, nenhuma — nem no foco, nem no zoom da câmera
+    const meio = (oito[0] + oito[1]) / 2;
+    const entre = stopFocus(meio, oito, percurso);
+    expect(entre.forca).toBe(0);
+    expect(entre.ts).toBeNull();
+    const alvoEntre = alvo(meio, 5, { cinematic: { stops: true, stopTs: oito } });
+    expect(alvoEntre.boost).toBe(0);
+    expect(alvoEntre.zoom).toBeCloseTo(16, 6);
+  });
+
+  it("com poucas paradas a janela é a pedida (a ênfase não muda)", () => {
+    // sem vizinha de quem se aproximar, uma parada (ou duas) não muda nada
+    expect(janelaDaEnfase(7.2, 1)).toBeCloseTo(stopSpan(7.2), 9);
+    expect(janelaDaEnfase(7.2, 2)).toBeCloseTo(stopSpan(7.2), 9);
+    // e a chegada conta como parada: oito paradas mais a chegada = nove janelas
+    expect(janelaDaEnfase(7.2, 9)).toBeLessThan(janelaDaEnfase(7.2, 8));
   });
 });
 

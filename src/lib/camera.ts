@@ -149,10 +149,42 @@ export function openingProgress(elapsed: number, duration: number): number {
  * é o tempo que a câmera leva para **chegar** na parada. Com uma janela curta
  * ela só começava a se mexer nos últimos quadros, e a parada continuava saindo
  * pela borda no 9:16.
+ *
+ * É a janela **pedida**: quem manda nela é a `janelaDaEnfase`, que ainda limita
+ * o quanto cada parada pode ocupar da rota.
  */
 export function stopSpan(duration: number): number {
   const d = Number.isFinite(duration) && duration > 0 ? duration : 10;
   return Math.max(0.03, Math.min(0.12, 1.6 / d));
+}
+
+/**
+ * Quanto do **espaço entre paradas** as janelas de ênfase podem ocupar.
+ *
+ * Com `N` paradas igualmente espaçadas, cada uma pode ter no máximo
+ * `ENFASE_ENTRE_PARADAS / (2·N)` de cada lado — o que deixa ~30% do espaço entre
+ * uma parada e a seguinte **sem** ênfase nenhuma.
+ *
+ * Sem este teto, a janela era só a pedida (~1,6 s de percurso): com oito paradas
+ * numa rota de 21 km e um vídeo de 14 s, cada janela ficava com 12% da rota
+ * (2,5 km de cada lado) — **mais larga que a distância entre as paradas**. Medido
+ * nesse caso: o zoom entrava em 2,6 s e ia até o fim do vídeo, com o máximo em
+ * todas as paradas e ~56% de zoom ainda entre elas. Ou seja, a visão aproximada
+ * já estava na tela muito antes de o personagem chegar em qualquer ponto — que é
+ * exatamente o que o usuário viu ("a parada cinematográfica está sendo muito
+ * antes do ponto").
+ */
+export const ENFASE_ENTRE_PARADAS = 0.7;
+
+/**
+ * A meia-janela da ênfase de uma parada, em fração da rota.
+ *
+ * `routeSeconds` = segundos do percurso; `quantos` = quantas paradas caem na
+ * rota (no foco da câmera, a chegada conta como uma a mais).
+ */
+export function janelaDaEnfase(routeSeconds: number, quantos: number): number {
+  const n = Number.isFinite(quantos) ? Math.max(1, Math.floor(quantos)) : 1;
+  return Math.min(stopSpan(routeSeconds), ENFASE_ENTRE_PARADAS / (2 * n));
 }
 
 /**
@@ -179,7 +211,7 @@ export function stopFocus(
   duration: number,
 ): { forca: number; ts: number | null } {
   if (stopTs.length === 0) return { forca: 0, ts: null };
-  const span = stopSpan(duration);
+  const span = janelaDaEnfase(duration, stopTs.length);
   let maior = 0;
   let escolhida: number | null = null;
   for (const ts of stopTs) {

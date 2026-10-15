@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildTrack, cumulative, rumoSuave, sampleTrack } from "./geo";
+import { TILE_SIZE, buildTrack, cumulative, rumoSuave, sampleTrack } from "./geo";
 import { formatPace } from "./hud";
 import { buildTimeline, routeEnd, routeProgress, type Timeline } from "./timeline";
 import { colorizeRoute, NEUTRAL_COLOR } from "./coloring";
@@ -11,9 +11,11 @@ import { findCharacter, gaitOf } from "./characters";
 import {
   SceneRenderer,
   PINO_CRESCE_S,
+  SANGRIA_PX,
   TILE_BUDGET,
   centroDoBloco,
   ladoDoBloco,
+  retanguloDoBloco,
   andar,
   crescimentoDoPino,
   pipocoDaPonta,
@@ -2810,34 +2812,64 @@ describe("a emenda dos blocos de mapa", () => {
     return f;
   };
 
-  it("no zoom quebrado, as bordas dos blocos caem em pixels inteiros da tela", () => {
+  it("a imagem do mapa anda com a câmera, sem dente de serra", () => {
     /*
-     * O defeito que o usuário viu ("linhas pretas na emenda das imagens"): com o
-     * zoom quebrado (16,4), cada bloco era desenhado no seu retângulo exato e a
-     * cobertura dos dois lados de uma emenda podia somar menos de 1 pixel — o
-     * que sobrava era o fundo do mapa aparecendo como uma linha escura.
+     * O defeito que o usuário viu ("melhorar o degrau das imagens, suavizar"): a
+     * borda de cada bloco era **presa na grade de pixels** (`Math.round`) para
+     * fechar a emenda — e com isso a imagem do mapa andava aos pulos, presa por
+     * alguns quadros e pulando 1 px de uma vez, enquanto a rota e o personagem
+     * andavam liso. Medido na bancada: com a câmera andando 0,2 px, a borda de um
+     * bloco andava 0,8 px e depois 0 px.
      */
-    const f = quadroDeBlocos(16.4);
-    const [a, b, c, d, e, fy] = matriz(f);
-    expect(b).toBeCloseTo(0, 9); // sem giro: a grade de pixels existe
-    expect(c).toBeCloseTo(0, 9);
-    // a escala não é inteira: é justamente o caso em que as bordas quebravam
-    expect(Math.abs(a - Math.round(a))).toBeGreaterThan(0.1);
+    const base = vistaDe({
+      centro: { lat: -23.5, lng: -48.4 },
+      zoom: 16.4,
+      width: 1280,
+      height: 720,
+    });
+    // a escala não é inteira: é justamente o caso em que a borda quebrava
+    expect(base.b).toBeCloseTo(0, 9);
+    expect(base.c).toBeCloseTo(0, 9);
+    expect(Math.abs(base.a - Math.round(base.a))).toBeGreaterThan(0.1);
 
+    const bordas: number[] = [];
+    for (const passo of [0, 0.2, 0.4, 0.6, 0.8, 1]) {
+      const v = { ...base, e: base.e + passo };
+      const r = retanguloDoBloco(v, 0, 0, TILE_SIZE);
+      bordas.push(v.a * r.x + v.e);
+    }
+    for (let i = 1; i < bordas.length; i++) {
+      // a borda anda **o mesmo tanto** que a câmera andou: nada de ficar presa
+      // num quadro e pular de 1 px no seguinte (o `e` do mundo é da ordem de
+      // 10⁷, então a conta perde os últimos dígitos — daí a tolerância)
+      expect(bordas[i] - bordas[i - 1]).toBeCloseTo(0.2, 6);
+    }
+    // e a folga é meio pixel de tela de cada lado, simétrica em volta do bloco
+    // o bloco está no (0,0) do mundo: o que se mede é a folga, em pixels
+    const r = retanguloDoBloco(base, 0, 0, TILE_SIZE);
+    expect(base.a * r.x).toBeCloseTo(-SANGRIA_PX, 6);
+    expect(base.a * (r.x + r.w)).toBeCloseTo(base.a * TILE_SIZE + SANGRIA_PX, 6);
+    expect(base.d * r.y).toBeCloseTo(-SANGRIA_PX, 6);
+    expect(base.d * (r.y + r.h)).toBeCloseTo(base.d * TILE_SIZE + SANGRIA_PX, 6);
+  });
+
+  it("a matriz não carrega o mundo inteiro (é o que fecha a emenda no 9:16)", () => {
+    /*
+     * As coordenadas do mundo no zoom do mapa são enormes (dezenas de milhões) e
+     * somadas na matriz estouram a precisão do rasterizador: a borda de dois
+     * blocos vizinhos cai fora do lugar e o fundo do mapa aparece como um fio de
+     * 1 px. Medido numa tela 1080x1920 com a inclinação da terceira pessoa: uma
+     * linha inteira do quadro (832 px de fundo à mostra numa emenda).
+     *
+     * A defesa é desenhar cada bloco com a origem no **canto da vista**: o
+     * `drawImage` recebe coordenadas na casa dos milhares, e não dos milhões.
+     */
+    const f = quadroDeBlocos(15.7);
     const desenhados = blocos(f);
     expect(desenhados.length).toBeGreaterThan(4);
     for (const i of desenhados) {
-      const X0 = a * i.args[0] + e;
-      const X1 = a * (i.args[0] + i.args[2]) + e;
-      const Y0 = d * i.args[1] + fy;
-      const Y1 = d * (i.args[1] + i.args[3]) + fy;
-      expect(Math.abs(X0 - Math.round(X0))).toBeLessThan(1e-6);
-      expect(Math.abs(X1 - Math.round(X1))).toBeLessThan(1e-6);
-      expect(Math.abs(Y0 - Math.round(Y0))).toBeLessThan(1e-6);
-      expect(Math.abs(Y1 - Math.round(Y1))).toBeLessThan(1e-6);
-      // e a escala ficou dentro do pixel: nada de bloco esticado
-      expect(Math.abs(X1 - X0 - 256 * a)).toBeLessThan(1.01);
-      expect(Math.abs(Y1 - Y0 - 256 * d)).toBeLessThan(1.01);
+      expect(Math.abs(i.args[0])).toBeLessThan(100_000);
+      expect(Math.abs(i.args[1])).toBeLessThan(100_000);
     }
   });
 
@@ -2850,7 +2882,7 @@ describe("a emenda dos blocos de mapa", () => {
     for (const i of desenhados) {
       const Y0 = Math.round(d * i.args[1] + fy);
       const lista = porFileira.get(Y0) ?? [];
-      lista.push(Math.round(a * i.args[0] + e));
+      lista.push(a * i.args[0] + e);
       porFileira.set(Y0, lista);
     }
     let emendas = 0;
@@ -2859,25 +2891,30 @@ describe("a emenda dos blocos de mapa", () => {
       expect(colunas.length).toBeGreaterThan(1);
       for (let i = 1; i < colunas.length; i++) {
         /*
-         * A esquerda de um é a direita do outro, na largura exata do bloco na
-         * tela (256·a, com a sobra de meio pixel do arredondamento). Se a
-         * diferença fosse maior, haveria fresta; menor, sobreposição.
+         * A fronteira de um é a fronteira do outro, na largura exata do bloco na
+         * tela (256·a): a folga é a mesma nos dois, então ela só **sobrepõe** a
+         * emenda (é o que fecha a fresta) e nunca abre espaço. Se a diferença
+         * fosse maior, haveria fresta.
          */
-        expect(Math.abs(colunas[i] - colunas[i - 1] - 256 * a)).toBeLessThanOrEqual(1.001);
+        expect(Math.abs(colunas[i] - colunas[i - 1] - 256 * a)).toBeLessThan(1e-9);
         emendas++;
+        // e a sobra é **meio pixel de cada lado**: 1 px de tela de sobreposição
+        expect(2 * SANGRIA_PX).toBeCloseTo(1, 9);
       }
     }
     expect(emendas).toBeGreaterThan(3);
   });
 
-  it("o bloco não anda na tela: a borda presa fica a menos de meio pixel", () => {
+  it("o bloco desenhado é o exato mais meio pixel de folga de cada lado", () => {
+    // é essa sobra que fecha a emenda: o que um deixa de cobrir na fronteira, o
+    // vizinho cobre — e ela é pequena, nada de bloco esticado na tela
     const f = quadroDeBlocos(15.7);
-    const [a, , , d, e, fy] = matriz(f);
-    for (const i of blocos(f)) {
-      const idealX = a * i.args[0] + e;
-      const idealY = d * i.args[1] + fy;
-      expect(Math.abs(idealX - Math.round(idealX))).toBeLessThanOrEqual(0.5);
-      expect(Math.abs(idealY - Math.round(idealY))).toBeLessThanOrEqual(0.5);
+    const [a, , , d, ,] = matriz(f);
+    const desenhados = blocos(f);
+    expect(desenhados.length).toBeGreaterThan(4);
+    for (const i of desenhados) {
+      expect(a * i.args[2]).toBeCloseTo(a * TILE_SIZE + 2 * SANGRIA_PX, 6);
+      expect(d * i.args[3]).toBeCloseTo(d * TILE_SIZE + 2 * SANGRIA_PX, 6);
     }
   });
 
@@ -2941,8 +2978,10 @@ describe("a emenda dos blocos de mapa", () => {
     expect(a).toBeCloseTo(1, 9);
     expect(d).toBeCloseTo(1, 9);
     for (const i of blocos(f)) {
-      expect(i.args[2]).toBeCloseTo(256, 6);
-      expect(i.args[3]).toBeCloseTo(256, 6);
+      // a folga é meio pixel de **tela** de cada lado: com a escala 1, um pixel
+      // no mundo de cada lado
+      expect(i.args[2]).toBeCloseTo(TILE_SIZE + 2 * SANGRIA_PX, 6);
+      expect(i.args[3]).toBeCloseTo(TILE_SIZE + 2 * SANGRIA_PX, 6);
     }
   });
 });

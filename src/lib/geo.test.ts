@@ -386,6 +386,43 @@ function ruaDeCidade(metros: number, passoM: number, segM: number): LatLng[] {
 }
 
 /**
+ * Rua de cidade com **esquina arredondada** (raio `raio`), que é como esquina de
+ * rua é de verdade.
+ *
+ * É o caso que separa os dois defeitos do filtro: a janela larga atravessando a
+ * curva (distância inventada) e a guarda cega para a boca da curva (distância
+ * comida). Pontos de 10° no arco, como num arquivo real.
+ */
+function ruaArredondada(metros: number, passoM: number, segM: number, raio: number): LatLng[] {
+  const pts: LatLng[] = [{ lat: 0, lng: 0 }];
+  let lat = 0;
+  let lng = 0;
+  let rumo = 0;
+  const anda = (graus: number, d: number) => {
+    const rad = (graus * Math.PI) / 180;
+    lng += Math.sin(rad) * d * GRAU_POR_METRO;
+    lat += Math.cos(rad) * d * GRAU_POR_METRO;
+    pts.push({ lat, lng });
+  };
+  const arco = (Math.PI * raio) / 2;
+  let percorrido = 0;
+  while (percorrido < metros) {
+    const retas = Math.max(1, Math.round((segM - arco) / passoM));
+    for (let i = 0; i < retas && percorrido < metros; i++) {
+      anda(rumo, passoM);
+      percorrido += passoM;
+    }
+    for (let a = 0; a < 90 && percorrido < metros; a += 10) {
+      const d = arco / 9;
+      anda(rumo + a, d);
+      percorrido += d;
+    }
+    rumo += 90;
+  }
+  return pts;
+}
+
+/**
  * Ruído de GPS correlacionado (AR(1)).
  *
  * O erro do GPS **não** é independente ponto a ponto: ele vagueia. É esse
@@ -486,7 +523,7 @@ describe("medida do arquivo (filtro de GPS)", () => {
     const a = measuredCumulative(denso).at(-1) ?? 0;
     const b = measuredCumulative(esparso).at(-1) ?? 0;
     // 1 Hz e 10 Hz do mesmo percurso medem quase a mesma coisa
-    expect(Math.abs(erro(a, b))).toBeLessThan(1.5);
+    expect(Math.abs(erro(a, b))).toBeLessThan(0.5);
   });
 
   it("o desenho continua sendo o arquivo, ponto a ponto", () => {
@@ -514,16 +551,60 @@ describe("medida do arquivo (filtro de GPS)", () => {
     expect(measuredCumulative(suja, 0).at(-1) ?? 0).toBeCloseTo(cumulative(suja).at(-1) ?? 0, 6);
   });
 
-  it("curva suave de verdade não é comida pelo filtro", () => {
-    // 30 m de amplitude a cada 400 m: um desvio suave e legítimo (estrada de
-    // serra, contorno de represa). O filtro tem que medir o mesmo que o arquivo.
+  it("curva de serra e esquina arredondada ficam inteiras", () => {
+    // o que **não** pode ser comido: curva apertada de verdade
+    const serra: LatLng[] = [{ lat: 0, lng: 0 }];
+    {
+      let lat = 0;
+      let lng = 0;
+      for (let a = 0; a < 180; a += 5) {
+        const d = (2 * Math.PI * 20 * 5) / 360; // raio de 20 m, meia-volta
+        const rad = (a * Math.PI) / 180;
+        lng += Math.sin(rad) * d * GRAU_POR_METRO;
+        lat += Math.cos(rad) * d * GRAU_POR_METRO;
+        serra.push({ lat, lng });
+      }
+    }
+    const vSerra = cumulative(serra).at(-1) ?? 0;
+    expect(Math.abs(erro(measuredCumulative(serra).at(-1) ?? 0, vSerra))).toBeLessThan(0.05);
+
+    // e a rua com esquina arredondada de raio 25 m (a boca da curva inclusive)
+    const rua = ruaArredondada(5000, 5, 150, 25);
+    const vRua = cumulative(rua).at(-1) ?? 0;
+    for (const janela of [8, 20, 32, 50]) {
+      expect(erro(measuredCumulative(rua, janela).at(-1) ?? 0, vRua)).toBeCloseTo(0, 2);
+    }
+  });
+
+  it("o preço da janela de 50 m: serpentina longa e suave mede um pouco menos", () => {
+    /*
+     * 30 m de amplitude a cada 400 m é estrada sinuosa (raio ~600 m), e a janela
+     * de 50 m corta 1,5% dela. Com a janela antiga de 8 m o erro era 0,04%, mas
+     * a média não tirava o vaivém do GPS — e no arquivo real isso valia 0,8% de
+     * distância, muito mais do que custa aqui. Fica registrado como limite.
+     */
     const suave: LatLng[] = Array.from({ length: 4275 }, (_, i) => {
       const s = i * 5;
       return { lat: (30 * Math.sin((2 * Math.PI * s) / 400)) * GRAU_POR_METRO, lng: s * GRAU_POR_METRO };
     });
     const verdade = cumulative(suave).at(-1) ?? 0;
     const medido = measuredCumulative(suave).at(-1) ?? 0;
-    expect(Math.abs(erro(medido, verdade))).toBeLessThan(0.5);
+    expect(erro(medido, verdade)).toBeGreaterThan(-2);
+    expect(erro(medido, verdade)).toBeLessThan(-1);
+  });
+
+  it("o vaivém do GPS não é confundido com curva (é para isso que o span é de 40 m)", () => {
+    /*
+     * Num arquivo denso com ruído grande, o giro medido num span curto é mentira
+     * do sinal, e a guarda de curva acaba preservando o vaivém — o filtro para de
+     * filtrar. Medido nesta mesma reta (um ponto a cada 2,5 m, ruído de ±2,5 m
+     * correlacionado), com o span de 20 m o filtro media **+1,2%**; com 40 m,
+     * −0,05%. É o span que separa as duas coisas: o erro do rumo cai com a
+     * distância, o giro de uma curva de verdade não.
+     */
+    const suja = comRuido(reta(10_000, 2.5), 2.5, 99, 0.85);
+    const medido = measuredCumulative(suja).at(-1) ?? 0;
+    expect(Math.abs(erro(medido, 10_000))).toBeLessThan(0.5);
   });
 
   it("buildTrack mede com o filtro: é a distância que vai para o vídeo", () => {
@@ -538,34 +619,43 @@ describe("medida do arquivo (filtro de GPS)", () => {
     expect(Math.abs(erro(t.total, verdade))).toBeLessThan(1.2);
   });
 
-  it("a janela é medida em metros: a mesma faixa de caminho, em qualquer densidade", () => {
+  it("a janela não atravessa a esquina: sem isso a rua limpa media 2,5% a mais", () => {
     /*
-     * Uma ondulação de 2 m de amplitude a cada 30 m — geometria de verdade, com
-     * giro de ~24° por ponto (abaixo do limiar de curva). Uma média de ±8 **m**
-     * de caminho corta a amplitude para ~1,2 m; uma média de "±2 pontos" corta
-     * quase nada num arquivo denso e muito num arquivo esparso.
+     * O defeito medido: perto de uma esquina, a média pegava pontos dos dois
+     * lados dela e o traçado "estourava" ali — numa rua de cidade limpa (90° a
+     * cada 200 m) a janela de 32 m inventava **+2,5%** de distância, sem uma
+     * curva a mais para justificar. Travando a janela no ponto preservado, a
+     * mesma rua mede exatamente o que o arquivo diz, em qualquer janela.
      */
-    const ondulada = (passo: number): LatLng[] =>
-      Array.from({ length: Math.floor(2000 / passo) + 1 }, (_, i) => {
-        const s = i * passo;
-        return { lat: 2 * GRAU_POR_METRO * Math.sin((2 * Math.PI * s) / 30), lng: s * GRAU_POR_METRO };
-      });
-    for (const passo of [0.5, 1, 2]) {
-      const suave = smoothedPoints(ondulada(passo));
-      const desvios = suave.slice(3, -3).map((p) => Math.abs(p.lat / GRAU_POR_METRO));
-      const maxDesvio = Math.max(...desvios);
-      // amaciou (não deixou os 2 m)
-      expect(maxDesvio).toBeLessThan(1.5);
-      // mas não apagou: a ondulação é a geometria, não ruído
-      expect(maxDesvio).toBeGreaterThan(0.8);
+    const rua = ruaArredondada(6000, 5, 200, 25);
+    const verdade = cumulative(rua).at(-1) ?? 0;
+    for (const janela of [8, 16, 32, 50]) {
+      const medido = measuredCumulative(rua, janela).at(-1) ?? 0;
+      expect(erro(medido, verdade)).toBeCloseTo(0, 2);
     }
+  });
+
+  it("o ponto da curva fica exatamente onde o arquivo pôs", () => {
+    // a guarda preserva a coordenada; quem gira é só a vizinhança
+    const rua = ruaArredondada(2000, 5, 200, 25);
+    const suave = smoothedPoints(rua);
+    const cum = cumulative(rua);
+    let preservados = 0;
+    for (const i of rua.map((_, k) => k)) {
+      void cum;
+      if (suave[i].lat === rua[i].lat && suave[i].lng === rua[i].lng) preservados++;
+    }
+    // retas e curvas têm pontos fixos; o que não pode é nenhum (a guarda morta)
+    expect(preservados).toBeGreaterThan(rua.length * 0.2);
+    expect(suave[0]).toEqual(rua[0]);
+    expect(suave.at(-1)).toEqual(rua.at(-1));
   });
 
   it("as constantes do filtro são as medidas", () => {
     // se alguém mexer nelas, os números deste arquivo deixam de valer
-    expect(SMOOTH_WINDOW_M).toBe(8);
-    expect(SHARP_TURN_DEG).toBe(50);
-    expect(TURN_SPAN_M).toBe(20);
+    expect(SMOOTH_WINDOW_M).toBe(50);
+    expect(SHARP_TURN_DEG).toBe(30);
+    expect(TURN_SPAN_M).toBe(40);
     expect(SMOOTH_PASSES).toBe(2);
   });
 });

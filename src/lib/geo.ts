@@ -78,14 +78,25 @@ export function cumulative(pts: LatLng[]): number[] {
 }
 
 /**
- * Janela (em metros de caminho) da média móvel que tira o ruído do GPS.
+ * Meia-janela (em metros de caminho) da média móvel que tira o ruído do GPS.
  *
- * Medido numa reta de 21,4 km com 1 ponto a cada 5 m: somando ponto a ponto sem
- * filtro, um ruído de ±2 m infla a distância em **+2,4%**; com esta janela, em
- * +0,7%. É a diferença entre o vídeo mostrar 4:56 e 5:00 num percurso que o
- * Strava marca como 5:02.
+ * A janela é medida em **metros de caminho**, e não em quantidade de pontos: um
+ * arquivo de 1 Hz e outro de 10 Hz têm que medir a mesma distância. Ela vale para
+ * os dois lados: o ponto vira a média de até 50 m antes e 50 m depois.
+ *
+ * O valor foi calibrado num arquivo real de prova de rua (5.704 pontos, um a cada
+ * 3,6 m): somando ponto a ponto, o percurso rende **21,717 km**, e o Strava marca
+ * **21,370**. Com 8 m (o valor anterior) o app media 21,531 — 0,8% a mais, o que
+ * num vídeo de 1h47 aparecia como ritmo **4:58** onde o certo era **5:02**. Com
+ * esta janela mede 21,394 km (**5:02** com o tempo exato digitado na cartela).
+ *
+ * Uma janela larga assim só é segura por causa das outras duas regras abaixo: o
+ * ponto de curva fechada fica exatamente onde está, e a janela **não atravessa**
+ * essas curvas. Sem elas, esta janela cortava esquina de rua e media -1,3% de um
+ * percurso com curvas de raio 25 m e 150 m; com elas, erra -0,2% no mesmo
+ * percurso e -0,13% numa volta curta de quadra (900 m, cinco esquinas).
  */
-export const SMOOTH_WINDOW_M = 8;
+export const SMOOTH_WINDOW_M = 50;
 
 /**
  * Curvatura (em graus) a partir da qual o ponto é **preservado** como está.
@@ -94,8 +105,16 @@ export const SMOOTH_WINDOW_M = 8;
  * distância medida perdia 2,1% — e pé de ouvido isso é sumir com uma curva
  * inteira. Preservando os pontos de curva fechada, a mesma rua de cidade mede
  * exatamente o que mediava antes.
+ *
+ * São 30° medidos no trecho de 40 m (`TURN_SPAN_M` de cada lado), o que preserva
+ * curva de raio até ~76 m — a esquina arredondada de rua (raio 10 a 25 m),
+ * inclusive as **bocas** da curva. Era esse o defeito dos 50°: a esquina de raio
+ * 25 m dava 46° no meio (protegida) mas só 20-40° na entrada e na saída, e a
+ * média entrava justamente ali, comendo a curva: medido num percurso de 34,7 km
+ * com esquinas de raio 25 m e curvas de raio 150 m, o filtro perdia 1,3% com a
+ * janela de 50 m e 50°; com 30°, perde 0,27%.
  */
-export const SHARP_TURN_DEG = 50;
+export const SHARP_TURN_DEG = 30;
 
 /**
  * Distância (m) usada para medir a curva em cada ponto.
@@ -103,10 +122,17 @@ export const SHARP_TURN_DEG = 50;
  * **Não** se mede o giro entre dois pontos vizinhos: com ruído de GPS, um ponto
  * jogado 3 m para o lado num arquivo de 1 Hz vira uma "curva" de 50°, e aí o
  * filtro preserva tudo e não filtra nada (foi o primeiro defeito que apareceu,
- * medindo). O rumo é medido de 20 m antes até 20 m depois: o vaivém do sinal se
+ * medindo). O rumo é medido de 40 m antes até 40 m depois: o vaivém do sinal se
  * cancela, e uma esquina de verdade continua aparecendo inteira.
+ *
+ * O span é o que separa **vaivém de curva** quando os dois têm o mesmo tamanho
+ * aparente: o erro do rumo cai com o span (é ruído dividido por distância), e o
+ * giro de uma curva de verdade não muda com ele. Medido numa reta densa com
+ * ruído branco de ±2,5 m, o giro medido tem mediana de 23° num span de 20 m e de
+ * 13° num span de 40 m: com 20 m, o limiar de 30° preservava 36 pontos de cada
+ * 100 (o ruído passava inteiro); com 40 m, 5.
  */
-export const TURN_SPAN_M = 20;
+export const TURN_SPAN_M = 40;
 
 /**
  * Quantas passadas a média móvel dá.
@@ -160,7 +186,12 @@ function ultimoIndice(cum: number[], alvo: number): number {
  * 1. **as pontas e as curvas fechadas ficam como estão** — a média corta esquina
  *    de verdade, e uma esquina de rua não é ruído;
  * 2. **a janela é medida no caminho, e não em quantidade de pontos** — arquivos
- *    de 1 Hz e de 10 Hz têm que medir a mesma distância.
+ *    de 1 Hz e de 10 Hz têm que medir a mesma distância;
+ * 3. **a janela não atravessa uma curva fechada** — o trecho de média de cada
+ *    ponto começa depois da última esquina e termina antes da próxima. Sem isso,
+ *    a média pegava pontos dos dois lados da esquina e o traçado "estourava" ali
+ *    (medido numa rua de cidade limpa, 90° a cada 200 m: +2,5% de distância
+ *    inventada com janela de 32 m, sem curva nenhuma para justificar).
  */
 export function smoothedPoints(
   pts: LatLng[],
@@ -180,6 +211,21 @@ function umaPassada(pts: LatLng[], windowM: number): LatLng[] {
   if (n < 3) return pts.map(copia);
 
   const cum = cumulative(pts);
+  // quem fica exatamente onde está: as pontas e as curvas fechadas
+  const fixo = pts.map((_, i) => i === 0 || i === n - 1 || curvaFechada(pts, i, cum));
+  // vizinho fixo mais próximo de cada lado: é ele que limita a janela
+  const antes = new Int32Array(n);
+  const depois = new Int32Array(n);
+  let ultimo = -1;
+  for (let i = 0; i < n; i++) {
+    antes[i] = ultimo;
+    if (fixo[i]) ultimo = i;
+  }
+  ultimo = n;
+  for (let i = n - 1; i >= 0; i--) {
+    depois[i] = ultimo;
+    if (fixo[i]) ultimo = i;
+  }
   // prefixos das coordenadas: a média de cada janela sai em tempo constante
   const somaLat = new Float64Array(n + 1);
   const somaLng = new Float64Array(n + 1);
@@ -190,12 +236,17 @@ function umaPassada(pts: LatLng[], windowM: number): LatLng[] {
 
   const out: LatLng[] = [];
   for (let i = 0; i < n; i++) {
-    if (i === 0 || i === n - 1 || curvaFechada(pts, i, cum)) {
+    if (fixo[i]) {
       out.push(copia(pts[i]));
       continue;
     }
-    const lo = primeiroIndice(cum, cum[i] - windowM);
-    const hi = ultimoIndice(cum, cum[i] + windowM);
+    /*
+     * A janela **não atravessa** um ponto fixo: perto de uma esquina, a média
+     * só enxerga o lado do caminho em que o ponto está. É o que permite a janela
+     * ser larga o bastante para tirar o ruído sem inventar distância na curva.
+     */
+    const lo = Math.max(primeiroIndice(cum, cum[i] - windowM), antes[i] + 1);
+    const hi = Math.min(ultimoIndice(cum, cum[i] + windowM), depois[i] - 1);
     const m = hi - lo + 1;
     if (m < 2) {
       out.push(copia(pts[i]));

@@ -467,9 +467,8 @@ export function tilesForAnimation(
    * render usa) é maior que a tela. Sem isso, o vídeo sairia com buracos nas
    * diagonais.
    */
-  const push = (centro: LatLng, zoom: number, rumo: number, gira: boolean) => {
-    const antes = new Set(map.keys());
-    const v = vistaDe({
+  const vista = (centro: LatLng, zoom: number, rumo: number, gira: boolean) =>
+    vistaDe({
       centro,
       zoom,
       width,
@@ -481,15 +480,31 @@ export function tilesForAnimation(
       // com buracos no alto (blocos que o desenho pede e a conta não pediu)
       tilt: chase ? fatorDeTilt(camera) : 1,
     });
+
+  /**
+   * Quantos blocos desta vista ainda **não** estão no mapa.
+   *
+   * É o que permite perguntar "esta vista cabe?" **antes** de acrescentá-la. A
+   * primeira versão copiava o mapa inteiro a cada vista para poder desfazer —
+   * numa rota longa são centenas de vistas e uma cópia de mil blocos cada: a
+   * conta ficou 12x mais lenta (a sugestão de zoom no painel passou de 70 ms
+   * para 1 s).
+   */
+  const novosDaVista = (v: Vista) => {
+    let n = 0;
+    for (const [z, x, y] of tilesDaVista(v, 1)) if (!map.has(`${z}/${x}/${y}`)) n++;
+    return n;
+  };
+
+  const despejar = (v: Vista) => {
     for (const [z, x, y] of tilesDaVista(v, 1)) {
       const k = `${z}/${x}/${y}`;
       if (!map.has(k)) map.set(k, { url: tileUrl(bm, z, x, y), z, x, y });
     }
-    // as chaves que esta vista acrescentou (para desfazer, se não couber)
-    const novas: string[] = [];
-    for (const k of map.keys()) if (!antes.has(k)) novas.push(k);
-    return novas;
   };
+
+  const push = (centro: LatLng, zoom: number, rumo: number, gira: boolean) =>
+    despejar(vista(centro, zoom, rumo, gira));
 
   const b = boundsOf(track.pts);
   const centro = { lat: (b.north + b.south) / 2, lng: (b.east + b.west) / 2 };
@@ -522,21 +537,19 @@ export function tilesForAnimation(
     const zoomParada = Math.min(zoomEfetivo(camera) + STOP_BOOST, maxZoom);
     for (const ts of escolhidas) {
       const s = sampleTrack(track, ts);
-      const novas = push(s.pos, zoomParada, s.heading, true);
       /*
        * O teto manda mais que a parada: a vista extra é um **ganho** (o foco
        * chega mais perto), e não pode ser o motivo de a exportação ser recusada.
-       * Se a vista de uma parada não couber, ela é desfeita e as seguintes também
-       * não caberiam (o custo só cresce) — então para aqui.
+       * A pergunta é feita **antes** de acrescentar — e, se esta não couber, as
+       * seguintes também não caberiam (o custo só cresce), então para aqui.
        *
        * O que sobra do teto depois da rota é o que define quantas paradas ganham
        * a aproximação: numa rota curta e num quadro largo, todas; numa rota longa
        * em retrato, as primeiras.
        */
-      if (map.size > TILE_BUDGET) {
-        for (const k of novas) map.delete(k);
-        break;
-      }
+      const v = vista(s.pos, zoomParada, s.heading, true);
+      if (map.size + novosDaVista(v) > TILE_BUDGET) break;
+      despejar(v);
     }
   }
   return Array.from(map.values());

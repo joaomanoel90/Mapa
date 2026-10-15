@@ -11,6 +11,7 @@ import { findCharacter, gaitOf } from "./characters";
 import {
   SceneRenderer,
   PINO_CRESCE_S,
+  TILE_BUDGET,
   centroDoBloco,
   ladoDoBloco,
   andar,
@@ -1217,6 +1218,37 @@ describe("a parada perto do fim do vídeo", () => {
       expect(e.x1).toBeLessThanOrEqual(1080);
       expect(e.y1).toBeLessThanOrEqual(1920);
     }
+  });
+});
+
+describe("o orçamento de blocos com as paradas aproximadas", () => {
+  it("a parada perde o ganho de zoom antes de a exportação ser recusada", () => {
+    /*
+     * O teto de blocos manda mais que a parada. Numa rota de 30 km em 9:16 na
+     * terceira pessoa, só a rota pede ~1086 blocos, e cada parada aproximada
+     * custa mais uns 100: com a aproximação de 2,2 níveis o teto de 1400 é
+     * alcançado no meio da lista de paradas. O certo é a parada **seguinte**
+     * ficar sem a vista extra — e não a exportação ser recusada por causa de um
+     * enfeite (sem o corte, essa mesma rota pede ~1506 blocos).
+     */
+    const graus = 30 / 111.32;
+    const rota = buildTrack(
+      Array.from({ length: 4000 }, (_, i) => ({
+        lat: -23.5 + (i / 3999) * graus,
+        lng: -48.4 + (i / 3999) * graus * 0.35,
+      })),
+    );
+    const camera = { mode: "follow" as const, followZoom: 16, chase: { gira: false, tilt: true } };
+    const sem = tilesForAnimation(rota, camera, 1080, 1920, "osm", null).length;
+    const com = tilesForAnimation(rota, camera, 1080, 1920, "osm", {
+      opening: false,
+      stops: true,
+      stopTs: [0.2, 0.4, 0.6, 0.8],
+      chegada: true,
+    }).length;
+    expect(sem).toBeLessThan(TILE_BUDGET); // a rota sozinha cabe
+    expect(com).toBeLessThanOrEqual(TILE_BUDGET); // com as paradas também
+    expect(com).toBeGreaterThan(sem); // as paradas que couberam ganharam a vista
   });
 });
 

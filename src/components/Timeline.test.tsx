@@ -81,36 +81,22 @@ const bolinhas = (h: HTMLElement) =>
       ),
     }));
 
-describe("a barra do tempo com a freada nos pontos", () => {
-  it("sem freada (sem a função), a bolinha fica na posição da parada", () => {
-    // é o comportamento de sempre: o cursor é a rota
+describe("a barra do tempo com as paradas", () => {
+  it("a bolinha da parada fica na posição dela na rota", () => {
+    // sem a freada, o cursor do vídeo e a personagem andam juntos: a bolinha
+    // marca a passagem no lugar de sempre
     const b = bolinhas(desenhar({ progress: 0.1 }));
     expect(b.map((x) => x.esquerda)).toEqual([0.2, 0.8]);
   });
 
-  it("com a freada, a bolinha marca o **instante** da passagem", () => {
-    /*
-     * O ponto em 0,2 da rota só é alcançado perto do fim do vídeo (a curva anda
-     * devagar antes dele). A bolinha tem de ir para lá: é o instante em que o
-     * cursor cruza a parada, e é onde o clique leva.
-     */
-    const tempoDe = (t: number) => (t === 0.2 ? 0.55 : 0.95);
-    const b = bolinhas(desenhar({ progress: 0.1, rota: 0.05, tempoDoPonto: tempoDe }));
-    expect(b.map((x) => x.esquerda)).toEqual([0.55, 0.95]);
-  });
-
-  it("o clique na bolinha leva o vídeo ao instante da passagem", () => {
+  it("o clique na bolinha leva o vídeo até a passagem", () => {
     const buscados: number[] = [];
-    const h = desenhar({
-      rota: 0.05,
-      tempoDoPonto: (t) => (t === 0.2 ? 0.55 : 0.95),
-      onSeek: (t) => buscados.push(t),
-    });
+    const h = desenhar({ rota: 0.05, onSeek: (t) => buscados.push(t) });
     const alvo = [...h.querySelectorAll("button[title]")].find((b) =>
       (b.getAttribute("title") ?? "").includes("primeira"),
     ) as HTMLElement;
     act(() => alvo.click());
-    expect(buscados).toEqual([0.55]);
+    expect(buscados).toEqual([0.2]);
   });
 
   it("a distância e a próxima parada falam da rota, não do vídeo", () => {

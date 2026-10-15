@@ -8,6 +8,7 @@ import { CHASE_ALTURA, CHASE_ZOOM } from "../lib/camera";
 import { poiAnchor, poiLatLng, poiOffset, type Poi } from "../lib/pois";
 import { hasMark, type Endpoints } from "../lib/endpoints";
 import { keepsMarker, pinsAsDots } from "../lib/pins";
+import { tilesForAnimation } from "../lib/renderer";
 
 export type FlyTarget = {
   /** muda sempre que o usuário escolhe um destino novo */
@@ -256,6 +257,15 @@ export default function MapView(props: Props) {
       maxZoom: 20,
       maxNativeZoom: bm.maxZoom,
       attribution: bm.attribution,
+      /*
+       * O mapa da prévia não fica parado: no "Seguir" ele anda ~3 km/s de vídeo.
+       * Guardar mais blocos em volta (o padrão é 2) evita jogar fora e pedir de
+       * novo os que acabaram de sair da tela — e `updateWhenIdle: false` tira a
+       * espera do Leaflet entre um movimento e o pedido dos blocos novos: era
+       * por isso que a rolagem engasgava mesmo com a rede em dia.
+       */
+      keepBuffer: 6,
+      updateWhenIdle: false,
     });
     layer.addTo(map);
     tileRef.current = layer;
@@ -362,6 +372,15 @@ export default function MapView(props: Props) {
       dashArray: "2 10",
       lineCap: "round",
       interactive: false,
+      /*
+       * O traçado é redesenhado a cada quadro (a câmera do "Seguir" anda
+       * quilômetros por segundo), e o desenho custa o número de segmentos. O
+       * `smoothFactor` é a tolerância, em pixels, do encurtamento que o Leaflet
+       * já faz — com 3 em vez de 1, o GPX do usuário (5.704 pontos, 21,4 km)
+       * cai de 262 pontos desenhados no zoom 15 para **93**, e de 751 para 325
+       * no zoom 17. Num mapa de prévia, 3 px de folga no traço não se vê.
+       */
+      smoothFactor: 3,
     }).addTo(map);
     plannedRef.current = line;
 
@@ -375,6 +394,7 @@ export default function MapView(props: Props) {
       opacity: 0,
       className: "route-hit",
       bubblingMouseEvents: false,
+      smoothFactor: 3,
     }).addTo(map);
     hit.on("click", (e: L.LeafletMouseEvent) => {
       const near = nearestTOnTrack(track, { lat: e.latlng.lat, lng: e.latlng.lng });
@@ -384,6 +404,21 @@ export default function MapView(props: Props) {
   }, [track, showRoute, basemap]);
 
   /* --- trilha percorrida --- */
+  /**
+   * Os pontos da trilha são guardados como `LatLng` **uma vez só**.
+   *
+   * Antes, cada quadro montava a lista de novo (`track.pts.slice(…)` mais um
+   * `concat`, até 5.704 pontos) e o Leaflet convertia cada ponto da lista num
+   * `LatLng` novo — dezenas de milhares de objetos por segundo, jogados fora em
+   * seguida. Com a animação rodando, o mapa da prévia engasgava ("travando no
+   * percurso"). Aqui a lista é a mesma: o que entra é o ponto novo (e a ponta,
+   * que é o personagem), e ela é cortada quando o vídeo volta atrás.
+   */
+  const trilhaRef = useRef<{ track: Track | null; pontos: L.LatLng[] }>({
+    track: null,
+    pontos: [],
+  });
+
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
@@ -393,17 +428,33 @@ export default function MapView(props: Props) {
         weight: 5,
         opacity: 0.95,
         lineCap: "round",
+        // a trilha é redesenhada a cada quadro: vale o mesmo encurtamento da rota
+        smoothFactor: 3,
       }).addTo(map);
     }
     const line = traveledRef.current;
     line.setStyle({ color: accent });
+    const trilha = trilhaRef.current;
     if (track.pts.length < 2) {
       line.setLatLngs([]);
+      trilha.track = null;
+      trilha.pontos = [];
       return;
     }
+    if (trilha.track !== track) {
+      trilha.track = track;
+      trilha.pontos = track.pts.map((p) => L.latLng(p.lat, p.lng));
+    }
     const s = sampleTrack(track, progress);
-    const pts = track.pts.slice(0, s.index + 1).concat([s.pos]);
-    line.setLatLngs(pts);
+    /*
+     * A lista é sempre a mesma: corta no ponto atual — o que descarta a ponta do
+     * quadro anterior e, quando o vídeo volta atrás (arrastar a barra do tempo,
+     * recomeçar), a trilha que ficou para trás — e recoloca a ponta no
+     * personagem, que anda dentro do trecho até o trecho virar um ponto novo.
+     */
+    trilha.pontos.length = s.index + 1;
+    trilha.pontos[s.index + 1] = L.latLng(s.pos.lat, s.pos.lng);
+    line.setLatLngs(trilha.pontos);
   }, [track, progress, accent]);
 
   /* --- marcador do personagem --- */
@@ -481,6 +532,78 @@ export default function MapView(props: Props) {
       map.setView(centro, zoom, { animate: false });
     }
   }, [track, progress, rotate, character, playing, follow, followZoom, basemap, thirdPerson]);
+
+  /*
+   * --- o mapa da prévia é baixado **antes** de andar ---
+   *
+   * O pedido que sobrou: "melhore o carregamento do mapa, que ainda está
+   * travando no percurso". O vídeo exportado nunca sofreu disso — antes de
+   * gravar, o renderizador baixa todos os blocos da animação (`warmup`, com
+   * barra de progresso). A prévia andava sem esse aquecimento: o Leaflet pedia
+   * o bloco no instante em que ele entrava na tela, e com a câmera a ~3 km por
+   * segundo de vídeo ele nunca chegava a tempo. Aqui a prévia pede os mesmos
+   * blocos antes: são os do `tilesForAnimation`, a mesma conta do vídeo (e as
+   * mesmas URLs, então quem responde é o cache do navegador).
+   *
+   * Seis pedidos por vez, na ordem do percurso: o começo da animação fica
+   * pronto primeiro, e o resto chega enquanto o vídeo roda. Em 9:16, com a
+   * terceira pessoa e zoom 15, o GPX do usuário (21,4 km) são **430 blocos**.
+   */
+  const aquecidoRef = useRef<string>("");
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !playing || !follow || track.pts.length < 2) return;
+    const size = map.getSize();
+    if (size.x <= 0 || size.y <= 0) return;
+    const maxZoom = BASEMAPS[basemap].maxZoom;
+    // o Leaflet prende o zoom em nível inteiro: é esse nível que os blocos têm
+    // de casar (é o `zoomSnap` padrão, 1)
+    const zoom = Math.max(
+      3,
+      Math.min(maxZoom, Math.round(followZoom + (thirdPerson ? CHASE_ZOOM : 0))),
+    );
+    const chave = `${basemap}/${zoom}/${size.x}x${size.y}/${track.total.toFixed(0)}`;
+    if (aquecidoRef.current === chave) return;
+    aquecidoRef.current = chave;
+    const blocos = tilesForAnimation(
+      track,
+      {
+        mode: "follow",
+        // o `chase` entra para o enquadramento ser o da terceira pessoa (o
+        // personagem abaixo do centro): sem ele a conta pediria os blocos de
+        // uma vista centrada, e faltaria mapa no alto do quadro
+        followZoom: zoom - (thirdPerson ? CHASE_ZOOM : 0),
+        ...(thirdPerson ? { chase: { gira: false, tilt: false } } : {}),
+      },
+      size.x,
+      size.y,
+      basemap,
+      null,
+    );
+    let cancelado = false;
+    const fila = blocos.map((b) => b.url);
+    let i = 0;
+    const proximo = () => {
+      if (cancelado) return;
+      const lote = fila.slice(i, i + 6);
+      i += 6;
+      if (lote.length === 0) return;
+      let prontos = 0;
+      for (const url of lote) {
+        const img = new Image();
+        const fim = () => {
+          if (++prontos === lote.length) proximo();
+        };
+        img.onload = fim;
+        img.onerror = fim;
+        img.src = url;
+      }
+    };
+    proximo();
+    return () => {
+      cancelado = true;
+    };
+  }, [playing, follow, followZoom, thirdPerson, basemap, track]);
 
   /**
    * A pré-visualização com câmera "seguir" move o mapa. Guardamos a vista do

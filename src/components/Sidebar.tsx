@@ -652,8 +652,8 @@ function Sidebar(props: Props) {
           {s.cinematic &&
             (s.cameraMode === "follow" ? (
               <p className="text-[11px] leading-snug text-zinc-500">
-                Abertura sobrevoando a região (~2 s), freada e zoom em cima de cada
-                parada.
+                Abertura sobrevoando a região (~2 s) e, em cada parada, um zoom
+                com a câmera indo até o ponto — sem freada: o caminho não para.
               </p>
             ) : (
               <p className="text-[11px] leading-snug text-amber-300/80">

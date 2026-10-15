@@ -388,21 +388,22 @@ já está inteira na tela, e o painel avisa).
 - **Abertura:** o vídeo começa com a região inteira na tela — o mesmo
   enquadramento do "Rota toda" — e pousa na rota. Duração: 25% do vídeo, com
   teto de 2,6 s.
-- **Paradas:** chegando perto de uma parada marcada, a câmera **aproxima** 1,4
-  nível de zoom e volta depois de passar. É zoom, não desvio: o personagem
-  continua no centro. Duas paradas vizinhas não somam zoom, e a janela acompanha
-  a duração do vídeo (~1,2 s de cada lado).
-- **Freada:** a pessoa **desacelera** ao passar por cada parada — a 4× mais
-  devagar em cima dela, com o foco do zoom entrando junto. O tempo da freada sai
-  do próprio percurso (a duração escolhida não muda) e a rota inteira continua
-  sendo percorrida. A curva é uma função pura (`pacing.ts`), medida com o teto
-  de metade do percurso dentro das paradas: com 3 paradas a janela é ±11% da
-  rota, com 40 ela encolhe para ±0,8% em vez de o vídeo virar uma corrida entre
-  pontos. Vale para todas as **passagens** (uma parada visitada duas vezes freia
-  duas vezes). Quem manda no desenho é a **posição** — a câmera, a rota
-  percorrida, o anel do progresso e o próprio foco acompanham; a barra do tempo
-  mostra o relógio do vídeo e as bolinhas das paradas marcam o instante da
-  passagem, então clicar numa delas leva ao lugar certo.
+- **Paradas:** ao passar por uma parada marcada, a câmera **aproxima** 2,2
+  níveis de zoom **e vai até o ícone do ponto** — o ícone (com a foto e o nome)
+  termina o movimento no centro do quadro, em qualquer proporção de tela. O alvo
+  da câmera é avaliado **0,1 s à frente** do relógio do vídeo: a câmera suaviza o
+  alvo, e sem esse adiantamento o pico do zoom que aparece no vídeo caía 297 m
+  **depois** do ponto (medido no GPX de 21,4 km, com 8 paradas); com ele, o pico
+  cai em cima do ponto (0 m de mediana). O
+  caminho **não para**: não há freada, o personagem anda o tempo todo no mesmo
+  passo e a duração do vídeo não muda. A janela do zoom acompanha o percurso
+  (~1,6 s de cada lado) e encolhe quando há muitas paradas, de modo que uma
+  parada vizinha não recebe o zoom da outra: com 3 paradas a janela fica
+  praticamente a de antes, com 40 ela cai para ~0,9% da rota em vez de o zoom
+  ficar ligado a viagem inteira. Vale para todas as **passagens** (uma parada
+  visitada duas vezes recebe o zoom duas vezes). A barra do tempo mostra o
+  relógio do vídeo e as bolinhas das paradas marcam a passagem, então clicar
+  numa delas leva ao lugar certo.
 
 O alvo da câmera virou uma **função pura** (`camera.ts`) — antes morava dentro do
 `render`, misturado com a suavização, e não tinha como ser testado. Durante a
@@ -594,11 +595,12 @@ ficar por baixo dela.
   apagava a foto escolhida, inclusive do pino no mapa. Agora toda mudança passa
   por `patchMark`, que só troca o campo pedido.
 
-**Quem tem foto não vira aviso no topo.** O círculo com a foto já anuncia o lugar
-(e o nome dele está escrito embaixo); escrever de novo no topo seria repetir a
-mesma informação. Vale para as paradas e para a partida/chegada. Uma ressalva que
-importa: se a foto foi escolhida mas **não carregou**, o aviso volta a aparecer —
-melhor repetir do que o lugar passar em branco.
+**Não há aviso no topo da tela.** O aviso que anunciava a passagem (e a chegada)
+numa tarja no alto do vídeo foi **removido** — a pedido: quem anuncia o lugar é o
+próprio mapa. Nas paradas é o pino com o miolo da foto (ou o emoji) mais o bloco
+com a foto, o nome e o km; na partida e na chegada são os pinos A/B, com o nome
+e a foto desenhados ao lado. E o bloco da parada desvia da cartela final e dos
+selos A/B, então o lugar nunca fica escondido atrás de nada nem fora da moldura.
 
 **Onde a foto fica guardada:** a do projeto vai para o `localStorage` com o resto
 da cartela; a da partida/chegada vai junto dos locais; as das paradas vivem na
@@ -697,6 +699,27 @@ Com a **rota colorida** ligada o desenho é o mesmo caminho, feito em nove
 passadas (uma por faixa de cor) em vez de duas — e com os pontos visíveis
 projetados uma única vez por quadro em vetores reaproveitados. Sem esse cuidado
 seriam dezoito mil projeções por quadro num percurso longo visto de longe.
+
+### O mapa da prévia
+
+A pré-visualização anima o **mapa do Leaflet**, e o Leaflet pede um bloco de mapa
+no instante em que ele entra na tela: com a câmera a ~3 km por segundo de vídeo
+(21,4 km em 7,2 s de percurso) a imagem chegava sempre atrasada, e o mapa parecia
+**travar durante o percurso**. O vídeo exportado nunca sofreu disso — antes de
+gravar, o renderizador baixa todos os blocos da animação (`warmup`, com barra de
+progresso). Agora a prévia faz o mesmo aquecimento ao dar play: pede, seis de
+cada vez e na ordem do percurso, os blocos de `tilesForAnimation` — as mesmas
+URLs que o Leaflet vai pedir, então quem responde é o cache do navegador. Em
+9:16 com a terceira pessoa no zoom 15, o trajeto de 21,4 km são **430 blocos**.
+
+A **trilha percorrida** também era remontada a cada quadro (`slice` +
+`concat` de até 5.704 pontos, com um `LatLng` novo por ponto dentro do Leaflet).
+Agora a lista de `LatLng` é montada uma vez por rota e reusada: o que entra por
+quadro é a ponta (o personagem), e a lista é cortada quando o vídeo volta atrás.
+O traçado planejado, a área de clique e a trilha ainda ganham `smoothFactor: 3`
+(a tolerância de simplificação, em pixels, que o Leaflet já aplica): no GPX do
+usuário o traçado desenhado cai de 262 pontos para **93** no zoom 15 e de 751
+para **325** no 17.
 
 ### Muitos pinos
 

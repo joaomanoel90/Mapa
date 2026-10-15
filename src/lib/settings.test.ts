@@ -97,6 +97,13 @@ describe("sanitizeSettings", () => {
     expect(sanitizeSettings(raw({ spinMap: false })).spinMap).toBe(false);
   });
 
+  it("exige booleano também na inclinação do horizonte", () => {
+    expect(sanitizeSettings(raw({ tiltHorizonte: "sim" })).tiltHorizonte).toBeUndefined();
+    expect(sanitizeSettings(raw({ tiltHorizonte: true })).tiltHorizonte).toBe(true);
+    // e ela nasce **ligada**: é o que faz a terceira pessoa parecer uma câmera atrás
+    expect(DEFAULT_SETTINGS.tiltHorizonte).toBe(true);
+  });
+
   it("nasce com a linha sólida e as novidades desligadas", () => {
     // as três são facultativas: quem não mexer no painel não vê diferença
     expect(DEFAULT_SETTINGS.colorBy).toBe("solid");

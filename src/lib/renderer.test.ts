@@ -20,11 +20,12 @@ import {
   projetorDaVista,
   summaryBox,
   tilesDaVista,
+  tilesForAnimation,
   vistaDe,
   type FrameState,
   type SceneStyle,
 } from "./renderer";
-import { CHASE_ALTURA } from "./camera";
+import { CHASE_ALTURA, CHASE_TILT } from "./camera";
 import { project } from "./geo";
 import { endCard, rideSummary, type EndCard } from "./stats";
 
@@ -1317,30 +1318,76 @@ describe("partida e chegada no vídeo", () => {
     expect(ladoParada).toBeCloseTo(78, 0);
   });
 
-  it("a cartela final não cobre a chegada", () => {
-    // com a câmera que acompanha o personagem, a chegada cai no meio da tela —
-    // exatamente onde a cartela aparece (é o caso do vídeo do usuário)
+  it("a cartela sai de cima da chegada (em vez de o pino sair de baixo dela)", () => {
+    /*
+     * Com a câmera que acompanha o personagem, a chegada cai no meio da tela —
+     * exatamente onde a cartela nasce. O pedido é literal: "ajuste a cartela
+     * para não ficar em cima do ponto B na chegada". Quem se desloca agora é o
+     * **painel**: o pino, o nome e a foto ficam onde estavam.
+     */
     const seguir = { camera: { mode: "follow" as const, followZoom: 16 } };
+    const marcas = { a: null, b: LOCAL_B };
     const com = fakeCtx();
     desenhar(com.ctx, {
       ...estado(1, 14, cartela),
       ...seguir,
-      endpoints: { a: null, b: LOCAL_B },
+      endpoints: marcas,
       photos: cacheComFoto,
     });
-    const caixa = summaryBox(com.ctx, 1280, 720, { ...estado(1, 14, cartela), ...seguir }, 1);
+    // o pino da chegada fica na âncora da vista (a câmera está pousada nele)
+    const caixa = summaryBox(com.ctx, 1280, 720, { ...estado(1, 14, cartela), ...seguir }, 1, [
+      { x: 640, y: 360, r: 104 },
+    ]);
     expect(caixa).not.toBeNull();
+    const dentro = (y: number) => y > caixa!.boxY && y < caixa!.boxY + caixa!.boxH;
+    expect(dentro(360)).toBe(false); // o pino não está debaixo dela
+    expect(dentro(yAbsDe(com, "Cachoeira"))).toBe(false); // nem o nome
 
     const sem = fakeCtx();
     desenhar(sem.ctx, {
       ...estado(1, 14, null),
       ...seguir,
-      endpoints: { a: null, b: LOCAL_B },
+      endpoints: marcas,
       photos: cacheComFoto,
     });
-    // o nome da chegada sobe para ficar acima da cartela — e sem cartela fica onde sempre ficou
-    expect(yAbsDe(com, "Cachoeira")).toBeLessThan(yAbsDe(sem, "Cachoeira"));
-    expect(yAbsDe(com, "Cachoeira")).toBeLessThan(caixa!.boxY);
+    // e o nome ficou exatamente onde estava: o que se mexeu foi a cartela
+    expect(yAbsDe(com, "Cachoeira")).toBeCloseTo(yAbsDe(sem, "Cachoeira"), 6);
+  });
+
+  it("a cartela escolhe o lado mais perto do pino — e não sai da tela", () => {
+    const seguir = estado(1, 14, cartela);
+    const base = summaryBox(fakeCtx().ctx, 1280, 720, seguir, 1)!;
+    const altura = base.boxH;
+    const centro = base.boxY;
+    /** A caixa com um pino no lugar dado. */
+    const com = (y: number, r = 60) =>
+      summaryBox(fakeCtx().ctx, 1280, 720, seguir, 1, [{ x: 640, y, r }])!;
+    const encosta = (L: ReturnType<typeof com>, y: number, r: number) =>
+      L.boxY + L.boxH > y - r && L.boxY < y + r;
+
+    // 1) pino longe da caixa: a cartela fica onde sempre ficou
+    expect(com(20).boxY).toBeCloseTo(centro, 6);
+
+    // 2) pino colado no alto, encostando na caixa: ela desce e cabe inteira
+    const alto = com(centro - 40);
+    expect(alto.boxY).toBeGreaterThan(centro);
+    expect(alto.boxY + altura).toBeLessThanOrEqual(720.001);
+    expect(encosta(alto, centro - 40, 60)).toBe(false);
+
+    // 3) pino no fundo: ela sobe, e também cabe
+    const fundo = com(centro + altura + 40);
+    expect(fundo.boxY).toBeLessThan(centro);
+    expect(fundo.boxY).toBeGreaterThanOrEqual(0);
+    expect(encosta(fundo, centro + altura + 40, 60)).toBe(false);
+
+    // 4) empate (pino centrado na tela): desce — em cima ficam o HUD e o aviso
+    const empate = com(360);
+    expect(empate.boxY).toBeGreaterThan(centro);
+    expect(encosta(empate, 360, 60)).toBe(false);
+
+    // 5) pino grande cobrindo a tela toda: não há para onde ir, ela fica
+    const semSaida = com(360, 400);
+    expect(semSaida.boxY).toBeCloseTo(centro, 6);
   });
 
   it("pino acima ou abaixo da cartela não se mexe (só quem ela alcança desvia)", () => {
@@ -1763,6 +1810,49 @@ describe("o andar do personagem", () => {
     }
   });
 
+  it("nas curvas o corpo se inclina **devagar**: sem degrau de um quadro para o outro", () => {
+    /*
+     * O outro lado do "brusco nas curvas": `inclinacaoDaCurva` olha 30 m de
+     * traçado e, quando o índice muda de ponto, o ângulo muda de degrau. O
+     * usuário viu isso como o corpo entortando de uma vez. Aqui a inclinação é
+     * suavizada no tempo e o teste mede o maior degrau entre quadros.
+     */
+    const G = 1 / 111320;
+    const rad = (25 * Math.PI) / 180;
+    const pts = [{ lat: 0, lng: 0 }];
+    let x = 0;
+    let y = 0;
+    for (let i = 0; i < 8; i++) {
+      x += 20;
+      pts.push({ lat: y * G, lng: x * G });
+    }
+    for (let i = 0; i < 24; i++) {
+      x += 20 * Math.cos(rad);
+      y += 20 * Math.sin(rad);
+      pts.push({ lat: y * G, lng: x * G });
+    }
+    const curva = buildTrack(pts);
+    const tl = buildTimeline(14, { voo: false, cartela: false });
+    const r = new SceneRenderer("dark");
+    const serie: number[] = [];
+    const N = Math.round(tl.percurso * 30);
+    for (let i = 0; i <= N; i++) {
+      const instante = i / 30;
+      const f = fakeCtx();
+      r.render(f.ctx as never, 1280, 720, {
+        ...estado(Math.min(1, instante / tl.percurso), 14, null, null, null, tl),
+        track: curva,
+        elapsed: instante,
+      });
+      serie.push(r.inclinacaoDoQuadro as number);
+    }
+    const saltos = serie.slice(1).map((v, i) => Math.abs(v - serie[i]));
+    // 1,5° num quadro de 30 quadros/s = 45°/s: acima disso o corpo "entorta"
+    expect(Math.max(...saltos)).toBeLessThan(1.5);
+    // e mesmo assim a curva inclina o corpo de verdade
+    expect(Math.max(...serie.map(Math.abs))).toBeGreaterThan(3);
+  });
+
   it("na curva o corpo se inclina; na reta, não", () => {
     const reta = buildTrack([
       { lat: 0, lng: 0, ele: 0, t: 0 },
@@ -2071,6 +2161,93 @@ describe("terceira pessoa", () => {
     const amplitude = Math.max(...alturas) - Math.min(...alturas);
     // poucos pixels neste traçado curto, mas é o que a âncora elimina por completo
     expect(amplitude).toBeGreaterThan(5);
+  });
+
+  it("a inclinação do horizonte comprime o alto e não move o personagem", () => {
+    /*
+     * O pedido: "dar uma inclinação para enxergar o horizonte". Um mapa de cima
+     * não tem horizonte; o que se faz é comprimir a parte de cima, de modo que
+     * o mundo acima do personagem caiba mais longe na mesma tela (o longe fica
+     * pequeno, como o chão visto de rasão).
+     */
+    const centro = { lat: -23.5, lng: -48.4 };
+    const W = 1280;
+    const H = 720;
+    const sem = vistaDe({ centro, zoom: 16, width: W, height: H, altura: CHASE_ALTURA });
+    const com = vistaDe({
+      centro,
+      zoom: 16,
+      width: W,
+      height: H,
+      altura: CHASE_ALTURA,
+      tilt: CHASE_TILT,
+    });
+    const ponto = project(centro.lat, centro.lng, sem.z);
+    // um ponto 200 unidades de mundo **acima** do personagem
+    const acima = (v: ReturnType<typeof vistaDe>) =>
+      projetorDaVista(v)(ponto.x, ponto.y - 200).y;
+    const ancora = H * CHASE_ALTURA;
+    // o personagem (a âncora) não se move…
+    expect(Math.abs(projetorDaVista(com)(ponto.x, ponto.y).y - ancora)).toBeLessThan(1e-6);
+    // …e o que está acima dele chega mais perto do horizonte
+    expect(ancora - acima(com)).toBeLessThan(ancora - acima(sem));
+    expect(ancora - acima(com)).toBeCloseTo((ancora - acima(sem)) * CHASE_TILT, 6);
+    // o mundo que a tela enxerga cresce (é o que dá a sensação de profundidade)
+    const alturaSem = (sem.y1 - sem.y0) * sem.s;
+    const alturaCom = (com.y1 - com.y0) * com.s;
+    expect(alturaCom).toBeGreaterThan(alturaSem * 1.4);
+  });
+
+  it("no desenho, a inclinação comprime de verdade o que está à frente", () => {
+    /*
+     * O teste acima prova a conta da vista; este prova que o **desenho** a usa.
+     * Com a inclinação, tudo o que não é a âncora se aproxima dela na vertical
+     * — o que está atrás sobe, o que está à frente desce. Se o renderizador
+     * esquecesse a inclinação na hora de desenhar, os dois quadros ficariam
+     * iguais (e o mapa apareceria com buracos no alto, porque os blocos são
+     * pedidos com ela).
+     */
+    const camera = { mode: "follow" as const, followZoom: 15 };
+    const comTilt = { ...camera, chase: { gira: false, tilt: true } };
+    const semTilt = { ...camera, chase: { gira: false, tilt: false } };
+    // uma parada que o personagem **já passou**: a etiqueta dela está na tela
+    const paradaAtras = parada({ t: 0.35 });
+    /*
+     * A marca no chão da parada (`arc.arc`) é desenhada em coordenadas de tela:
+     * é a posição que interessa. O rótulo não serve — ele é desenhado dentro de
+     * um `translate`/`scale`, então o que o `fakeCtx` anota é a posição local.
+     */
+    const quadro = (cam: typeof comTilt | typeof semTilt) => {
+      const f = fakeCtx();
+      desenhar(f.ctx, { ...estado(0.5, 30, null), camera: cam, stops: [paradaAtras] });
+      const marca = f.arcosPos.find((a) => a[2] > 3 && a[2] < 5);
+      return marca ? { x: marca[0], y: marca[1] } : null;
+    };
+    const com = quadro(comTilt);
+    const sem = quadro(semTilt);
+    expect(com).not.toBeNull();
+    expect(sem).not.toBeNull();
+    const ancora = 720 * CHASE_ALTURA;
+    // a compressão é só vertical: o x não muda em nada
+    expect(com!.x).toBeCloseTo(sem!.x, 6);
+    // e a distância até o personagem encolhe (o quadro comprimiu a vertical)
+    const dSem = Math.abs(sem!.y - ancora);
+    const dCom = Math.abs(com!.y - ancora);
+    expect(dSem).toBeGreaterThan(100); // a parada está longe o bastante para medir
+    expect(dCom).toBeLessThan(dSem * 0.85);
+  });
+
+  it("a inclinação faz o vídeo pedir mais blocos de mapa (senão sairia burado)", () => {
+    const camera = { mode: "follow" as const, followZoom: 16, chase: { gira: false, tilt: true } };
+    const comTilt = tilesForAnimation(track, camera, 1280, 720, "dark").length;
+    const semTilt = tilesForAnimation(
+      track,
+      { ...camera, chase: { gira: false, tilt: false } },
+      1280,
+      720,
+      "dark",
+    ).length;
+    expect(comTilt).toBeGreaterThan(semTilt);
   });
 
   it("no vídeo, o personagem desce na tela e a seta aponta para cima", () => {

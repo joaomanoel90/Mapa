@@ -15,6 +15,8 @@ import { averagePace, elapsedAt, formatClock, formatPace, speedAt } from "./hud"
 import {
   cameraTarget,
   CHASE_ALTURA,
+  CHASE_TILT,
+  fatorDeTilt,
   STOP_BOOST,
   zoomEfetivo,
   type ChaseConfig,
@@ -273,6 +275,14 @@ export function vistaDe(input: {
   altura?: number;
   /** graus: gira o mapa (o rumo do personagem para cima) */
   angulo?: number;
+  /**
+   * Compressão vertical da vista (1 = de cima; ver `CHASE_TILT`).
+   *
+   * A compressão é feita **em volta da âncora** (o ponto onde o personagem
+   * está), então o personagem não se move na tela quando a inclinação entra —
+   * o que muda é quanto do mundo aparece acima dele.
+   */
+  tilt?: number;
 }): Vista {
   const { centro, width, height, maxZoom = 19 } = input;
   const altura = input.altura ?? 0.5;
@@ -284,11 +294,19 @@ export function vistaDe(input: {
   const cos = Math.cos(rad);
   const sin = Math.sin(rad);
   const a = s * cos;
-  const b = s * sin;
+  /*
+   * A inclinação comprime a **linha vertical** da matriz (b e d), na altura da
+   * âncora: o ponto onde o personagem está não sai do lugar e o que muda é o
+   * quanto do mundo cabe acima dele — a parte de cima do quadro vira o fundo do
+   * cenário, pequena e longe, e a de baixo fica o chão perto.
+   */
+  const tilt = Math.max(0.3, Math.min(1, input.tilt ?? 1));
+  const ancora = height * altura;
+  const b = s * sin * tilt;
   const c = -s * sin;
-  const d = s * cos;
+  const d = s * cos * tilt;
   const e = width / 2 - (a * P.x + c * P.y);
-  const f = height * altura - (b * P.x + d * P.y);
+  const f = tilt * (ancora - (s * sin * P.x + s * cos * P.y)) + ancora * (1 - tilt);
   const det = a * d - b * c;
   const inverso = (sx: number, sy: number) => ({
     x: (d * (sx - e) - c * (sy - f)) / det,
@@ -406,6 +424,9 @@ export function tilesForAnimation(
       maxZoom,
       altura: chase ? CHASE_ALTURA : 0.5,
       angulo: chase?.gira && gira ? -rumo : 0,
+      // com a inclinação o quadro olha mais longe: sem ela aqui, o vídeo sairia
+      // com buracos no alto (blocos que o desenho pede e a conta não pediu)
+      tilt: chase ? fatorDeTilt(camera) : 1,
     });
     for (const [z, x, y] of tilesDaVista(v, 1)) {
       const k = `${z}/${x}/${y}`;
@@ -490,6 +511,14 @@ const RUMO_TAU_S = 0.6;
  */
 const RUMO_MAX_GRAUS_S = 120;
 
+/**
+ * Constante de tempo da inclinação do corpo na curva (segundos de vídeo).
+ *
+ * Menor que a da virada: o corpo acompanha a curva de perto — o que se tira
+ * aqui é o degrau, não a resposta.
+ */
+const INCLINACAO_TAU_S = 0.35;
+
 /** Constante de tempo da câmera que acompanha o personagem (segundos). */
 const CAM_TAU_FOLLOW = 0.24;
 /** A câmera parada ("Rota toda") não precisa de tanta pressa. */
@@ -501,6 +530,8 @@ export class SceneRenderer {
   private cam: Camera | null = null;
   /** o rumo do quadro anterior (ver `suavizarRumo`) */
   private rumoSuave: number | null = null;
+  /** a inclinação do corpo no quadro anterior (ver `suavizarInclinacao`) */
+  private inclinacaoSuave: number | null = null;
   private instanteAnterior: number | null = null;
   private store: TileStore;
   /** pontos visíveis já projetados, reaproveitados entre os quadros */
@@ -527,6 +558,11 @@ export class SceneRenderer {
     return this.rumoSuave;
   }
 
+  /** A inclinação do corpo que o último quadro desenhou (graus). */
+  get inclinacaoDoQuadro(): number | null {
+    return this.inclinacaoSuave;
+  }
+
   /** quantos tiles já estão prontos para desenhar */
   get loadedTiles(): number {
     return this.store.loadedCount;
@@ -540,6 +576,7 @@ export class SceneRenderer {
   reset() {
     this.cam = null;
     this.rumoSuave = null;
+    this.inclinacaoSuave = null;
     this.instanteAnterior = null;
   }
 
@@ -568,6 +605,25 @@ export class SceneRenderer {
     this.instanteAnterior = elapsed;
     if (anterior === null) return 0;
     return Math.max(0, Math.min(0.5, elapsed - anterior));
+  }
+
+  /**
+   * A inclinação do corpo na curva, suavizada no tempo.
+   *
+   * `inclinacaoDaCurva` olha 30 m de traçado para trás e para frente: quando o
+   * índice muda de ponto, o ângulo muda de degrau — e, desenhado cru, o corpo
+   * entortava de uma vez a cada ponto (era o "brusco nas curvas" que o usuário
+   * viu). Com o mesmo filtro do rumo, a curva é feita como quem realmente
+   * inclina o corpo, e não como quem bate num batente.
+   */
+  private suavizarInclinacao(alvo: number, dt: number): number {
+    if (this.inclinacaoSuave === null || dt <= 0) {
+      this.inclinacaoSuave = alvo;
+      return alvo;
+    }
+    const k = 1 - Math.exp(-dt / INCLINACAO_TAU_S);
+    this.inclinacaoSuave += (alvo - this.inclinacaoSuave) * k;
+    return this.inclinacaoSuave;
   }
 
   private suavizarRumo(heading: number, dt: number): number {
@@ -707,6 +763,15 @@ export class SceneRenderer {
      */
     const chase = camera.mode === "follow" ? camera.chase ?? null : null;
     /**
+     * A inclinação do quadro entra junto com o pouso do voo.
+     *
+     * Durante a abertura a câmera está no alto olhando a região de cima (uma
+     * vista de mapa, sem horizonte); inclinar ali só estragaria o voo. Ela entra
+     * no pouso, com a terceira pessoa, e daí não sai mais.
+     */
+    const tiltAlvo = chase ? fatorDeTilt(camera) : 1;
+    const tilt = 1 + (tiltAlvo - 1) * (chase ? target.opening : 0);
+    /**
      * Onde o quadro é ancorado.
      *
      * Na terceira pessoa o centro é a **posição do personagem**, e não a câmera
@@ -732,6 +797,7 @@ export class SceneRenderer {
       maxZoom,
       altura: 0.5 + (CHASE_ALTURA - 0.5) * (chase ? target.opening : 0),
       angulo: anguloMapa,
+      tilt,
     });
     const { z, s, x0, y0, x1, y1 } = vista;
     const projeta = projetorDaVista(vista);
@@ -787,9 +853,23 @@ export class SceneRenderer {
    * A cartela final é **medida** antes de qualquer desenho: o pino da chegada
    * precisa saber onde ela vai cair para sair de baixo. Antes ela era desenhada
    * por último (por cima) e cobria o pino B, o nome e a foto da chegada.
+   *
+   * E ela mesma sai da frente das duas pontas: a chegada costuma acontecer no
+   * meio da tela, que é onde a cartela nasce (o usuário viu a cartela em cima do
+   * ponto B). O raio cobre o pino, o nome e a foto do lugar — o pino é o que não
+   * pode sumir atrás do painel.
    */
+  const lugaresDasPontas: { x: number; y: number; r: number }[] = [];
+  if (style.showEndpoints && track.pts.length > 1) {
+    for (const p of [track.pts[0], track.pts[track.pts.length - 1]]) {
+      const t = toXY(p);
+      if (t.x > -60 && t.x < width + 60 && t.y > -60 && t.y < height + 60) {
+        lugaresDasPontas.push({ x: t.x, y: t.y, r: 104 * sf });
+      }
+    }
+  }
   const cartao = style.showSummary
-    ? summaryBox(ctx, width, height, input, sf)
+    ? summaryBox(ctx, width, height, input, sf, lugaresDasPontas)
     : null;
   const retanguloDaCartela = (L: SummaryLayout) => ({
     x: L.boxX,
@@ -894,8 +974,39 @@ export class SceneRenderer {
       drawStops(ctx, input, toXY, sf);
     }
 
+    /*
+     * --- o horizonte ---
+     *
+     * Com a inclinação, o alto do quadro é o fundo do cenário: ele ganha uma
+     * névoa que vai do fundo do mapa (opaco) até nada, na altura da âncora. O
+     * que está longe fica mais claro e some — é o que dá a leitura de
+     * profundidade que a compressão sozinha não dá. Entra **antes** do
+     * personagem e dos pinos: eles são o primeiro plano e não podem ficar
+     * enevoados.
+     */
+    if (tilt < 1) {
+      const forca = (1 - tilt) / (1 - CHASE_TILT);
+      const linha = height * CHASE_ALTURA;
+      const nevoa = ctx.createLinearGradient(0, 0, 0, linha);
+      nevoa.addColorStop(0, hexA(bm.bg, 0.94 * forca));
+      nevoa.addColorStop(0.5, hexA(bm.bg, 0.42 * forca));
+      nevoa.addColorStop(1, hexA(bm.bg, 0));
+      ctx.save();
+      ctx.fillStyle = nevoa;
+      ctx.fillRect(0, 0, width, linha);
+      ctx.restore();
+    }
+
     // --- personagem ---
-    drawCharacter(ctx, toXY(sample.pos), rumo + anguloMapa, input, sf, sample.index);
+    drawCharacter(
+      ctx,
+      toXY(sample.pos),
+      rumo + anguloMapa,
+      input,
+      sf,
+      // a inclinação do corpo também é suavizada (ver `suavizarInclinacao`)
+      this.suavizarInclinacao(inclinacaoDaCurva(track, sample.index), dt),
+    );
 
     /*
      * --- pontos de partida e chegada ---
@@ -1125,13 +1236,18 @@ function drawCharacter(
   rumo: number,
   input: FrameState,
   sf: number,
-  indice: number,
+  /**
+   * A inclinação do corpo na curva, em graus — **já suavizada** por quem
+   * desenha (`suavizarInclinacao`). Ela vem de fora e não é calculada aqui
+   * porque o cálculo puro (`inclinacaoDaCurva`) muda de degrau em degrau quando
+   * o traçado muda de ponto, e era isso que ficava brusco nas curvas.
+   */
+  inclina: number,
 ) {
   const { character, style, rotate, elapsed } = input;
   const badge = Math.round(Math.max(38, Math.min(86, 62 * sf)) * (character.size ?? 1));
   const respira = 1 + 0.05 * Math.sin(elapsed * 4);
   const { sobe, lado, estica } = andar(input, character);
-  const inclina = inclinacaoDaCurva(input.track, indice);
 
   ctx.save();
   ctx.translate(at.x + lado * badge, at.y + sobe * badge);
@@ -2200,6 +2316,15 @@ export function summaryBox(
   height: number,
   input: FrameState,
   sf: number,
+  /**
+   * Lugares que a cartela **não pode cobrir** (normalmente os pinos A e B).
+   *
+   * A cartela é centrada na tela e a chegada acontece no meio dela: o usuário
+   * via a cartela em cima do ponto B (\"ajuste a cartela para não ficar em cima
+   * do ponto B na chegada\"). Aqui ela sai do caminho — sobe ou desce o
+   * mínimo necessário, ficando com a tela toda de folga se couber.
+   */
+  evitar?: { x: number; y: number; r: number }[] | null,
 ): SummaryLayout | null {
   const card = input.summary;
   if (!card || (card.tiles.length === 0 && !card.note)) return null;
@@ -2305,8 +2430,33 @@ export function summaryBox(
     (nota ? noteFs * 1.5 : 0) +
     pad * 1.6;
   const boxX = (width - boxW) / 2;
-  const boxY = (height - altura) / 2;
+  const margem = 18 * sf;
+  let boxY = Math.max(margem, Math.min(height - altura - margem, (height - altura) / 2));
 
+  /*
+   * Sai da frente dos pinos das pontas: para cada lugar que a caixa alcançaria,
+   * escolhe o lado (acima ou abaixo) que exige o menor deslocamento — e só
+   * desloca se a caixa couber inteira naquele lado. Onde não couber, fica como
+   * está e o pino é quem se desvia (ver `liftToClear`).
+   */
+  for (const ob of evitar ?? []) {
+    const topoObs = ob.y - ob.r;
+    const baseObs = ob.y + ob.r;
+    if (boxY + altura <= topoObs || boxY >= baseObs) continue;
+    const acima = topoObs - margem - altura;
+    const abaixo = baseObs + margem;
+    const cabeAcima = acima >= margem;
+    const cabeAbaixo = abaixo + altura <= height - margem;
+    if (cabeAcima && cabeAbaixo) {
+      // empate resolve para **baixo**: em cima ficam o HUD e o aviso do lugar,
+      // e a cartela cobriria justamente os números que ela está repetindo
+      boxY = Math.abs(abaixo - boxY) <= Math.abs(acima - boxY) ? abaixo : acima;
+    } else if (cabeAcima) {
+      boxY = acima;
+    } else if (cabeAbaixo) {
+      boxY = abaixo;
+    }
+  }
 
   return {
     alpha,

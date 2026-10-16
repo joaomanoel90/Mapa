@@ -459,6 +459,50 @@ export function targetView(input: {
   );
 }
 
+/**
+ * O bloco que cobre um bloco que **ainda não chegou**: o pai dele, esticado.
+ *
+ * O desenho pede o bloco do nível de zoom em vigor. Quando a câmera muda de
+ * nível — o zoom da parada é o caso mais visível, são 2,2 níveis de uma vez — o
+ * nível novo não está no mapa ainda, e o que ficava no lugar era **nada**: um
+ * pedaço do fundo no meio do quadro até o bloco chegar. No arquivo do usuário
+ * isso aparece como o mapa "pulando" na aproximação da parada.
+ *
+ * Com o pai, o buraco nunca existe: em vez de um quadro vazio, aparece a imagem
+ * do nível anterior esticada (borrada por um instante, e logo substituída pela
+ * exata). A sub-área do pai que cobre o filho é a mesma área do mundo, então o
+ * retângulo de destino é o mesmo do filho — só o recorte de origem muda.
+ *
+ * Devolve `null` quando não há nenhum ancestral no mapa.
+ */
+export function blocoDeReserva(
+  store: { get(z: number, x: number, y: number): TileImage | null },
+  z: number,
+  x: number,
+  y: number,
+  niveis = 3,
+): { img: TileImage; sx: number; sy: number; sw: number; sh: number } | null {
+  for (let k = 1; k <= niveis; k++) {
+    const pz = z - k;
+    if (pz < 0) return null;
+    const m = 2 ** k;
+    const px = Math.floor(x / m);
+    const py = Math.floor(y / m);
+    const img = store.get(pz, px, py);
+    if (!img) continue;
+    const largura = Math.max(1, Number(img.width) || TILE_SIZE) / m;
+    const altura = Math.max(1, Number(img.height) || TILE_SIZE) / m;
+    return {
+      img,
+      sx: (x - px * m) * largura,
+      sy: (y - py * m) * altura,
+      sw: largura,
+      sh: altura,
+    };
+  }
+  return null;
+}
+
 function tilesInView(
   view: View,
   width: number,
@@ -838,14 +882,33 @@ export class SceneRenderer {
   }
 
   /** pré-carrega as imagens usadas na animação (retorna promise que resolve ao final) */
+  /**
+   * Baixa, antes de gravar, **todos os blocos que a animação vai desenhar**.
+   *
+   * O `foco` é o mesmo que o desenho usa (`focoDasParadas`): sem ele, as vistas
+   * das paradas eram baixadas no ponto da **rota** e o vídeo chegava no lugar da
+   * parada — o pino arrastado para fora da linha — com os blocos faltando. Era
+   * o mapa aparecendo aos pedaços durante a gravação, que é justamente o que o
+   * usuário pediu para resolver ("entender a rota, baixar todo o mapa necessário
+   * para depois criar o vídeo").
+   */
   async warmup(
     track: Track,
     camera: CameraConfig,
     width: number,
     height: number,
     onProgress: (p: number) => void,
+    foco?: FocusPoint | null,
   ): Promise<void> {
-    const refs = tilesForAnimation(track, camera, width, height, this.store.basemap);
+    const refs = tilesForAnimation(
+      track,
+      camera,
+      width,
+      height,
+      this.store.basemap,
+      camera.cinematic,
+      foco,
+    );
     const seen = new Set<string>();
     const unique = refs.filter((r) => {
       const k = `${r.z}/${r.x}/${r.y}`;
@@ -1152,11 +1215,25 @@ export class SceneRenderer {
     ctx.imageSmoothingQuality = "high";
     for (const [tz, tx, ty] of tilesDaVista(vista)) {
       this.store.request(tz, tx, ty);
+      const r = retanguloDoBloco(vista, tx * TILE_SIZE, ty * TILE_SIZE, TILE_SIZE);
       const img = this.store.get(tz, tx, ty);
       if (img) {
-        const r = retanguloDoBloco(vista, tx * TILE_SIZE, ty * TILE_SIZE, TILE_SIZE);
+        ctx.drawImage(img as CanvasImageSource, r.x - origemX, r.y - origemY, r.w, r.h);
+        continue;
+      }
+      /*
+       * O bloco deste nível não chegou (a câmera acabou de mudar de zoom): o do
+       * nível anterior entra no lugar, esticado. É o que impede o buraco no meio
+       * do quadro — que era o "mapa pulando" na aproximação das paradas.
+       */
+      const pai = blocoDeReserva(this.store, tz, tx, ty);
+      if (pai) {
         ctx.drawImage(
-          img as CanvasImageSource,
+          pai.img as CanvasImageSource,
+          pai.sx,
+          pai.sy,
+          pai.sw,
+          pai.sh,
           r.x - origemX,
           r.y - origemY,
           r.w,

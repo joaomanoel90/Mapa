@@ -6,6 +6,7 @@ export default function Timeline({
   progress,
   rota,
   playing,
+  preparo,
   duration,
   track,
   emoji,
@@ -29,6 +30,12 @@ export default function Timeline({
    */
   rota?: number;
   playing: boolean;
+  /**
+   * Preparo do mapa antes de andar: `{feito,total}` enquanto baixa os primeiros
+   * blocos e `null` quando já pode tocar. Quem espera é a prévia — a rota é
+   * conhecida antes, e o mapa do começo é baixado antes de o relógio andar.
+   */
+  preparo?: { feito: number; total: number } | null;
   duration: number;
   track: Track;
   emoji: string;
@@ -57,9 +64,16 @@ export default function Timeline({
           type="button"
           disabled={disabled}
           onClick={onToggle}
+          title={preparo ? "Baixando o mapa do começo do percurso…" : undefined}
           className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-gradient-to-b from-violet-500 to-indigo-600 text-lg text-white shadow-lg shadow-indigo-950/50 transition hover:brightness-110 active:scale-95 disabled:opacity-40"
         >
-          {playing ? "❚❚" : "▶"}
+          {preparo ? (
+            <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/25 border-t-white" />
+          ) : playing ? (
+            "❚❚"
+          ) : (
+            "▶"
+          )}
         </button>
         <button
           type="button"
@@ -109,6 +123,14 @@ export default function Timeline({
               );
             })}
           </div>
+          {preparo && (
+            <p className="mt-1 flex items-center gap-1.5 text-[11px] font-semibold text-violet-300">
+              <span className="h-2.5 w-2.5 animate-spin rounded-full border-2 border-violet-400/30 border-t-violet-300" />
+              Preparando o mapa do começo…
+              {preparo.total > 0 && ` ${Math.min(100, Math.round((preparo.feito / preparo.total) * 100))}%`}
+              <span className="font-normal text-zinc-500">— o resto chega andando</span>
+            </p>
+          )}
           <div className="mt-1 flex items-center justify-between gap-2 text-[11px] font-medium text-zinc-400">
             <span className="flex items-center gap-1.5 truncate">
               <span className="text-sm leading-none">{emoji}</span>

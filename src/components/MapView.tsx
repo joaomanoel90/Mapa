@@ -9,6 +9,7 @@ import { poiAnchor, poiLatLng, poiOffset, type Poi } from "../lib/pois";
 import { hasMark, type Endpoints } from "../lib/endpoints";
 import { keepsMarker, pinsAsDots } from "../lib/pins";
 import { tilesForAnimation } from "../lib/renderer";
+import { PREVIA_ESPERA_MS, blocosEssenciais } from "../lib/previa";
 
 export type FlyTarget = {
   /** muda sempre que o usuário escolhe um destino novo */
@@ -55,6 +56,13 @@ type Props = {
   onMovePoi: (id: string, pos: LatLng) => void;
   /** cria/move a parada exatamente onde o usuário clicou */
   onPlacePoi: (pos: LatLng) => void;
+  /**
+   * A prévia está **esperando o mapa do começo** antes de andar: o mapa baixa os
+   * primeiros blocos e devolve `onPreparo(null)` quando pode tocar.
+   */
+  preparando?: boolean;
+  /** progresso do preparo (`null` = pronto para tocar) */
+  onPreparo?: (estado: { feito: number; total: number } | null) => void;
   /** solta uma parada arrastada do catálogo no ponto exato do mapa */
   onDropPoi: (kindId: string, pos: LatLng) => void;
 };
@@ -99,6 +107,8 @@ export default function MapView(props: Props) {
     onMovePoi,
     onPlacePoi,
     onDropPoi,
+    preparando,
+    onPreparo,
   } = props;
 
   const hostRef = useRef<HTMLDivElement | null>(null);
@@ -536,23 +546,34 @@ export default function MapView(props: Props) {
   /*
    * --- o mapa da prévia é baixado **antes** de andar ---
    *
-   * O pedido que sobrou: "melhore o carregamento do mapa, que ainda está
-   * travando no percurso". O vídeo exportado nunca sofreu disso — antes de
-   * gravar, o renderizador baixa todos os blocos da animação (`warmup`, com
-   * barra de progresso). A prévia andava sem esse aquecimento: o Leaflet pedia
-   * o bloco no instante em que ele entrava na tela, e com a câmera a ~3 km por
-   * segundo de vídeo ele nunca chegava a tempo. Aqui a prévia pede os mesmos
-   * blocos antes: são os do `tilesForAnimation`, a mesma conta do vídeo (e as
-   * mesmas URLs, então quem responde é o cache do navegador).
+   * O vídeo exportado nunca sofreu disso: antes de gravar, o renderizador baixa
+   * todos os blocos da animação (`warmup`, com barra de progresso). A prévia
+   * andava sem esse aquecimento: o Leaflet pedia o bloco no instante em que ele
+   * entrava na tela, e com a câmera a ~3 km por segundo de vídeo ele nunca
+   * chegava a tempo — o mapa aparecia aos pedaços.
    *
-   * Seis pedidos por vez, na ordem do percurso: o começo da animação fica
-   * pronto primeiro, e o resto chega enquanto o vídeo roda. Em 9:16, com a
-   * terceira pessoa e zoom 15, o GPX do usuário (21,4 km) são **430 blocos**.
+   * Aqui a prévia pede os mesmos blocos antes: são os do `tilesForAnimation`, a
+   * mesma conta do vídeo (e as mesmas URLs, então quem responde é o cache do
+   * navegador). Seis pedidos por vez, na ordem do percurso.
+   *
+   * E, desde o pedido do usuário (*"entender a rota, baixar todo o mapa
+   * necessário para depois criar o vídeo"*), ela **espera o começo**: ao apertar
+   * ▶ a animação fica no primeiro quadro enquanto os primeiros blocos chegam
+   * ("Preparando o mapa… x %"), com teto de tempo (`PREVIA_ESPERA_MS`) para uma
+   * rede ruim não prender a tela. O resto continua chegando durante o percurso.
+   *
+   * A carga vive numa **sessão** (e não no efeito) de propósito: quando o preparo
+   * termina, `preparando` e `playing` mudam, o efeito roda de novo — e a sessão
+   * do mesmo mapa tem de continuar de onde estava, em vez de recomeçar.
    */
-  const aquecidoRef = useRef<string>("");
+  const sessaoRef = useRef<{ chave: string; pronto: boolean; cancelar: () => void } | null>(null);
+  /** o callback fica em ref: quem baixa não pode depender da identidade dele */
+  const preparoRef = useRef(onPreparo);
+  preparoRef.current = onPreparo;
+
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || !playing || !follow || track.pts.length < 2) return;
+    if (!map || (!playing && !preparando) || !follow || track.pts.length < 2) return;
     const size = map.getSize();
     if (size.x <= 0 || size.y <= 0) return;
     const maxZoom = BASEMAPS[basemap].maxZoom;
@@ -563,8 +584,14 @@ export default function MapView(props: Props) {
       Math.min(maxZoom, Math.round(followZoom + (thirdPerson ? CHASE_ZOOM : 0))),
     );
     const chave = `${basemap}/${zoom}/${size.x}x${size.y}/${track.total.toFixed(0)}`;
-    if (aquecidoRef.current === chave) return;
-    aquecidoRef.current = chave;
+    const anterior = sessaoRef.current;
+    if (anterior?.chave === chave) {
+      // já está baixando (ou já baixou): se a prévia está esperando e a carga
+      // ficou pronta enquanto isso, libera o play
+      if (preparando && anterior.pronto) preparoRef.current?.(null);
+      return;
+    }
+    anterior?.cancelar();
     const blocos = tilesForAnimation(
       track,
       {
@@ -580,19 +607,55 @@ export default function MapView(props: Props) {
       basemap,
       null,
     );
-    let cancelado = false;
     const fila = blocos.map((b) => b.url);
+    /** quantos blocos a prévia espera antes de andar (0 = não espera nada) */
+    const essencial = preparando ? blocosEssenciais(fila.length) : 0;
+    const inicio = Date.now();
+    let cancelado = false;
+    let prontos = 0;
+    let pronto = essencial === 0;
+    const sessao = {
+      chave,
+      pronto,
+      cancelar: () => {
+        cancelado = true;
+      },
+    };
+    sessaoRef.current = sessao;
+
+    const liberar = () => {
+      if (pronto) return;
+      pronto = true;
+      sessao.pronto = true;
+      preparoRef.current?.(null);
+    };
+    const avisar = () => {
+      if (pronto) return;
+      // o teto de tempo vale mesmo com a rede devolvendo erro em série
+      if (Date.now() - inicio >= PREVIA_ESPERA_MS) {
+        liberar();
+        return;
+      }
+      preparoRef.current?.({ feito: prontos, total: essencial });
+      if (prontos >= essencial) liberar();
+    };
+
     let i = 0;
     const proximo = () => {
       if (cancelado) return;
       const lote = fila.slice(i, i + 6);
       i += 6;
-      if (lote.length === 0) return;
-      let prontos = 0;
+      if (lote.length === 0) {
+        liberar();
+        return;
+      }
+      let noLote = 0;
       for (const url of lote) {
         const img = new Image();
         const fim = () => {
-          if (++prontos === lote.length) proximo();
+          prontos++;
+          avisar();
+          if (++noLote === lote.length) proximo();
         };
         img.onload = fim;
         img.onerror = fim;
@@ -600,10 +663,7 @@ export default function MapView(props: Props) {
       }
     };
     proximo();
-    return () => {
-      cancelado = true;
-    };
-  }, [playing, follow, followZoom, thirdPerson, basemap, track]);
+  }, [playing, preparando, follow, followZoom, thirdPerson, basemap, track]);
 
   /**
    * A pré-visualização com câmera "seguir" move o mapa. Guardamos a vista do

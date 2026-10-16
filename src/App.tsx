@@ -121,6 +121,16 @@ function App() {
   const [loading, setLoading] = useState(false);
   const [progress, setProgress] = useState(0);
   const [playing, setPlaying] = useState(false);
+  /**
+   * A prévia está esperando o mapa do começo antes de andar.
+   *
+   * Pedido do usuário: *"será que é possível entender a rota, baixar todo o mapa
+   * necessário para depois criar o vídeo"*. O que se aplica à prévia é esperar os
+   * **primeiros** blocos (o resto chega durante o percurso): o mapa não aparece
+   * mais aos pedaços na frente de quem está olhando.
+   */
+  const [preparando, setPreparando] = useState(false);
+  const [preparo, setPreparo] = useState<{ feito: number; total: number } | null>(null);
   const [showSidebar, setShowSidebar] = useState(false);
   /** confirmação visual do "Copiar link" */
   const [linkCopiado, setLinkCopiado] = useState(false);
@@ -852,6 +862,31 @@ function App() {
     setPlaying(true);
   }, []);
 
+  /**
+   * O mapa avisa o preparo: `{feito,total}` enquanto baixa, `null` quando pode
+   * tocar. Quem toca é esta função — o relógio da animação é do App.
+   */
+  const aoPreparar = useCallback((estado: { feito: number; total: number } | null) => {
+    if (estado) {
+      setPreparo(estado);
+      return;
+    }
+    setPreparo(null);
+    setPreparando(false);
+    setPlaying(true);
+  }, []);
+
+  /* rede ruim não pode prender a prévia: depois do teto, toca de qualquer jeito */
+  useEffect(() => {
+    if (!preparando) return;
+    const t = setTimeout(() => {
+      setPreparo(null);
+      setPreparando(false);
+      setPlaying(true);
+    }, 20000);
+    return () => clearTimeout(t);
+  }, [preparando]);
+
   /** move o mapa para a cidade escolhida */
   const pickCity = useCallback((p: Place) => {
     setCity(p);
@@ -1086,10 +1121,19 @@ function App() {
 
       // mostra o mapa carregando no canvas (não fica uma tela preta)
       paint(0, 0);
-      await renderer.warmup(track, camera, aspect.w, aspect.h, (p) => {
-        setExportProgress(p);
-        paint(Math.min(0.35, p * 0.35), p * 12);
-      });
+      await renderer.warmup(
+        track,
+        camera,
+        aspect.w,
+        aspect.h,
+        (p) => {
+          setExportProgress(p);
+          paint(Math.min(0.35, p * 0.35), p * 12);
+        },
+        // o mesmo foco do desenho: a parada pode ter lugar próprio, fora da
+        // linha, e é o mapa **daquele lugar** que precisa estar baixado
+        focoDoVideo,
+      );
       if (cancelRef.current) throw new CancelledError();
 
       // o mapa realmente apareceu?
@@ -1332,6 +1376,8 @@ function App() {
             track={track}
             progress={rotaDoVideo}
             playing={playing}
+            preparando={preparando}
+            onPreparo={aoPreparar}
             flyTo={flyTo}
             fitRequest={fitRequest}
             character={character}
@@ -1468,6 +1514,7 @@ function App() {
             progress={progress}
             rota={rotaDoVideo}
             playing={playing}
+            preparo={preparo}
             duration={settings.duration}
             track={track}
             emoji={character.emoji}
@@ -1476,9 +1523,31 @@ function App() {
             stops={pois}
             onToggle={() => {
               if (!hasRoute) return;
-              if (playing) setPlaying(false);
-              else if (progressRef.current >= 1) replay();
-              else setPlaying(true);
+              if (playing) {
+                setPlaying(false);
+                return;
+              }
+              // um segundo clique durante o preparo toca já, sem esperar o mapa
+              if (preparando) {
+                setPreparo(null);
+                setPreparando(false);
+                setPlaying(true);
+                return;
+              }
+              if (progressRef.current >= 1) {
+                replay();
+                return;
+              }
+              /*
+               * A câmera "Rota toda" já tem a rota inteira na tela e não anda —
+               * não há mapa para preparar. Só a "Seguir" espera.
+               */
+              if (settings.cameraMode !== "follow") {
+                setPlaying(true);
+                return;
+              }
+              setPreparo({ feito: 0, total: 0 });
+              setPreparando(true);
             }}
             onSeek={(t) => {
               setPlaying(false);

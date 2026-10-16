@@ -13,6 +13,7 @@ import {
   PINO_CRESCE_S,
   SANGRIA_PX,
   TILE_BUDGET,
+  blocoDeReserva,
   centroDoBloco,
   ladoDoBloco,
   retanguloDoBloco,
@@ -2797,6 +2798,108 @@ describe("o foco no ícone do ponto", () => {
   });
 });
 
+/*
+ * O buraco do nível de zoom que ainda não chegou.
+ *
+ * O desenho pede o bloco do nível em vigor. Quando a câmera muda de nível — o
+ * zoom da parada são 2,2 níveis de uma vez — o nível novo não está no mapa, e o
+ * que ficava no lugar era **nada**: um pedaço do fundo no meio do quadro até o
+ * bloco chegar. É o "mapa pulando" que o usuário viu no arquivo dele. Com o pai
+ * esticado, o buraco não existe: aparece a imagem do nível anterior, borrada por
+ * um instante, no lugar certo.
+ */
+describe("o bloco que ainda não chegou", () => {
+  const imagem = (lado = TILE_SIZE) => ({ width: lado, height: lado }) as unknown as never;
+  const guardado = (
+    blocos: Record<string, ReturnType<typeof imagem>>,
+  ): { get: (z: number, x: number, y: number) => never | null } => ({
+    get: (z, x, y) => blocos[`${z}/${x}/${y}`] ?? null,
+  });
+
+  it("o pai cobre o filho: o recorte é o pedaço certo da imagem", () => {
+    // o filho 18/5/3 fica no canto de baixo-direita do pai 17/2/1
+    const pai = imagem();
+    const pega = blocoDeReserva(guardado({ "17/2/1": pai }), 18, 5, 3);
+    expect(pega?.img).toBe(pai);
+    expect([pega?.sx, pega?.sy, pega?.sw, pega?.sh]).toEqual([128, 128, 128, 128]);
+  });
+
+  it("o canto superior esquerdo do pai é o filho par", () => {
+    const pega = blocoDeReserva(guardado({ "17/2/1": imagem() }), 18, 4, 2);
+    expect([pega?.sx, pega?.sy]).toEqual([0, 0]);
+  });
+
+  it("sobe mais de um nível quando o pai também não está lá", () => {
+    // sem o 17/2/1, o avô 16/1/0 cobre o 18/5/3 — que é 1/4 dele
+    const pega = blocoDeReserva(guardado({ "16/1/0": imagem() }), 18, 5, 3);
+    expect([pega?.sx, pega?.sy, pega?.sw, pega?.sh]).toEqual([64, 192, 64, 64]);
+  });
+
+  it("o tamanho real da imagem manda (bloco de 512 do retina)", () => {
+    const pega = blocoDeReserva(guardado({ "17/2/1": imagem(512) }), 18, 5, 3);
+    expect([pega?.sx, pega?.sy, pega?.sw, pega?.sh]).toEqual([256, 256, 256, 256]);
+  });
+
+  it("sem nenhum ancestral no mapa, não há o que desenhar", () => {
+    expect(blocoDeReserva(guardado({}), 18, 5, 3)).toBeNull();
+    // e o nível 0 não tem pai: não desce abaixo do zero
+    expect(blocoDeReserva(guardado({ "-1/0/0": imagem() }), 0, 0, 0)).toBeNull();
+  });
+
+  it("um quadro com o nível novo faltando desenha o pai no lugar do buraco", () => {
+    /*
+     * A conta do quadro é a do desenho, com a câmera de verdade: os blocos
+     * pedidos no primeiro quadro são os que o renderizador vai buscar (o alvo da
+     * câmera anda 0,1 s à frente do relógio, então o quadro não é exatamente o da
+     * rota — daí pedir a lista em vez de calculá-la à mão).
+     */
+    const caminho = buildTrack(percursoLongo(12));
+    const camera = { mode: "follow" as const, followZoom: 15 };
+    const quadro = {
+      ...estado(0.3, 14, null),
+      track: caminho,
+      camera,
+      style: {
+        ...style,
+        showRoute: false,
+        showTraveled: false,
+        showEndpoints: false,
+        showStops: false,
+        showHud: false,
+        showSummary: false,
+        showProgress: false,
+        showTitle: false,
+      },
+    };
+    const pedidos: [number, number, number][] = [];
+    const r = new SceneRenderer("dark");
+    const req = r.tiles.request.bind(r.tiles);
+    r.tiles.request = (z: number, x: number, y: number) => {
+      pedidos.push([z, x, y]);
+      req(z, x, y);
+    };
+
+    // 1) sem mapa nenhum: buraco — nenhum bloco desenhado
+    const vazio = fakeCtx();
+    r.render(vazio.ctx, 1280, 720, quadro);
+    expect(pedidos.length).toBeGreaterThan(10);
+    expect(vazio.imagens.length).toBe(0);
+
+    // 2) com só o nível anterior (o pai de cada bloco pedido), o quadro é
+    //    desenhado: um recorte de pai para cada bloco, nenhum buraco
+    const comPai = new SceneRenderer("dark");
+    for (const [z, x, y] of pedidos) {
+      comPai.tiles.put(z - 1, Math.floor(x / 2), Math.floor(y / 2), imagem() as never);
+    }
+    const f = fakeCtx();
+    comPai.render(f.ctx, 1280, 720, quadro);
+    expect(f.imagens.length).toBe(pedidos.length);
+    // todos pelo caminho do pai (o desenho do bloco exato tem 4 argumentos; o do
+    // pai, 8: o recorte de origem e o retângulo de destino)
+    expect(f.imagens.every((i) => i.args.length === 8)).toBe(true);
+  });
+});
+
 describe("o aquecimento dos blocos na parada", () => {
   /* a mesma parada fora da linha do outro describe, na rota de 21,4 km */
   const CAMINHO = buildTrack(percursoLongo(21.4));
@@ -2858,6 +2961,44 @@ describe("o aquecimento dos blocos na parada", () => {
     for (const [z, x, y] of tilesDaVista(vista)) {
       expect(comFoco.has(`${z}/${x}/${y}`)).toBe(true);
     }
+  });
+
+  it("o `warmup` do renderizador baixa os blocos do lugar da parada", async () => {
+    /*
+     * O defeito da rodada: o `warmup` chamava `tilesForAnimation` **sem** o foco,
+     * então baixava a vista da parada no ponto da **rota** — e o desenho, com o
+     * pino fora da linha, ia buscar outros blocos durante a gravação. Era o mapa
+     * aparecendo aos pedaços (o "mapa pulando") na aproximação.
+     */
+    const blocos = { width: 256, height: 256 };
+    const pedir = async (comFoco: boolean) => {
+      const r = new SceneRenderer("dark");
+      const pedidos = new Set<string>();
+      r.tiles.fetchTile = async (z: number, x: number, y: number) => {
+        pedidos.add(`${z}/${x}/${y}`);
+        return blocos as never;
+      };
+      await r.warmup(
+        CAMINHO,
+        { ...camera, cinematic: cine },
+        1080,
+        1920,
+        () => undefined,
+        comFoco ? () => poiLatLng(FORA, CAMINHO) : null,
+      );
+      return { pedidos, baixados: r.loadedTiles };
+    };
+
+    const com = await pedir(true);
+    const sem = await pedir(false);
+    // o pico da aproximação (o quadro que o vídeo mostra) está coberto…
+    const pico = tilesDaVista(vistaDoPico());
+    expect(pico.length).toBeGreaterThan(0);
+    for (const [z, x, y] of pico) expect(com.pedidos.has(`${z}/${x}/${y}`)).toBe(true);
+    // …e sem o foco aqueles blocos não seriam pedidos (é o defeito, de volta)
+    expect(pico.some(([z, x, y]) => !sem.pedidos.has(`${z}/${x}/${y}`))).toBe(true);
+    // e o que foi pedido está de fato no mapa, pronto para desenhar
+    expect(com.baixados).toBe(com.pedidos.size);
   });
 
   it("sem o foco, os blocos do lugar da parada ficavam de fora", () => {

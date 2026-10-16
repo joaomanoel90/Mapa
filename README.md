@@ -443,7 +443,18 @@ novo só atrasaria o pouso).
 
 **A abertura entra na conta dos blocos de mapa** (`tilesForAnimation`): a vista
 larga da região e as vistas aproximadas das paradas são baixadas no aquecimento.
-Sem isso o começo do vídeo sairia com o mapa vazio. Custo medido numa rota de
+Sem isso o começo do vídeo sairia com o mapa vazio. A vista de cada parada é a do
+**lugar** dela (o pino arrastado para fora da linha — `focoDasParadas`), e não a
+do ponto da rota: era o que fazia o vídeo chegar na parada com os blocos
+faltando, o mapa aparecendo aos pedaços na gravação.
+
+**O bloco que ainda não chegou não deixa buraco**: quando a câmera muda de nível
+de zoom (o da parada são 2,2 níveis de uma vez), o nível novo pode não estar no
+mapa por um instante — e o que ficava no lugar era o fundo. Agora o desenho
+procura o **pai** daquele bloco (até três níveis acima) e desenha o pedaço certo
+dele esticado no lugar exato: em vez de um quadro vazio, aparece a imagem do
+nível anterior borrada por um instante, logo substituída pela exata
+(`blocoDeReserva`). Custo medido numa rota de
 55 km em 1280×720: **1.124 blocos** com a abertura e as paradas ligadas, contra
 1.089 só com as paradas — os dois extras juntos custam ~35 blocos, dentro do teto
 de 1.400. As vistas de parada são limitadas a **oito** paradas por rota (numa
@@ -743,6 +754,14 @@ cada vez e na ordem do percurso, os blocos de `tilesForAnimation` — as mesmas
 URLs que o Leaflet vai pedir, então quem responde é o cache do navegador. Em
 9:16 com a terceira pessoa no zoom 15, o trajeto de 21,4 km são **430 blocos**.
 
+E ela **espera o começo** antes de andar (pedido do usuário: *"será que é possível
+entender a rota, baixar todo o mapa necessário para depois criar o vídeo"*): ao
+apertar ▶ a animação fica no primeiro quadro enquanto os primeiros blocos chegam
+("Preparando o mapa do começo… x %"), e o resto continua chegando durante o
+percurso. A espera é limitada — `blocosEssenciais` espera **15%** da lista (com
+piso de 40 blocos) e há um teto de **12 s** dentro do mapa e de 20 s no app, para
+rede ruim não prender a tela. Um segundo clique no ▶ começa na hora.
+
 A **trilha percorrida** também era remontada a cada quadro (`slice` +
 `concat` de até 5.704 pontos, com um `LatLng` novo por ponto dentro do Leaflet).
 Agora a lista de `LatLng` é montada uma vez por rota e reusada: o que entra por
@@ -807,7 +826,7 @@ ou cortados.
 
 ```bash
 npm run typecheck  # tsc --noEmit
-npm test           # Vitest (691 casos)
+npm test           # Vitest (702 casos)
 npm run check:dist # o build saiu autocontido e sem /src/?
 ```
 

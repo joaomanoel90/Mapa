@@ -795,6 +795,14 @@ percurso** ele travou ("No ponto 42.1% do percurso") — é esse texto que apont
 linha, e é ele que o usuário manda de volta. Sem área de transferência (origem sem
 TLS, iframe) o botão avisa e o texto continua selecionável na tela.
 
+O rastro do usuário fechou o caso: o erro vinha do `setLatLngs` da **trilha
+percorrida**, quando o índice pulava à frente (arrastar a barra do tempo, um
+engasgo do navegador, recomeçar a animação). A lista era cortada no ponto atual,
+mas o `length` era **esticado** até o índice novo e os pontos que faltavam no meio
+ficavam como **buracos** — e o Leaflet estoura ao projetar um buraco. Agora o
+pedaço que falta é copiado do próprio traçado (`completarTrilha`): a trilha chega
+inteira, sem buraco nenhum, e o mapa não cai.
+
 A terceira mudança evita o problema em vez de contá-lo: nada chega ao Leaflet sem
 ser um ponto de verdade. `pontoValido` (número finito, dentro da faixa do planeta
 — texto de JSON não passa) é perguntado antes de cada `marker`, `polyline` e
@@ -802,6 +810,23 @@ ser um ponto de verdade. `pontoValido` (número finito, dentro da faixa do plane
 `<trkpt>` cortado no fim do arquivo, uma coordenada nula da rota ou um link
 compartilhado estragado viram, no máximo, um trecho a menos — em vez de derrubar o
 app.
+
+### O mapa não troca de bloco durante a gravação
+
+O mp4 novo do usuário foi medido quadro a quadro: o tempo do arquivo está certo
+(30 quadros por segundo, com menos de 0,3% de variação entre um quadro e outro),
+mas a **imagem** mudava de repente em alguns quadros — e não era deslocamento: em
+cada um desses saltos, nenhuma faixa do quadro andava junto com as outras. É troca
+de **textura**: um bloco do mapa chegava durante a gravação e substituía o nível
+anterior que estava no lugar.
+
+Na gravação isso não pode acontecer — o vídeo é curto e o mapa já foi baixado
+antes (`warmup`), mas um bloco pedido pelo enquadramento exato pode chegar no meio
+do caminho. Agora, ao começar a gravar, o que entrou no primeiro quadro **fica**:
+`blocoDoQuadro` congela cada bloco no nível em que foi desenhado e o mapa não
+troca de imagem no meio do vídeo. O painel do fim conta quantos blocos saíram do
+nível anterior ("N blocos do mapa não estavam prontos na hora…"): com zero, o
+mapa saiu nítido do começo ao fim.
 
 ### Muitos pinos
 
@@ -858,7 +883,7 @@ ou cortados.
 
 ```bash
 npm run typecheck  # tsc --noEmit
-npm test           # Vitest (722 casos)
+npm test           # Vitest (731 casos)
 npm run check:dist # o build saiu autocontido e sem /src/?
 ```
 

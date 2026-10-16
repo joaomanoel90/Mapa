@@ -7,6 +7,7 @@ import {
   TURN_SPAN_M,
   bearing,
   buildTrack,
+  completarTrilha,
   cumulative,
   fitZoom,
   formatDistance,
@@ -722,5 +723,74 @@ describe("o traçado joga fora o ponto estragado", () => {
     expect(t.total).toBe(0);
     // e a amostra do traçado vazio continua respondendo (nada de `undefined.lat`)
     expect(sampleTrack(t, 0.5).pos).toEqual({ lat: 0, lng: 0 });
+  });
+});
+
+/**
+ * A trilha desenhada no mapa da prévia.
+ *
+ * Foi **esta** a linha do erro que o usuário viu, no rastro do "Copiar
+ * detalhes": `setLatLngs` da trilha percorrida → `_projectLatlngs` → *"Cannot
+ * read properties of undefined (reading 'lat')"*. A lista era cortada no ponto
+ * atual, mas quando o índice **pulava à frente** (arrastar a barra, recomeçar, um
+ * engasgo do navegador) o `length` era esticado e os pontos que faltavam viravam
+ * **buracos** — e o Leaflet estoura ao projetar um buraco.
+ */
+describe("a trilha percorrida", () => {
+  const rota: LatLng[] = Array.from({ length: 200 }, (_, i) => ({
+    lat: -23.5 + i * 0.0001,
+    lng: -48.4,
+  }));
+  const criar = (p: LatLng): LatLng => ({ ...p });
+  /** nenhum índice vazio: `length` esticado deixa buracos que o Leaflet não lê */
+  const buracos = (l: LatLng[]) => l.filter((_, i) => !(i in l)).length;
+
+  it("anda para a frente um ponto por vez", () => {
+    const pontos = rota.slice(0, 2).map(criar);
+    completarTrilha(pontos, rota, 5, { lat: -23.4, lng: -48.4 }, criar);
+    expect(pontos.length).toBe(7);
+    expect(buracos(pontos)).toBe(0);
+    expect(pontos.slice(0, 6)).toEqual(rota.slice(0, 6));
+    // a ponta é o personagem, dentro do trecho
+    expect(pontos[6]).toEqual({ lat: -23.4, lng: -48.4 });
+  });
+
+  it("um pulo à frente completa com o traçado, sem buraco", () => {
+    const pontos = rota.slice(0, 3).map(criar);
+    // a barra do tempo foi arrastada: o índice salta de 2 para 150
+    completarTrilha(pontos, rota, 150, { lat: -23.4, lng: -48.4 }, criar);
+    expect(pontos.length).toBe(152);
+    expect(buracos(pontos)).toBe(0);
+    expect(pontos.every(pontoValido)).toBe(true);
+    expect(pontos[100]).toEqual(rota[100]);
+    expect(pontos[151]).toEqual({ lat: -23.4, lng: -48.4 });
+  });
+
+  it("voltar atrás corta a trilha", () => {
+    const pontos = rota.map(criar);
+    completarTrilha(pontos, rota, 4, { lat: -23.4, lng: -48.4 }, criar);
+    expect(pontos.length).toBe(6);
+    expect(buracos(pontos)).toBe(0);
+    expect(pontos[4]).toEqual(rota[4]);
+  });
+
+  it("índice fora da rota fica preso nas pontas", () => {
+    const inicio: LatLng[] = [];
+    completarTrilha(inicio, rota, -5, { lat: -23.4, lng: -48.4 }, criar);
+    expect(inicio.length).toBe(2);
+    expect(buracos(inicio)).toBe(0);
+
+    const fim = rota.slice(0, 5).map(criar);
+    completarTrilha(fim, rota, 9999, { lat: -23.4, lng: -48.4 }, criar);
+    expect(fim.length).toBe(rota.length + 1);
+    expect(buracos(fim)).toBe(0);
+    expect(fim.every(pontoValido)).toBe(true);
+  });
+
+  it("índice que não é número não estoura", () => {
+    const pontos = rota.slice(0, 3).map(criar);
+    completarTrilha(pontos, rota, NaN, { lat: -23.4, lng: -48.4 }, criar);
+    expect(pontos.length).toBe(2);
+    expect(buracos(pontos)).toBe(0);
   });
 });

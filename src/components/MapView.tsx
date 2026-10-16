@@ -1,7 +1,14 @@
 import { useEffect, useRef } from "react";
 import L from "leaflet";
 import { BASEMAPS, pontoEmPixelInteiro, type BasemapId } from "../lib/tiles";
-import { nearestTOnTrack, pontoValido, sampleTrack, type LatLng, type Track } from "../lib/geo";
+import {
+  completarTrilha,
+  nearestTOnTrack,
+  pontoValido,
+  sampleTrack,
+  type LatLng,
+  type Track,
+} from "../lib/geo";
 import { HOME_CITY } from "../lib/geocode";
 import { gaitOf, type Character } from "../lib/characters";
 import { CHASE_ALTURA, CHASE_ZOOM } from "../lib/camera";
@@ -460,7 +467,9 @@ export default function MapView(props: Props) {
     }
     if (trilha.track !== track) {
       trilha.track = track;
-      trilha.pontos = track.pts.map((p) => L.latLng(p.lat, p.lng));
+      // um ponto estragado do traçado viraria `undefined` dentro da lista — e o
+      // Leaflet estoura ao projetar (`reading 'lat'`)
+      trilha.pontos = track.pts.filter(pontoValido).map((p) => L.latLng(p.lat, p.lng));
     }
     const s = sampleTrack(track, progress);
     if (!pontoValido(s.pos)) return;
@@ -469,9 +478,13 @@ export default function MapView(props: Props) {
      * quadro anterior e, quando o vídeo volta atrás (arrastar a barra do tempo,
      * recomeçar), a trilha que ficou para trás — e recoloca a ponta no
      * personagem, que anda dentro do trecho até o trecho virar um ponto novo.
+     * Quando o índice **pula à frente**, o pedaço que falta vem do traçado
+     * (`completarTrilha`): esticar a lista deixaria buracos, e era isso que
+     * derrubava o mapa com "reading 'lat'".
      */
-    trilha.pontos.length = s.index + 1;
-    trilha.pontos[s.index + 1] = L.latLng(s.pos.lat, s.pos.lng);
+    completarTrilha(trilha.pontos, track.pts, s.index, L.latLng(s.pos.lat, s.pos.lng), (p) =>
+      L.latLng(p.lat, p.lng),
+    );
     line.setLatLngs(trilha.pontos);
   }, [track, progress, accent]);
 

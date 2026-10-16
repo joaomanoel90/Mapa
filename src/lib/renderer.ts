@@ -503,6 +503,40 @@ export function blocoDeReserva(
   return null;
 }
 
+/**
+ * O bloco que o quadro desenha — e, **na gravação**, sempre o mesmo.
+ *
+ * A gravação (tempo real, pelo `MediaRecorder`) leva os 60 segundos do vídeo em
+ * tempo de relógio: um bloco que chega no meio dela entra numa imagem que já
+ * estava na tela, e o mapa **troca de textura** de um quadro para o outro — é o
+ * "continua travando" que o usuário viu no mp4, medido quadro a quadro (as
+ * mudanças grandes do arquivo dele não são deslocamento: nenhuma faixa da imagem
+ * anda junto com as outras, é troca de textura).
+ *
+ * Com a lista de congelados, o primeiro quadro que precisou do nível anterior
+ * **fica** nele até o fim: o mapa pode estar mais borrado num pedaço, mas não
+ * troca de imagem no meio do vídeo. Fora da gravação (e na exportação rápida, que
+ * desenha quadros em sequência sem esperar o relógio) a lista vai nula e o
+ * comportamento é o de sempre: o bloco exato entra assim que chega.
+ */
+export function blocoDoQuadro(
+  store: { get(z: number, x: number, y: number): TileImage | null },
+  z: number,
+  x: number,
+  y: number,
+  congelados?: Set<string> | null,
+): { img: TileImage } | { reserva: { img: TileImage; sx: number; sy: number; sw: number; sh: number } } | null {
+  const chave = `${z}/${x}/${y}`;
+  if (!congelados?.has(chave)) {
+    const img = store.get(z, x, y);
+    if (img) return { img };
+  }
+  const reserva = blocoDeReserva(store, z, x, y);
+  // travou neste nível: o resto do vídeo sai daqui
+  if (reserva && congelados) congelados.add(chave);
+  return reserva ? { reserva } : null;
+}
+
 function tilesInView(
   view: View,
   width: number,
@@ -773,6 +807,11 @@ export class SceneRenderer {
   private inclinacaoSuave: number | null = null;
   private instanteAnterior: number | null = null;
   private store: TileStore;
+  /**
+   * Blocos travados no nível anterior durante a gravação (ver `blocoDoQuadro`).
+   * Nulo fora da gravação.
+   */
+  private congelados: Set<string> | null = null;
   /** pontos visíveis já projetados, reaproveitados entre os quadros */
   private px = new Float64Array(0);
   private py = new Float64Array(0);
@@ -810,6 +849,19 @@ export class SceneRenderer {
   setBasemap(basemap: BasemapId) {
     if (this.store.basemap === basemap) return;
     this.store = new TileStore(basemap);
+  }
+
+  /**
+   * Durante a gravação, o mapa não troca de bloco: o que entrou no quadro fica.
+   * `false` devolve o comportamento normal.
+   */
+  congelarBlocos(ligado = true) {
+    this.congelados = ligado ? new Set() : null;
+  }
+
+  /** Quantos blocos saíram do nível anterior por não estarem prontos. */
+  get blocosDeReserva(): number {
+    return this.congelados?.size ?? 0;
   }
 
   reset() {
@@ -1216,17 +1268,19 @@ export class SceneRenderer {
     for (const [tz, tx, ty] of tilesDaVista(vista)) {
       this.store.request(tz, tx, ty);
       const r = retanguloDoBloco(vista, tx * TILE_SIZE, ty * TILE_SIZE, TILE_SIZE);
-      const img = this.store.get(tz, tx, ty);
-      if (img) {
-        ctx.drawImage(img as CanvasImageSource, r.x - origemX, r.y - origemY, r.w, r.h);
+      /*
+       * O bloco deste nível, quando não chegou (a câmera acabou de mudar de
+       * zoom), é coberto pelo do nível anterior esticado — o buraco no meio do
+       * quadro era o "mapa pulando" na aproximação das paradas. Durante a
+       * gravação quem já caiu no nível anterior fica nele (`blocoDoQuadro`):
+       * trocar de imagem no meio do vídeo é o pulo que o usuário vê.
+       */
+      const escolha = blocoDoQuadro(this.store, tz, tx, ty, this.congelados);
+      if (escolha && "img" in escolha) {
+        ctx.drawImage(escolha.img as CanvasImageSource, r.x - origemX, r.y - origemY, r.w, r.h);
         continue;
       }
-      /*
-       * O bloco deste nível não chegou (a câmera acabou de mudar de zoom): o do
-       * nível anterior entra no lugar, esticado. É o que impede o buraco no meio
-       * do quadro — que era o "mapa pulando" na aproximação das paradas.
-       */
-      const pai = blocoDeReserva(this.store, tz, tx, ty);
+      const pai = escolha?.reserva ?? null;
       if (pai) {
         ctx.drawImage(
           pai.img as CanvasImageSource,

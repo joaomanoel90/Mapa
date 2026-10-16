@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import L from "leaflet";
 import { BASEMAPS, pontoEmPixelInteiro, type BasemapId } from "../lib/tiles";
-import { nearestTOnTrack, sampleTrack, type LatLng, type Track } from "../lib/geo";
+import { nearestTOnTrack, pontoValido, sampleTrack, type LatLng, type Track } from "../lib/geo";
 import { HOME_CITY } from "../lib/geocode";
 import { gaitOf, type Character } from "../lib/characters";
 import { CHASE_ALTURA, CHASE_ZOOM } from "../lib/camera";
@@ -308,6 +308,13 @@ export default function MapView(props: Props) {
     // os pinos viram pontos no canvas e só os importantes seguem marcadores
     const muitos = pinsAsDots(waypoints.length);
     waypoints.forEach((p, i) => {
+      /*
+       * Ponto sem coordenada não vira marcador — e não some da lista: o índice
+       * `i` continua sendo o da lista de verdade (é ele que o app usa para
+       * mover/remover o ponto). Era por aqui que um ponto estragado chegava no
+       * Leaflet e derrubava o app com "reading 'lat'".
+       */
+      if (!pontoValido(p)) return;
       if (muitos && !keepsMarker(i, waypoints.length, selectedWp)) {
         L.circleMarker(p, {
           radius: 4,
@@ -456,6 +463,7 @@ export default function MapView(props: Props) {
       trilha.pontos = track.pts.map((p) => L.latLng(p.lat, p.lng));
     }
     const s = sampleTrack(track, progress);
+    if (!pontoValido(s.pos)) return;
     /*
      * A lista é sempre a mesma: corta no ponto atual — o que descarta a ponta do
      * quadro anterior e, quando o vídeo volta atrás (arrastar a barra do tempo,
@@ -505,6 +513,7 @@ export default function MapView(props: Props) {
     const marker = charRef.current;
     if (!map || !marker || track.pts.length === 0) return;
     const s = sampleTrack(track, progress);
+    if (!pontoValido(s.pos)) return;
     marker.setLatLng(s.pos);
     const el = marker.getElement();
     // o rumo que o CSS vai girar: o mesmo do vídeo, sem o salto de 180°
@@ -696,6 +705,8 @@ export default function MapView(props: Props) {
     pois.forEach((p) => {
       const pos = poiLatLng(p, track);
       const anchor = poiAnchor(p, track);
+      // a parada pode ter vindo de fora (link, armazenamento) sem coordenada
+      if (!pontoValido(pos) || !pontoValido(anchor)) return;
       const off = poiOffset(p, track);
       const live = progress >= p.t;
       const sel = selectedPoi === p.id;
@@ -766,13 +777,13 @@ export default function MapView(props: Props) {
     const map = mapRef.current;
     if (!map || !flyTo || lastFly.current === flyTo.key) return;
     lastFly.current = flyTo.key;
-    if (flyTo.bbox) {
+    if (flyTo.bbox && flyTo.bbox.every((v) => Number.isFinite(v))) {
       const [south, north, west, east] = flyTo.bbox;
       map.flyToBounds(
         L.latLngBounds([south, west], [north, east]),
         { padding: [40, 40], duration: 1.1, maxZoom: 15 },
       );
-    } else {
+    } else if (pontoValido(flyTo.center)) {
       map.flyTo(flyTo.center, flyTo.zoom, { duration: 1.1 });
     }
   }, [flyTo]);
@@ -789,7 +800,7 @@ export default function MapView(props: Props) {
     const map = mapRef.current;
     if (!map || !fitRequest || fitRequest === lastFit.current) return;
     lastFit.current = fitRequest;
-    const pts = waypoints.length > 1 ? waypoints : track.pts;
+    const pts = (waypoints.length > 1 ? waypoints : track.pts).filter(pontoValido);
     if (pts.length < 2) return;
     map.flyToBounds(L.latLngBounds(pts.map((p) => [p.lat, p.lng] as [number, number])), {
       padding: [70, 70],

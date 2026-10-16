@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ErrorBoundary from "./components/ErrorBoundary";
 import MapView, { type FlyTarget } from "./components/MapView";
+import CameraBoundary from "./components/CameraBoundary";
 import { HOME_CITY, type Place } from "./lib/geocode";
 import Sidebar from "./components/Sidebar";
 import Timeline from "./components/Timeline";
@@ -1371,39 +1372,51 @@ function App() {
             (showSidebar ? "hidden lg:block" : "block h-[56vh] lg:h-auto")
           }
         >
-          <MapView
-            waypoints={waypoints}
-            track={track}
-            progress={rotaDoVideo}
-            playing={playing}
-            preparando={preparando}
-            onPreparo={aoPreparar}
-            flyTo={flyTo}
-            fitRequest={fitRequest}
-            character={character}
-            rotate={settings.rotate}
-            accent={settings.accent}
-            basemap={settings.basemap}
-            follow={settings.cameraMode === "follow"}
-            followZoom={settings.followZoom}
-            thirdPerson={settings.thirdPerson}
-            showRoute={settings.showRoute}
-            onAddPoint={addPoint}
-            onMovePoint={movePoint}
-            onRemovePoint={removePoint}
-            selectedWp={selectedWp}
-            onSelectPoint={setSelectedWp}
-            endpoints={endpoints}
-            pois={pois}
-            showStops={settings.showStops}
-            selectedPoi={selectedPoi}
-            poiMode={poiMode}
-            onSelectPoi={setSelectedPoi}
-            onAddPoiAt={addPoiAt}
-            onMovePoi={movePoiTo}
-            onPlacePoi={placePoiAt}
-            onDropPoi={dropPoi}
-          />
+          {/*
+            O mapa tem fronteira de erro própria: um quadro ruim do Leaflet
+            (um ponto sem coordenada no meio da animação) derrubava o app
+            inteiro com "Cannot read properties of undefined (reading 'lat')".
+            Aqui só o mapa cai, o aviso diz em que ponto do percurso travou, e
+            "Tentar de novo" remonta o mapa sem perder a rota.
+          */}
+          <CameraBoundary
+            agora={rotaDoVideo}
+            onReiniciar={() => setFitRequest((n) => n + 1)}
+          >
+            <MapView
+              waypoints={waypoints}
+              track={track}
+              progress={rotaDoVideo}
+              playing={playing}
+              preparando={preparando}
+              onPreparo={aoPreparar}
+              flyTo={flyTo}
+              fitRequest={fitRequest}
+              character={character}
+              rotate={settings.rotate}
+              accent={settings.accent}
+              basemap={settings.basemap}
+              follow={settings.cameraMode === "follow"}
+              followZoom={settings.followZoom}
+              thirdPerson={settings.thirdPerson}
+              showRoute={settings.showRoute}
+              onAddPoint={addPoint}
+              onMovePoint={movePoint}
+              onRemovePoint={removePoint}
+              selectedWp={selectedWp}
+              onSelectPoint={setSelectedWp}
+              endpoints={endpoints}
+              pois={pois}
+              showStops={settings.showStops}
+              selectedPoi={selectedPoi}
+              poiMode={poiMode}
+              onSelectPoi={setSelectedPoi}
+              onAddPoiAt={addPoiAt}
+              onMovePoi={movePoiTo}
+              onPlacePoi={placePoiAt}
+              onDropPoi={dropPoi}
+            />
+          </CameraBoundary>
 
           {waypoints.length > 0 && !playing && pinsAsDots(waypoints.length) && (
             <div className="pointer-events-none absolute left-1/2 top-4 z-20 -translate-x-1/2 rounded-2xl border border-white/15 bg-zinc-950/85 px-4 py-2.5 text-center shadow-2xl backdrop-blur-md">

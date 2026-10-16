@@ -771,6 +771,38 @@ O traçado planejado, a área de clique e a trilha ainda ganham `smoothFactor: 3
 usuário o traçado desenhado cai de 262 pontos para **93** no zoom 15 e de 751
 para **325** no 17.
 
+### Quando o mapa trava
+
+Na rodada em que o usuário viu *"Algo travou no app — Cannot read properties of
+undefined (reading 'lat')"* não dava para saber **onde** — e o app inteiro ia
+junto: mapa, barra do tempo, rota e o botão de gravar. Três coisas mudaram.
+
+O que derruba o mapa não derruba mais o app. O `CameraBoundary` é uma fronteira de
+erro só em volta do `MapView`: um quadro ruim do Leaflet (um ponto que chegou sem
+coordenada no meio da animação) põe o aviso **no lugar do mapa**, e o resto da
+tela continua funcionando — dá para pausar, mexer na linha do tempo e gravar o
+vídeo, que não passa pelo Leaflet. Como o mapa recebe um `setView` por quadro, um
+erro de um quadro só não pode custar a tela: quando `agora` (o instante que está
+sendo desenhado) anda, a fronteira **retoma sozinha**, até **3** vezes. Depois
+disso o aviso fica de pé — falha que se repete é falha de verdade — e o botão
+"Tentar de novo" remonta o mapa do zero, sem recarregar a página (em pausa, quem
+decide é o usuário: a fronteira não insiste sozinha).
+
+E o aviso diz o que aconteceu. O texto da caixa (o mesmo do botão *Copiar
+detalhes*) traz a mensagem do navegador, o **rastro** com a linha do arquivo, o
+**caminho dos componentes** do React e, no caso do mapa, **em que ponto do
+percurso** ele travou ("No ponto 42.1% do percurso") — é esse texto que aponta a
+linha, e é ele que o usuário manda de volta. Sem área de transferência (origem sem
+TLS, iframe) o botão avisa e o texto continua selecionável na tela.
+
+A terceira mudança evita o problema em vez de contá-lo: nada chega ao Leaflet sem
+ser um ponto de verdade. `pontoValido` (número finito, dentro da faixa do planeta
+— texto de JSON não passa) é perguntado antes de cada `marker`, `polyline` e
+`flyTo`, e o `buildTrack` **não deixa mais passar** ponto sem coordenada: um
+`<trkpt>` cortado no fim do arquivo, uma coordenada nula da rota ou um link
+compartilhado estragado viram, no máximo, um trecho a menos — em vez de derrubar o
+app.
+
 ### Muitos pinos
 
 Um pino comum é um marcador do Leaflet com alça de arrasto — um elemento no DOM.
@@ -826,7 +858,7 @@ ou cortados.
 
 ```bash
 npm run typecheck  # tsc --noEmit
-npm test           # Vitest (702 casos)
+npm test           # Vitest (722 casos)
 npm run check:dist # o build saiu autocontido e sem /src/?
 ```
 

@@ -20,7 +20,7 @@
  * tela e não há para onde "pousar".
  */
 
-import { boundsOf, fitZoom, sampleTrack, type Track } from "./geo";
+import { boundsOf, fitZoom, haversine, sampleTrack, type LatLng, type Track } from "./geo";
 
 export type CinematicConfig = {
   /** abertura sobrevoando a região antes de pousar na rota */
@@ -119,6 +119,59 @@ export const OPEN_SHARE = 0.25;
  * ela couber no teto, então o número pôde subir sem estourar o orçamento.
  */
 export const STOP_BOOST = 2.2;
+
+/**
+ * Onde fica o ponto que a ênfase de uma parada focaliza, por instante do
+ * percurso.
+ *
+ * É uma função porque a parada pode ter **lugar próprio**, fora da linha (o
+ * usuário arrasta o pino até a igreja, a cachoeira) — e aí o foco não é o ponto
+ * da rota. Quem não tem lugar próprio devolve o ponto da rota.
+ */
+export type FocusPoint = (ts: number) => LatLng | null;
+
+/**
+ * Quanto do quadro (a metade do menor lado) o personagem e o ponto da ênfase
+ * podem ocupar juntos.
+ *
+ * A regra é: **o vídeo não pode perder o personagem**. O ponto da parada pode
+ * estar a centenas de metros da linha (o usuário arrasta o pino para fora), e
+ * com o ganho de zoom cheio essa distância vira mais de um quadro inteiro: o
+ * personagem sai da tela e o que se vê é um mapa de um lugar qualquer. Numa
+ * parada a 300 m da linha, em 720x1280, o ganho cheio de 2,2 níveis punha o
+ * personagem a ~1.100 px do centro — fora do quadro.
+ */
+export const RAIO_DO_PAR = 0.42;
+
+/** Metros por pixel no zoom 0, no equador (o mundo tem 256·2^z pixels). */
+const METROS_NO_EQUADOR = 156543.0339;
+
+/**
+ * Quantos níveis de zoom a ênfase pode acrescentar sem perder de vista o
+ * personagem.
+ *
+ * O ganho cheio (`STOP_BOOST`) só vale enquanto a **distância entre o
+ * personagem e o ponto** couber no quadro no zoom resultante — é o que mantém
+ * os dois na tela ao mesmo tempo. Quanto mais longe o pino estiver da linha,
+ * menos zoom: a 300 m da linha, em 720x1280, cabem ~1,1 nível em vez de 2,2.
+ *
+ * Nunca fica **abaixo** do zoom normal: a ênfase é um ganho, e não pode
+ * afastar a câmera do que já estava (o vídeo daria um "recuo" na parada).
+ */
+export function boostQueCabe(
+  camera: { followZoom: number; chase?: ChaseConfig },
+  width: number,
+  height: number,
+  metros: number,
+  lat: number,
+): number {
+  const base = zoomEfetivo(camera);
+  if (!(metros > 0) || !Number.isFinite(metros)) return STOP_BOOST;
+  const raio = RAIO_DO_PAR * Math.min(width, height);
+  const cos = Math.cos((Math.max(-85, Math.min(85, lat)) * Math.PI) / 180);
+  const zoomQueCabe = Math.log2((raio * METROS_NO_EQUADOR * cos) / metros);
+  return Math.max(0, Math.min(STOP_BOOST, zoomQueCabe - base));
+}
 
 /** Duração da abertura para um vídeo de `duration` segundos. */
 export function openingSeconds(duration: number): number {
@@ -256,7 +309,7 @@ export function cameraTarget(input: {
    */
   routeSeconds?: number;
   /** Onde fica a parada (a câmera vai até ela). Sem isto, não há deslocamento. */
-  stopPos?: (ts: number) => { lat: number; lng: number } | null;
+  stopPos?: FocusPoint;
 }): CameraTarget {
   const { track, t, camera, width, height, maxZoom, elapsed, duration } = input;
   const b = boundsOf(track.pts);
@@ -291,7 +344,18 @@ export function cameraTarget(input: {
     : [];
   const foco = focos.length > 0 ? stopFocus(t, focos, rotaSec) : { forca: 0, ts: null };
   const ponto = foco.ts !== null ? input.stopPos?.(foco.ts) ?? null : null;
-  const alvo = Math.min(zoomEfetivo(camera) + foco.forca * STOP_BOOST, maxZoom);
+  /*
+   * O ganho de zoom é **limitado pelo que cabe no quadro**: com o pino fora da
+   * linha (o lugar próprio da parada), o ganho cheio punha o personagem fora da
+   * tela — o usuário viu e cobrou ("está até perdendo o personagem do trajeto
+   * quando vai dar o zoom no ponto"). `boostQueCabe` devolve o quanto dá para
+   * chegar perto sem perder o personagem de vista; numa parada em cima da linha
+   * (a distância é de metros) continua sendo o ganho cheio.
+   */
+  const boost = ponto
+    ? boostQueCabe(camera, width, height, haversine(pos, ponto), pos.lat)
+    : STOP_BOOST;
+  const alvo = Math.min(zoomEfetivo(camera) + foco.forca * boost, maxZoom);
   const focoLat = ponto ? pos.lat + (ponto.lat - pos.lat) * foco.forca : pos.lat;
   const focoLng = ponto ? pos.lng + (ponto.lng - pos.lng) * foco.forca : pos.lng;
 

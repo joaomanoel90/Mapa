@@ -80,6 +80,16 @@ A diferença é grande: um vídeo de 14 s sai **em poucos segundos** no motor r�
 arquivo é exatamente o escolhido — no tempo real, um quadro perdido vira engasgo. O motor rápido
 também não precisa da aba visível.
 
+No **tempo real** o desenho é feito na **grade do vídeo**, e não no instante em que a tela pediu o
+quadro: numa tela de 60 Hz, um vídeo de 24 quadros por segundo é capturado em 2 ou 3 quadros de
+tela alternados (33 ms e 50 ms) e cada captura levaria um meio-caminho entre dois quadros do
+vídeo. Medido num arquivo de 60 s em 720×1280: 1.441 quadros com passos de 1/30 s e 1/50 s
+alternados — era isso o "engasgo". Na grade, cada captura é um quadro inteiro do vídeo (o mesmo
+conteúdo que a exportação rápida escreve) e o codificador descarta o repetido; com 30 ou 60
+quadros por segundo o tempo sai regular em qualquer tela. Quando o vídeo termina, a janela diz
+**qual motor rodou** — "Exportação rápida (WebCodecs): cada quadro no tempo exato" ou "Gravação em
+tempo real...": é a primeira coisa a olhar se o arquivo sair com o movimento picado.
+
 Cada formato tem um codec associado: MP4 usa H.264, WebM usa VP9 ou VP8. Se o navegador recusar
 o codec do formato escolhido, a exportação cai para tempo real sozinha, sem erro na tela.
 
@@ -395,6 +405,18 @@ já está inteira na tela, e o painel avisa).
   alvo, e sem esse adiantamento o pico do zoom que aparece no vídeo caía 297 m
   **depois** do ponto (medido no GPX de 21,4 km, com 8 paradas); com ele, o pico
   cai em cima do ponto (0 m de mediana). O
+  O quadro só anda **até onde o personagem continua na tela**: quanto mais
+  longe o pino estiver da linha, menos o quadro se desloca e menor é o ganho de
+  zoom (`boostQueCabe` decide o ganho, `pesoQueCabe` decide o deslocamento; a
+  parada na linha continua com o ganho cheio). No arquivo de exemplo que o
+  usuário mandou — uma parada com o pino a poucas dezenas de metros da linha —
+  o marcador do personagem saía do quadro por 1,46 s no meio do zoom e voltava,
+  e era isso o *"está até perdendo o personagem do trajeto"*. Medido numa parada
+  a 440 m da linha em 720×1280: o selo do pino chega a **15,8 px** do centro no
+  quadro de cima e a **144 px** na terceira pessoa (onde o personagem fica a 68%
+  da altura, com menos espaço embaixo), o personagem anda no máximo **320 px** do
+  lugar dele e **nenhum quadro** o deixa fora — sem o limite, o pino a 440 m
+  ficaria a 568 px e o personagem sairia pela borda. O
   caminho **não para**: não há freada, o personagem anda o tempo todo no mesmo
   passo e a duração do vídeo não muda. A janela do zoom acompanha o percurso
   (~1,6 s de cada lado) e encolhe quando há muitas paradas, de modo que uma
@@ -776,7 +798,7 @@ ou cortados.
 
 ```bash
 npm run typecheck  # tsc --noEmit
-npm test           # Vitest (582 casos)
+npm test           # Vitest (685 casos)
 npm run check:dist # o build saiu autocontido e sem /src/?
 ```
 

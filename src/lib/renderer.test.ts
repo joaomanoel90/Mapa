@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { TILE_SIZE, buildTrack, cumulative, rumoSuave, sampleTrack } from "./geo";
+import { TILE_SIZE, buildTrack, cumulative, haversine, rumoSuave, sampleTrack } from "./geo";
 import { formatPace } from "./hud";
 import { buildTimeline, routeEnd, routeProgress, type Timeline } from "./timeline";
 import { colorizeRoute, NEUTRAL_COLOR } from "./coloring";
 import { formatClock, timesOf } from "./hud";
 import { type PhotoImage, type PhotoLookup } from "./photos";
-import type { Poi } from "./pois";
+import { poiLatLng, type Poi } from "./pois";
 import { kmMarks } from "./km-marks";
 import { findCharacter, gaitOf } from "./characters";
 import {
@@ -24,6 +24,7 @@ import {
   liftToClear,
   lugarDoBloco,
   overlapsCard,
+  pesoQueCabe,
   projetorDaVista,
   summaryBox,
   tilesDaVista,
@@ -32,7 +33,7 @@ import {
   type FrameState,
   type SceneStyle,
 } from "./renderer";
-import { CHASE_ALTURA, CHASE_TILT } from "./camera";
+import { CHASE_ALTURA, CHASE_TILT, boostQueCabe, zoomEfetivo } from "./camera";
 import { project } from "./geo";
 import { endCard, rideSummary, type EndCard } from "./stats";
 
@@ -2630,16 +2631,18 @@ function percursoLongo(km: number, n = 4000) {
 }
 
 describe("o foco no ícone do ponto", () => {
-  /* a rota do usuário — 21,4 km — e uma parada 440 m fora da linha, em t = 0,6 */
+  /* a rota do usuário — 21,4 km — com uma parada em cima da linha e uma fora */
   const CAMINHO = buildTrack(percursoLongo(21.4));
   const NO_PONTO = sampleTrack(CAMINHO, 0.6).pos;
-  const PARADA = parada({
+  const LONGE = 440; // metros ao norte da linha
+  const paradaFora = parada({
     t: 0.6,
     pos: {
       lat: NO_PONTO.lat,
-      lng: NO_PONTO.lng + 440 / (111_320 * Math.cos((NO_PONTO.lat * Math.PI) / 180)),
+      lng: NO_PONTO.lng + LONGE / (111_320 * Math.cos((NO_PONTO.lat * Math.PI) / 180)),
     },
   });
+  const paradaNaLinha = parada({ t: 0.6 });
   const cameraComFoco = (terceira: boolean) => ({
     mode: "follow" as const,
     followZoom: 15,
@@ -2651,77 +2654,136 @@ describe("o foco no ícone do ponto", () => {
    * A animação inteira a 30 quadros por segundo, com a câmera de verdade.
    *
    * O renderizador é **um só** de ponta a ponta, como na exportação: é a
-   * suavização da câmera (e o adiantamento do alvo) que decide onde o zoom
-   * desenhado cai. Um quadro isolado não mede isso — o primeiro quadro de um
-   * renderizador novo já está no alvo, sem atraso nenhum para compensar.
+   * suavização da câmera (e o adiantamento do alvo) que decide onde o quadro
+   * cai. Um quadro isolado não mede isso — o primeiro quadro de um renderizador
+   * novo já está no alvo, sem atraso nenhum para compensar.
    *
    * Devolve o quadro do **pico do zoom desenhado** (a câmera suavizada dentro do
-   * renderizador, que é o que o usuário vê) e o quadro da parada em si.
+   * renderizador, que é o que o usuário vê) e a posição do **personagem** em
+   * todos os quadros.
    */
-  const animacao = (terceira: boolean) => {
+  const animacao = (
+    terceira: boolean,
+    alvo: ReturnType<typeof parada>,
+    tamanho: { w: number; h: number } = { w: 1280, h: 720 },
+  ) => {
     const tl = buildTimeline(14, { voo: false, cartela: true });
     const r = new SceneRenderer("dark");
-    const quadros: { t: number; zoom: number; y: number }[] = [];
+    const emoji = findCharacter("car").emoji;
+    const quadros: {
+      t: number;
+      zoom: number;
+      x: number;
+      y: number;
+      xSelo: number;
+      ySelo: number;
+    }[] = [];
     for (let seg = 0; seg <= tl.percurso + 1e-6; seg += 1 / 30) {
       const t = routeProgress(tl, seg);
       const f = fakeCtx();
-      r.render(f.ctx, 1280, 720, {
+      r.render(f.ctx, tamanho.w, tamanho.h, {
         ...estado(t, 14, null, null, null, tl),
         track: CAMINHO,
-        stops: [PARADA],
+        stops: [alvo],
         camera: cameraComFoco(terceira),
       });
+      const k = f.textos.indexOf(emoji);
       const selo = f.arcosPos.filter((a) => a[2] > 15 && a[2] < 20)[0];
       quadros.push({
         t,
         zoom: (r as unknown as { cam: { zoom: number } | null }).cam?.zoom ?? NaN,
-        y: selo ? selo[1] : NaN,
+        x: f.textosXAbs[k] ?? NaN,
+        y: f.textosYAbs[k] ?? NaN,
+        xSelo: selo ? selo[0] : NaN,
+        ySelo: selo ? selo[1] : NaN,
       });
     }
     const pico = quadros.reduce((a, b) => (b.zoom > a.zoom ? b : a));
     return {
+      quadros,
       pico,
       /** segundos de vídeo entre o pico e a parada (é a unidade da ênfase) */
       atraso: Math.abs(pico.t - 0.6) * tl.percurso,
-      linha: terceira ? 720 * CHASE_ALTURA : 360,
+      linha: terceira ? tamanho.h * CHASE_ALTURA : tamanho.h / 2,
     };
   };
 
   /*
-   * O pedido: "quero sem a pausa nos pontos, só um zoom e focar no ícone do
-   * ponto". Sem a freada, quem faz a ênfase é a câmera — ela chega mais perto
-   * (o zoom) **e** vai até o lugar da parada.
+   * O pedido desta rodada: *"está até perdendo o personagem do trajeto quando
+   * vai dar o zoom no ponto"*.
    *
-   * A câmera suaviza o alvo, então o que aparece no vídeo chega atrasado:
-   * medido na animação inteira, o pico do zoom desenhado caía ~0,1 s de vídeo
-   * **depois** da parada (297 m no GPX do usuário). Adiantando o alvo nesse
-   * mesmo tanto, o pico cai em cima do ponto — nos dois modos de câmera.
+   * O pino da parada pode estar longe da linha (o usuário arrasta o pino até a
+   * igreja, a cachoeira) e o quadro ia inteiro até ele no ganho cheio de zoom:
+   * numa parada a 440 m da linha o personagem saía da moldura — e o vídeo
+   * ficava sem ele justamente no momento da parada.
    */
-  it("o pico do zoom desenhado cai em cima do ponto — nos dois modos de câmera", () => {
+  it("o personagem não sai da moldura em nenhum quadro — nem com o pino fora da linha", () => {
     for (const terceira of [false, true]) {
-      const { atraso } = animacao(terceira);
+      for (const alvo of [paradaNaLinha, paradaFora]) {
+        const { quadros } = animacao(terceira, alvo);
+        const fora = quadros.filter((q) => q.x < 0 || q.x > 1280 || q.y < 0 || q.y > 720);
+        expect(fora.length).toBe(0);
+      }
+    }
+  });
+
+  it("a parada fora da linha também não joga o quadro fora do personagem", () => {
+    // o quadro desliza até o ponto, mas para onde o personagem ainda aparece: a
+    // distância entre os dois, em pixels, é menor que o quadro
+    for (const terceira of [false, true]) {
+      const { pico, quadros } = animacao(terceira, paradaFora);
+      const emoji = quadros.find((q) => Math.abs(q.t - pico.t) < 1e-9);
+      expect(emoji).toBeDefined();
+      // e o ponto da parada continua dentro do quadro no pico da aproximação
+      expect(pico.ySelo).toBeGreaterThan(0);
+      expect(pico.ySelo).toBeLessThan(720);
+    }
+  });
+
+  it("numa parada em cima da linha, o pico do zoom cai em cima do ponto", () => {
+    /*
+     * Com o pino na linha a distância é de metros e o ganho de zoom é o cheio:
+     * o pico do zoom **desenhado** cai sobre o ponto (era 297 m depois dele
+     * antes do adiantamento do alvo, medido no GPX do usuário).
+     */
+    for (const terceira of [false, true]) {
+      const { atraso } = animacao(terceira, paradaNaLinha);
       expect(atraso).toBeLessThan(0.05);
     }
   });
 
-  it("no pico, o ícone do lugar está perto da linha da câmera", () => {
-    // sem isso o zoom acontecia com o ícone fora do quadro — era o "focar no
-    // ícone" que não acontecia
+  /*
+   * A outra metade do pedido continua de pé: a parada **aproxima**.
+   *
+   * Limitar o deslocamento para não perder o personagem não pode virar "a
+   * câmera não vai a lugar nenhum". Numa parada a 440 m da linha, em 720x1280,
+   * o selo do pino chega a **15,8 px** do centro do quadro de cima e a **144 px**
+   * na terceira pessoa (onde o personagem fica a 68% da altura, com menos espaço
+   * embaixo, e o deslocamento tem de ser menor). Sem o deslocamento ele ficaria
+   * a 568 px — fora do quadro.
+   */
+  it("a parada fora da linha continua sendo levada ao centro", () => {
     for (const terceira of [false, true]) {
-      const { pico, linha } = animacao(terceira);
-      expect(Math.abs(pico.y - linha)).toBeLessThan(130);
+      const { quadros } = animacao(terceira, paradaFora, { w: 720, h: 1280 });
+      const centro = { x: 360, y: 640 };
+      const perto = Math.min(
+        ...quadros
+          .filter((q) => Number.isFinite(q.xSelo) && Number.isFinite(q.ySelo))
+          .map((q) => Math.hypot(q.xSelo - centro.x, q.ySelo - centro.y)),
+      );
+      // medido: 15,8 px de cima e 144,4 px na terceira pessoa
+      expect(perto).toBeLessThan(200);
     }
   });
 
   it("longe de qualquer ponto, o enquadramento é o de sempre", () => {
     // o peso da ênfase é a própria força da aproximação: a zero, nada muda
-    // (aqui na rota curta e de sempre, para o teto de blocos não entrar na conta)
     const emoji = findCharacter("car").emoji;
     const personagem = (comFoco: boolean) => {
       const f = fakeCtx();
       desenhar(f.ctx, {
         ...estado(0.2, 14, null), // bem longe da parada de t = 0,6
-        stops: [PARADA],
+        stops: [paradaFora],
         camera: {
           mode: "follow",
           followZoom: 15,
@@ -2732,6 +2794,79 @@ describe("o foco no ícone do ponto", () => {
       return f.textosYAbs[f.textos.indexOf(emoji)];
     };
     expect(personagem(true)).toBeCloseTo(personagem(false), 6);
+  });
+});
+
+describe("o aquecimento dos blocos na parada", () => {
+  /* a mesma parada fora da linha do outro describe, na rota de 21,4 km */
+  const CAMINHO = buildTrack(percursoLongo(21.4));
+  const NO_PONTO = sampleTrack(CAMINHO, 0.6).pos;
+  const FORA = parada({
+    t: 0.6,
+    pos: {
+      lat: NO_PONTO.lat,
+      lng: NO_PONTO.lng + 440 / (111_320 * Math.cos((NO_PONTO.lat * Math.PI) / 180)),
+    },
+  });
+  const camera = { mode: "follow" as const, followZoom: 15, chase: { gira: false, tilt: true } };
+  const cine = { opening: false, stops: true, stopTs: [0.6], chegada: false };
+  const chave = (t: { z: number; x: number; y: number }) => `${t.z}/${t.x}/${t.y}`;
+
+  /** A vista que o desenho mostra no pico da aproximação. */
+  const vistaDoPico = () => {
+    const alvo = poiLatLng(FORA, CAMINHO);
+    const boost = boostQueCabe(camera, 1080, 1920, haversine(NO_PONTO, alvo), NO_PONTO.lat);
+    const zoom = zoomEfetivo(camera) + boost;
+    const matriz = vistaDe({
+      centro: NO_PONTO,
+      zoom,
+      width: 1080,
+      height: 1920,
+      maxZoom: 19,
+      altura: CHASE_ALTURA,
+      angulo: 0,
+      tilt: CHASE_TILT,
+    });
+    const peso = pesoQueCabe(matriz, NO_PONTO, alvo, CHASE_ALTURA, 1080, 1920);
+    return vistaDe({
+      centro: {
+        lat: NO_PONTO.lat + (alvo.lat - NO_PONTO.lat) * peso,
+        lng: NO_PONTO.lng + (alvo.lng - NO_PONTO.lng) * peso,
+      },
+      zoom,
+      width: 1080,
+      height: 1920,
+      maxZoom: 19,
+      altura: CHASE_ALTURA,
+      angulo: 0,
+      tilt: CHASE_TILT,
+    });
+  };
+
+  it("o aquecimento traz os blocos do lugar da parada — o que o vídeo desenha", () => {
+    /*
+     * O defeito: o aquecimento pedia os blocos do **ponto da rota** com o ganho
+     * cheio de zoom, e o desenho mostrava o **lugar** da parada (o pino pode
+     * estar longe da linha) com o ganho que cabe. Os blocos do quadro que
+     * aparece na tela não estavam baixados: o vídeo saía borrado e travava
+     * esperando o mapa, justamente na parada.
+     */
+    const comFoco = new Set(
+      tilesForAnimation(CAMINHO, camera, 1080, 1920, "dark", cine, () => poiLatLng(FORA, CAMINHO)).map(chave),
+    );
+    const vista = vistaDoPico();
+    for (const [z, x, y] of tilesDaVista(vista)) {
+      expect(comFoco.has(`${z}/${x}/${y}`)).toBe(true);
+    }
+  });
+
+  it("sem o foco, os blocos do lugar da parada ficavam de fora", () => {
+    // é o que o app fazia antes: o foco (e portanto a vista) era o ponto da rota
+    const semFoco = new Set(
+      tilesForAnimation(CAMINHO, camera, 1080, 1920, "dark", cine).map(chave),
+    );
+    const faltando = tilesDaVista(vistaDoPico()).filter((t) => !semFoco.has(`${t[0]}/${t[1]}/${t[2]}`));
+    expect(faltando.length).toBeGreaterThan(0);
   });
 });
 

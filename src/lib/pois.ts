@@ -10,6 +10,7 @@
  */
 
 import { haversine, sampleTrack, type LatLng, type Track } from "./geo";
+import type { FocusPoint } from "./camera";
 
 export type PoiKind = {
   id: string;
@@ -131,6 +132,32 @@ export type Poi = {
 /** Coordenada geográfica efetiva da parada. */
 export function poiLatLng(poi: Poi, track: Track): LatLng {
   return poi.pos ?? sampleTrack(track, poi.t).pos;
+}
+
+/**
+ * Onde a câmera (e o aquecimento dos blocos) foca cada parada: **o lugar**.
+ *
+ * A parada pode ter lugar próprio, fora da linha — e é para lá que a câmera vai
+ * quando ela é anunciada ("só um zoom e focar no icone do ponto"). O mesmo
+ * `ts -> lugar` é usado por quem desenha e por quem baixa os blocos antes de
+ * gravar: com o foco diferente nos dois lados, o vídeo chegava na parada com os
+ * blocos da **rota** em mãos e o mapa saía borrado, esperando os blocos do lugar
+ * (era o "mostra o video tambem travando").
+ *
+ * O casamento é pelo instante da passagem, que é o que a linha do tempo carrega
+ * (uma parada visitada duas vezes tem um instante por passagem).
+ */
+export function focoDasParadas(
+  stops: Poi[],
+  passages: Record<string, number[]> | undefined,
+  track: Track,
+): FocusPoint {
+  return (ts) => {
+    const parada = stops.find((p) =>
+      (passages?.[p.id] ?? [p.t]).some((x) => Math.abs(x - ts) < 1e-6),
+    );
+    return parada ? poiLatLng(parada, track) : sampleTrack(track, ts).pos;
+  };
 }
 
 /** Ponto da rota usado como gatilho (de onde sai a linha de chamada). */

@@ -691,6 +691,18 @@ function Sidebar(props: Props) {
                 onChange={(v) => update("fps", Number(v))}
                 size="sm"
               />
+              {/*
+                Na gravação em tempo real quem carimba o tempo é a tela: o fps
+                pedido precisa dividir a taxa dela, senão os quadros do arquivo
+                saem com durações alternadas e o mapa anda aos pulos (24 numa
+                tela de 60 Hz é o pior caso).
+              */}
+              {!s.fastExport && (
+                <p className="mt-1 text-[10.5px] leading-snug text-zinc-500">
+                  Em tempo real, o fps precisa dividir a taxa da tela: num monitor de 60 Hz, 24
+                  sai aos pulos — 30 ou 60 saem certos.
+                </p>
+              )}
             </div>
             <div>
               <Label>Qualidade</Label>

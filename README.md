@@ -80,15 +80,24 @@ A diferença é grande: um vídeo de 14 s sai **em poucos segundos** no motor r�
 arquivo é exatamente o escolhido — no tempo real, um quadro perdido vira engasgo. O motor rápido
 também não precisa da aba visível.
 
-No **tempo real** o desenho é feito na **grade do vídeo**, e não no instante em que a tela pediu o
-quadro: numa tela de 60 Hz, um vídeo de 24 quadros por segundo é capturado em 2 ou 3 quadros de
-tela alternados (33 ms e 50 ms) e cada captura levaria um meio-caminho entre dois quadros do
-vídeo. Medido num arquivo de 60 s em 720×1280: 1.441 quadros com passos de 1/30 s e 1/50 s
-alternados — era isso o "engasgo". Na grade, cada captura é um quadro inteiro do vídeo (o mesmo
-conteúdo que a exportação rápida escreve) e o codificador descarta o repetido; com 30 ou 60
-quadros por segundo o tempo sai regular em qualquer tela. Quando o vídeo termina, a janela diz
-**qual motor rodou** — "Exportação rápida (WebCodecs): cada quadro no tempo exato" ou "Gravação em
-tempo real...": é a primeira coisa a olhar se o arquivo sair com o movimento picado.
+No **tempo real** quem carimba o tempo é a **tela**: o `MediaRecorder` entrega o quadro que estiver
+desenhado no instante em que a tela o pediu. Duas coisas seguem disso, e as duas foram medidas no
+arquivo de exemplo que o usuário mandou (60 s, 720×1280, 1.441 quadros):
+
+1. **Um quadro capturado por quadro desenhado.** O caminho de sempre deixa o navegador escolher o
+   instante da captura; com `captureStream(0)` + `requestFrame()` a captura sai colada no quadro que
+   acabou de ser desenhado. O desenho é feito na **grade do vídeo** (`indiceDoQuadro`, `i/fps`), de
+   modo que cada quadro do arquivo é um quadro inteiro do vídeo.
+2. **O `fps` tem de dividir a taxa da tela** (`fpsQueCasa`, medindo a tela com
+   `requestAnimationFrame`). Pedir 24 numa tela de 60 Hz é o pior caso: os quadros saem de 2 e 3
+   quadros de tela — durações agrupadas em **999 e 1.500** (1/30.000 s), ou 33 ms e 50 ms
+   alternados, exatamente o que o arquivo dele mostra — e, como a velocidade é a mesma, o que se vê
+   é o movimento oscilando a cada quadro: é o *"o mapa fica pulando"*. Numa tela de 60 Hz, 24 vira
+   **20**; 30 e 60 continuam 30 e 60. A janela avisa quando o fps foi trocado.
+
+Quando o vídeo termina, a janela diz **qual motor rodou** ("Exportação rápida (WebCodecs)" ou
+"Gravação em tempo real") e, no tempo real, em que fps o arquivo saiu: é a primeira coisa a olhar se
+o movimento sair picado.
 
 Cada formato tem um codec associado: MP4 usa H.264, WebM usa VP9 ou VP8. Se o navegador recusar
 o codec do formato escolhido, a exportação cai para tempo real sozinha, sem erro na tela.
@@ -798,7 +807,7 @@ ou cortados.
 
 ```bash
 npm run typecheck  # tsc --noEmit
-npm test           # Vitest (685 casos)
+npm test           # Vitest (691 casos)
 npm run check:dist # o build saiu autocontido e sem /src/?
 ```
 

@@ -13,6 +13,9 @@ export default function ExportModal({
   blobSize,
   ext,
   engine,
+  fps,
+  fpsPedido,
+  taxaDaTela,
   width,
   height,
   duration,
@@ -30,6 +33,12 @@ export default function ExportModal({
   ext: string;
   /** como o arquivo foi gravado — a diferença aparece no texto do fim */
   engine?: VideoEngine;
+  /** fps que o arquivo recebeu */
+  fps?: number;
+  /** fps que estava escolhido no painel (na gravação em tempo real pode mudar) */
+  fpsPedido?: number;
+  /** taxa da tela medida, em Hz (0 = não deu para medir) */
+  taxaDaTela?: number;
   width: number;
   height: number;
   duration: number;
@@ -40,6 +49,11 @@ export default function ExportModal({
 }) {
   const pct = Math.round(progress * 100);
   const isWorking = phase === "warmup" || phase === "recording";
+  /** o fps como se fala: 19,98 é 20; 22,5 continua 22,5 */
+  const numero = (v: number) => {
+    const redondo = Math.round(v * 10) / 10;
+    return (Number.isInteger(redondo) ? String(redondo) : redondo.toFixed(1).replace(".", ",")) as string;
+  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-md">
@@ -72,7 +86,25 @@ export default function ExportModal({
               <p className="mt-1 text-[11.5px] leading-snug text-zinc-500">
                 {engine === "fast"
                   ? "Exportação rápida (WebCodecs): cada quadro no tempo exato."
-                  : "Gravação em tempo real: a tela entrega os quadros no ritmo dela. Num monitor de 60 Hz, 30 ou 60 quadros por segundo saem com o tempo regular — com 24 pode ficar um leve engasgo. A exportação rápida, quando o navegador tem WebCodecs para o formato, sai perfeita."}
+                  : "Gravação em tempo real: quem carimba o tempo é a tela."}
+                {engine === "realtime" && fps != null && fpsPedido != null && (
+                  <>
+                    {fps !== fpsPedido
+                      ? ` A tela${
+                          taxaDaTela ? ` entrega ${Math.round(taxaDaTela)} quadros por segundo e` : ""
+                        } não fecha com ${numero(fpsPedido)}: gravado em ${numero(fps)} quadros por segundo, que é o que sai com o tempo regular (o pedido de ${numero(fpsPedido)} sairia com durações alternadas de 33 ms e 50 ms — é isso que faz o mapa parecer pular).`
+                      : ` Gravado em ${numero(fps)} quadros por segundo, que fecha com a tela${
+                          taxaDaTela ? ` (${Math.round(taxaDaTela)} Hz)` : ""
+                        } — o tempo sai regular.`}
+                  </>
+                )}
+                {engine === "realtime" && (
+                  <>
+                    {" "}
+                    A exportação rápida (⚡) escreve cada quadro no tempo exato, sem depender
+                    da tela.
+                  </>
+                )}
               </p>
             )}
           </div>

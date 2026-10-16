@@ -61,6 +61,8 @@ import {
   availableFormats,
   CancelledError,
   downloadBlob,
+  fpsQueCasa,
+  medirTaxaDaTela,
   recordVideo,
   type VideoEngine,
   type VideoFormat,
@@ -173,6 +175,12 @@ function App() {
     ext: string;
     /** como o arquivo foi gravado: WebCodecs (rápida) ou `MediaRecorder` */
     engine: VideoEngine;
+    /** fps que o arquivo recebeu (na gravação em tempo real pode diferir do pedido) */
+    fps: number;
+    /** fps que estava escolhido no painel */
+    fpsPedido: number;
+    /** taxa da tela medida, em Hz (0 = não deu para medir) */
+    taxaDaTela: number;
   } | null>(null);
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -1104,11 +1112,28 @@ function App() {
       setExportProgress(0);
       setPhase("recording");
 
+      /*
+       * Qual motor vai gravar — e com que `fps`.
+       *
+       * WebCodecs renderiza mais rápido que o tempo real e escreve o tempo exato
+       * de cada quadro. Se o navegador não souber codificar o formato escolhido,
+       * quem grava é o `MediaRecorder`, em tempo real — e aí o `fps` precisa
+       * **dividir** a taxa da tela, senão os quadros do arquivo saem com durações
+       * alternadas (33 ms e 50 ms numa tela de 60 Hz com 24 pedidos) e o mapa
+       * anda aos pulos.
+       */
+      const rapida =
+        settings.fastExport &&
+        (await isFastEncodeSupported(activeFormat, aspect.w, aspect.h, settings.fps));
+      if (cancelRef.current) throw new CancelledError();
+      const taxaDaTela = rapida ? 0 : await medirTaxaDaTela();
+      const fpsFinal = rapida ? settings.fps : fpsQueCasa(taxaDaTela, settings.fps);
+
       const engine = {
         canvas: canvasForRecord ?? canvasRef.current ?? document.createElement("canvas"),
         width: aspect.w,
         height: aspect.h,
-        fps: settings.fps,
+        fps: fpsFinal,
         durationSec: settings.duration,
         format: activeFormat,
         bitrate: Math.round(settings.bitrateMbps * 1_000_000),
@@ -1131,14 +1156,6 @@ function App() {
         },
       };
 
-      // WebCodecs renderiza mais rápido que o tempo real e com fps exato.
-      // Se o navegador não souber codificar o formato escolhido, cai para o
-      // MediaRecorder — que continua funcionando, só que em tempo real.
-      const rapida =
-        settings.fastExport &&
-        (await isFastEncodeSupported(activeFormat, aspect.w, aspect.h, settings.fps));
-      if (cancelRef.current) throw new CancelledError();
-
       const blob = rapida ? await recordVideoFast(engine) : await recordVideo(engine);
       setVideo({
         blob,
@@ -1146,6 +1163,9 @@ function App() {
         size: blob.size,
         ext: activeFormat.ext,
         engine: rapida ? "fast" : "realtime",
+        fps: fpsFinal,
+        fpsPedido: settings.fps,
+        taxaDaTela,
       });
       setPhase("done");
     } catch (err) {
@@ -1480,6 +1500,9 @@ function App() {
           blobSize={video?.size}
           ext={video?.ext ?? activeFormat.ext}
           engine={video?.engine}
+          fps={video?.fps}
+          fpsPedido={video?.fpsPedido}
+          taxaDaTela={video?.taxaDaTela}
           width={aspect.w}
           height={aspect.h}
           duration={settings.duration}

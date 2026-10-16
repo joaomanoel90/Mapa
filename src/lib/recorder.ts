@@ -94,6 +94,105 @@ export class CancelledError extends Error {
 }
 
 /**
+ * Taxa em que a **tela** desenha, medida com alguns quadros de `requestAnimationFrame`.
+ *
+ * É ela que decide se a gravação em tempo real sai com o tempo regular: o
+ * `MediaRecorder` carimba cada quadro com o relógio do instante em que a tela o
+ * entregou. Numa tela de 60 Hz, um pedido de 24 quadros por segundo é atendido
+ * de 2 ou 3 quadros de tela em 2 ou 3 — os quadros do arquivo saem com 33 ms e
+ * 50 ms **alternados**. O conteúdo anda o mesmo por unidade de tempo, então a
+ * velocidade aparente oscila a cada quadro: é o *"o mapa fica pulando"*.
+ *
+ * Devolve 0 quando não dá para medir (sem `requestAnimationFrame`, aba
+ * escondida, tudo travado).
+ */
+export async function medirTaxaDaTela(amostras = 24): Promise<number> {
+  if (typeof requestAnimationFrame !== "function" || typeof performance === "undefined") return 0;
+  const passos: number[] = [];
+  await new Promise<void>((resolve) => {
+    let anterior = 0;
+    let n = 0;
+    const tique = (agora: number) => {
+      if (anterior > 0) passos.push(agora - anterior);
+      anterior = agora;
+      if (++n >= amostras) {
+        resolve();
+        return;
+      }
+      requestAnimationFrame(tique);
+    };
+    requestAnimationFrame(tique);
+    // rede de segurança: aba escondida não entrega quadros
+    setTimeout(resolve, 1000);
+  });
+  if (passos.length < 8) return 0;
+  const ordenados = passos.slice().sort((a, b) => a - b);
+  /*
+   * O intervalo **curto** típico, e não a mediana: se a máquina engasgar no meio
+   * da medição (o aquecimento do mapa está rodando junto), metade dos quadros
+   * chega atrasada e a mediana diria "30 Hz" numa tela de 60 — e a gravação sairia
+   * com metade da taxa pedida. O 5º menor intervalo de 24 é a taxa da tela.
+   */
+  const base = ordenados[Math.min(ordenados.length - 1, Math.max(2, Math.floor(ordenados.length * 0.2)))];
+  if (!(base > 0)) return 0;
+  return Math.round(1_000_000 / base) / 1000;
+}
+
+/**
+ * Qual `fps` usar na gravação em tempo real para o arquivo sair com o **tempo
+ * regular**.
+ *
+ * O `MediaRecorder` não inventa os instantes: ele carimba cada quadro com o
+ * relógio do momento em que a tela o entregou. Então o arquivo só sai com
+ * durações iguais quando o `fps` **divide** a taxa da tela — 30 numa tela de
+ * 60 Hz, 20 numa de 60 Hz, 22,5 numa de 90 Hz. Pedir 24 numa tela de 60 Hz é o
+ * pior caso: os quadros saem de 2 e 3 quadros de tela (33 ms e 50 ms
+ * alternados) e o mapa anda aos pulos — foi o que o usuário cobrou
+ * (*"o problema é o mapa ficar pulando"*) e o que o arquivo de exemplo dele
+ * mostra: 1.441 quadros com as durações agrupadas em 999 e 1.500 (1/30.000 s).
+ *
+ * Vale a divisora da tela **mais próxima do pedido** (em proporção, para 20 e 30
+ * ficarem à mesma distância de 24), nunca abaixo de 6 quadros por segundo e
+ * nunca mais de 10% acima do pedido — subir a taxa num aparelho que já desenha
+ * no limite troca um problema pelo outro. Sem medida confiável da tela, devolve
+ * o pedido.
+ */
+export function fpsQueCasa(taxaDaTela: number, pedido: number): number {
+  const desejado = Math.max(1, Math.round(pedido));
+  if (!Number.isFinite(taxaDaTela) || taxaDaTela < 10) return desejado;
+  const tela = taxaDaTela;
+  /** o fps cabe na tela sem sobra de meia tela? */
+  const casado = (f: number) => {
+    const quadros = Math.round(tela / f);
+    return quadros >= 1 && Math.abs(tela / quadros - f) <= 0.005 * f;
+  };
+  if (casado(desejado)) return desejado;
+  let melhor = 0;
+  let distancia = Infinity;
+  for (let n = 1; n <= Math.floor(tela / 6); n++) {
+    const f = tela / n;
+    if (!casado(f)) continue;
+    /*
+     * Nunca muito acima do pedido: numa tela de 75 Hz, 60 pedidos cairiam em
+     * 75 quadros por segundo (um quadro por quadro de tela) — não sobra folga
+     * nenhuma para o desenho e o movimento engasga mais do que a taxa baixa.
+     */
+    if (f > desejado * 1.1) continue;
+    const d = Math.abs(Math.log(f / desejado));
+    /*
+     * Empate fica com o **maior**: entre 20 e 30 quadros por segundo (que estão
+     * à mesma distância de 24), o de cima é o mais macio.
+     */
+    if (d < distancia - 1e-9 || (Math.abs(d - distancia) <= 1e-9 && f > melhor)) {
+      distancia = d;
+      melhor = f;
+    }
+  }
+  if (melhor <= 0) return Math.max(6, Math.min(desejado, Math.round(tela)));
+  return Math.max(6, Math.round(melhor * 100) / 100);
+}
+
+/**
  * Qual quadro do vídeo desenhar num instante do relógio.
  *
  * O desenho é feito na **grade do vídeo** (`i/fps`), e não no instante em que a
@@ -122,7 +221,27 @@ export async function recordVideo(opts: RecordOptions): Promise<Blob> {
   // primeiro frame antes de iniciar a captura
   opts.draw(ctx, 0, 0);
 
-  const stream = canvas.captureStream(fps);
+  /*
+   * Um quadro capturado por quadro desenhado.
+   *
+   * O caminho de sempre (`captureStream(fps)`) deixa o **navegador** escolher o
+   * instante da captura: numa tela de 60 Hz com 24 quadros por segundo pedidos,
+   * ele entrega 2 ou 3 quadros de tela por quadro — e o quadro entregue é o que
+   * estiver na tela naquele instante, que não é o instante do desenho. O
+   * resultado é o arquivo com o movimento aos pulos (foi o que o usuário viu:
+   * *"o mapa fica pulando"*). Com `captureStream(0)` ninguém captura sozinho, e
+   * `requestFrame()` marca a captura **no quadro que acabou de ser desenhado**.
+   */
+  let stream = canvas.captureStream(0);
+  const trilha = stream.getVideoTracks()[0] as
+    | (CanvasCaptureMediaStreamTrack & { requestFrame?: () => void })
+    | undefined;
+  const porQuadro = typeof trilha?.requestFrame === "function";
+  if (!porQuadro) {
+    // navegador sem `requestFrame`: volta ao ritmo da tela, limitado pelo `fps`
+    for (const t of stream.getTracks()) t.stop();
+    stream = canvas.captureStream(fps);
+  }
   const chunks: BlobPart[] = [];
   const recorder = new MediaRecorder(stream, {
     mimeType: format.mime,
@@ -135,6 +254,12 @@ export async function recordVideo(opts: RecordOptions): Promise<Blob> {
     recorder.onstop = () => resolve();
   });
 
+  /*
+   * O primeiro quadro já está desenhado desde antes de a captura existir: com
+   * `requestFrame()` quem manda é o desenho, então ele precisa ser pedido uma
+   * vez à mão para o arquivo não começar no quadro 1.
+   */
+  trilha?.requestFrame?.();
   recorder.start(200);
   const startedAt = performance.now();
 
@@ -158,6 +283,7 @@ export async function recordVideo(opts: RecordOptions): Promise<Blob> {
         desenhado = i;
         try {
           opts.draw(ctx, t, tempoDoQuadro(i));
+          trilha?.requestFrame?.();
         } catch (err) {
           cancelAnimationFrame(raf);
           reject(err instanceof Error ? err : new Error("Falha ao renderizar frame"));

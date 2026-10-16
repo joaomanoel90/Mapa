@@ -14,6 +14,7 @@ import {
   SANGRIA_PX,
   TILE_BUDGET,
   blocoDeReserva,
+  blocoDoQuadro,
   centroDoBloco,
   ladoDoBloco,
   retanguloDoBloco,
@@ -2898,7 +2899,94 @@ describe("o bloco que ainda não chegou", () => {
     // pai, 8: o recorte de origem e o retângulo de destino)
     expect(f.imagens.every((i) => i.args.length === 8)).toBe(true);
   });
-});
+
+  /*
+   * O mapa que troca de bloco no meio da gravação.
+   *
+   * Medido quadro a quadro no mp4 do usuário: as mudanças grandes da imagem não
+   * eram deslocamento (nenhuma faixa andava junto com as outras) — era **troca de
+   * textura**, um bloco chegando e substituindo o nível anterior que estava no
+   * lugar. Na gravação em tempo real isso acontece no meio do vídeo, e é o
+   * "continua travando" que ele vê. Com a lista de congelados, o que entrou no
+   * primeiro quadro fica até o fim.
+   */
+  it("sem a lista, o bloco exato entra assim que chega", () => {
+    const blocos: Record<string, unknown> = { "17/2/1": imagem() };
+    const store = { get: (z: number, x: number, y: number) => (blocos[`${z}/${x}/${y}`] ?? null) as never };
+    expect("reserva" in (blocoDoQuadro(store, 18, 5, 3, null) ?? {})).toBe(true);
+    blocos["18/5/3"] = imagem();
+    expect(blocoDoQuadro(store, 18, 5, 3, null)).toEqual({ img: blocos["18/5/3"] });
+  });
+
+  it("com a lista, quem caiu no nível anterior fica nele até o fim", () => {
+    const blocos: Record<string, unknown> = { "17/2/1": imagem() };
+    const store = { get: (z: number, x: number, y: number) => (blocos[`${z}/${x}/${y}`] ?? null) as never };
+    const congelados = new Set<string>();
+    const primeiro = blocoDoQuadro(store, 18, 5, 3, congelados);
+    expect("reserva" in (primeiro ?? {})).toBe(true);
+    expect([...congelados]).toEqual(["18/5/3"]);
+    // o bloco exato chegou no meio da gravação: e **não** entra no lugar
+    blocos["18/5/3"] = imagem();
+    expect(blocoDoQuadro(store, 18, 5, 3, congelados)).toEqual(primeiro);
+  });
+
+  it("sem nada no mapa, não há o que congelar", () => {
+    const store = { get: () => null as never };
+    const congelados = new Set<string>();
+    expect(blocoDoQuadro(store, 18, 5, 3, congelados)).toBeNull();
+    expect(congelados.size).toBe(0);
+  });
+
+  it("a gravação conta quantos blocos saíram do nível anterior", () => {
+    const caminho = buildTrack(percursoLongo(12));
+    const quadro = {
+      ...estado(0.3, 14, null),
+      track: caminho,
+      camera: { mode: "follow" as const, followZoom: 15 },
+      style: {
+        ...style,
+        showRoute: false,
+        showTraveled: false,
+        showEndpoints: false,
+        showStops: false,
+        showHud: false,
+        showSummary: false,
+        showProgress: false,
+        showTitle: false,
+      },
+    };
+    const r = new SceneRenderer("dark");
+    const pedidos: [number, number, number][] = [];
+    const req = r.tiles.request.bind(r.tiles);
+    r.tiles.request = (z: number, x: number, y: number) => {
+      pedidos.push([z, x, y]);
+      req(z, x, y);
+    };
+
+    // 1) o primeiro quadro pede os blocos do nível em vigor (o mapa está vazio)
+    r.render(fakeCtx().ctx, 1280, 720, quadro);
+    expect(pedidos.length).toBeGreaterThan(3);
+
+    // 2) só o nível anterior no mapa, e a gravação começa: o quadro é do pai
+    for (const [z, x, y] of pedidos) {
+      r.tiles.put(z - 1, Math.floor(x / 2), Math.floor(y / 2), imagem() as never);
+    }
+    r.congelarBlocos(true);
+    const um = fakeCtx();
+    r.render(um.ctx, 1280, 720, quadro);
+    expect(um.imagens.length).toBeGreaterThan(3);
+    expect(um.imagens.every((i) => i.args.length === 8)).toBe(true);
+    const travados = r.blocosDeReserva;
+    expect(travados).toBe(um.imagens.length);
+
+    // 3) os blocos exatos chegam no meio da gravação: o quadro **não** muda
+    for (const [z, x, y] of pedidos) r.tiles.put(z, x, y, imagem() as never);
+    const dois = fakeCtx();
+    r.render(dois.ctx, 1280, 720, quadro);
+    expect(dois.imagens.length).toBe(um.imagens.length);
+    expect(dois.imagens.every((i) => i.args.length === 8)).toBe(true);
+    expect(r.blocosDeReserva).toBe(travados);
+  });});
 
 describe("o aquecimento dos blocos na parada", () => {
   /* a mesma parada fora da linha do outro describe, na rota de 21,4 km */

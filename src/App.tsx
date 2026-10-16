@@ -192,6 +192,8 @@ function App() {
     fpsPedido: number;
     /** taxa da tela medida, em Hz (0 = não deu para medir) */
     taxaDaTela: number;
+    /** blocos do mapa que saíram do nível anterior por não estarem prontos */
+    blocosDeReserva: number;
   } | null>(null);
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -1154,6 +1156,19 @@ function App() {
       }
 
       renderer.reset();
+      /*
+       * O mapa não troca de bloco durante a gravação.
+       *
+       * A gravação em tempo real leva os 60 segundos do vídeo em tempo de
+       * relógio: um bloco que chegasse no meio dela trocaria a textura de um
+       * quadro para o outro — medido quadro a quadro no mp4 do usuário, era
+       * isso o "continua travando" (as mudanças grandes não eram deslocamento:
+       * nenhuma faixa da imagem andava junto com as outras). O que estava no
+       * primeiro quadro fica até o fim; o mesmo vale para a exportação rápida,
+       * que desenha os quadros em sequência e também veria o bloco chegar no
+       * meio.
+       */
+      renderer.congelarBlocos(true);
       setExportProgress(0);
       setPhase("recording");
 
@@ -1211,6 +1226,7 @@ function App() {
         fps: fpsFinal,
         fpsPedido: settings.fps,
         taxaDaTela,
+        blocosDeReserva: renderer.blocosDeReserva,
       });
       setPhase("done");
     } catch (err) {
@@ -1585,6 +1601,7 @@ function App() {
           fps={video?.fps}
           fpsPedido={video?.fpsPedido}
           taxaDaTela={video?.taxaDaTela}
+          blocosDeReserva={video?.blocosDeReserva}
           width={aspect.w}
           height={aspect.h}
           duration={settings.duration}

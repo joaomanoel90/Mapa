@@ -324,6 +324,37 @@ export function pontoValido(p: LatLng | null | undefined): p is LatLng {
   );
 }
 
+/**
+ * A trilha percorrida até o ponto atual — **sem buraco nenhum**.
+ *
+ * A lista é a mesma do começo ao fim (montada uma vez por rota): a cada quadro
+ * ela é cortada no ponto atual e a ponta volta para cima do personagem, que anda
+ * dentro do trecho. O corte é o caso fácil; o difícil é quando o índice **pula
+ * à frente** — arrastar a barra do tempo, um engasgo do navegador, a animação
+ * recomeçando. Antes o `length` da lista era esticado até o índice novo, e os
+ * pontos que faltavam ficavam como **buracos**: o Leaflet, ao projetar a linha,
+ * batia no vazio e estourava com *"Cannot read properties of undefined (reading
+ * 'lat')"* — o erro que o usuário viu no meio da prévia, e o rastro dele aponta
+ * exatamente o `setLatLngs` desta trilha.
+ *
+ * Aqui o pedaço que falta é **copiado do próprio traçado** (os mesmos pontos do
+ * arquivo, criados pelo `criar`, que é quem sabe montar o `LatLng` do mapa).
+ * Nada de buraco, nada de `undefined` — e a trilha continua sendo o caminho.
+ */
+export function completarTrilha<T extends LatLng>(
+  pontos: T[],
+  rota: readonly LatLng[],
+  index: number,
+  ponta: T,
+  criar: (p: LatLng) => T,
+): void {
+  const i = Number.isFinite(index) ? Math.floor(index) : 0;
+  const alvo = Math.max(0, Math.min(rota.length - 1, i)) + 1;
+  if (pontos.length > alvo) pontos.length = alvo;
+  while (pontos.length < alvo) pontos.push(criar(rota[pontos.length]));
+  pontos[alvo] = ponta;
+}
+
 export function buildTrack(input: LatLng[]): Track {
   /*
    * A porteira do traçado: nada entra sem ser um ponto de verdade.

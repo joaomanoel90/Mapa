@@ -16,6 +16,7 @@ export default function ExportModal({
   fps,
   fpsPedido,
   taxaDaTela,
+  blocosDeReserva,
   width,
   height,
   duration,
@@ -39,6 +40,12 @@ export default function ExportModal({
   fpsPedido?: number;
   /** taxa da tela medida, em Hz (0 = não deu para medir) */
   taxaDaTela?: number;
+  /**
+   * Quantos blocos do mapa não estavam prontos quando o quadro precisou deles.
+   * Eles saíram do nível anterior, esticados — e **ficaram** nele até o fim do
+   * vídeo (trocar de imagem no meio de um quadro por outro é o "pulo").
+   */
+  blocosDeReserva?: number;
   width: number;
   height: number;
   duration: number;
@@ -105,6 +112,16 @@ export default function ExportModal({
                     da tela.
                   </>
                 )}
+              </p>
+            )}
+            {phase === "done" && (blocosDeReserva ?? 0) > 0 && (
+              <p className="mt-1 text-[11.5px] leading-snug text-amber-300/80">
+                {blocosDeReserva} {blocosDeReserva === 1 ? "bloco" : "blocos"} do mapa não
+                {blocosDeReserva === 1 ? " estava" : " estavam"} pronto
+                {blocosDeReserva === 1 ? "" : "s"} na hora: o pedaço saiu do nível anterior,
+                esticado, e ficou assim até o fim do vídeo — trocar de imagem no meio faria o
+                mapa pular. Num próximo vídeo, deixe a prévia rodar uma vez antes de gravar:
+                ele baixa esses blocos.
               </p>
             )}
           </div>

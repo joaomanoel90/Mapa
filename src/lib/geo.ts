@@ -303,11 +303,43 @@ export function measuredCumulative(
   return cumulative(smoothedPoints(pts, windowM, passadas));
 }
 
+/**
+ * O ponto é utilizável (número finito e dentro da faixa do planeta)?
+ *
+ * Existe por causa do "Algo travou no app" que o usuário viu: qualquer coisa que
+ * chegue de fora (um pino arrastado, um link compartilhado, uma resposta de
+ * rota) pode vir sem `lat`/`lng`, e o Leaflet estoura com *"Cannot read
+ * properties of undefined (reading 'lat')"* — que derruba o app inteiro. Quem
+ * desenha no mapa pergunta antes.
+ */
+export function pontoValido(p: LatLng | null | undefined): p is LatLng {
+  return (
+    !!p &&
+    Number.isFinite(p.lat) &&
+    Number.isFinite(p.lng) &&
+    p.lat >= -85.06 &&
+    p.lat <= 85.06 &&
+    p.lng >= -180 &&
+    p.lng <= 180
+  );
+}
+
 export function buildTrack(input: LatLng[]): Track {
-  let pts = input;
-  if (input.length > MAX_TRACK_POINTS) {
-    const step = Math.ceil(input.length / MAX_TRACK_POINTS);
-    pts = input.filter((_, i) => i % step === 0 || i === input.length - 1);
+  /*
+   * A porteira do traçado: nada entra sem ser um ponto de verdade.
+   *
+   * Um ponto sem `lat` — um `<trkpt>` cortado no fim do arquivo, uma coordenada
+   * de rota que veio nula, um link compartilhado estragado — atravessava a
+   * construção do traçado, chegava no Leaflet (`L.polyline`, `L.marker`) e
+   * derrubava o app inteiro com *"Cannot read properties of undefined (reading
+   * 'lat')"*. Filtrar aqui protege de uma vez o mapa, o desenho do vídeo e as
+   * contas de distância.
+   */
+  const limpos = input.filter(pontoValido);
+  let pts = limpos.length === input.length ? input : limpos;
+  if (pts.length > MAX_TRACK_POINTS) {
+    const step = Math.ceil(pts.length / MAX_TRACK_POINTS);
+    pts = pts.filter((_, i) => i % step === 0 || i === pts.length - 1);
   }
   /*
    * O desenho usa `pts` como sempre; só a **medida** passa pelo filtro. Com os

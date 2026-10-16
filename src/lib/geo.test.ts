@@ -15,6 +15,7 @@ import {
   measuredCumulative,
   nearestTOnTrack,
   nudge,
+  pontoValido,
   project,
   sampleTrack,
   smoothedPoints,
@@ -657,5 +658,69 @@ describe("medida do arquivo (filtro de GPS)", () => {
     expect(SHARP_TURN_DEG).toBe(30);
     expect(TURN_SPAN_M).toBe(40);
     expect(SMOOTH_PASSES).toBe(2);
+  });
+});
+
+/**
+ * O ponto que chegou de fora sem coordenada.
+ *
+ * Foi este o erro que o usuário viu, sem saber de onde vinha: *"Algo travou no
+ * app — Cannot read properties of undefined (reading 'lat')"*. O Leaflet lê
+ * `.lat` direto de tudo que recebe, e um ponto faltando derruba o app inteiro —
+ * então quem desenha pergunta antes, e o traçado não deixa passar.
+ */
+describe("o ponto que pode ser desenhado", () => {
+  it("recusa o que não é coordenada", () => {
+    expect(pontoValido(undefined)).toBe(false);
+    expect(pontoValido(null)).toBe(false);
+    expect(pontoValido({ lat: NaN, lng: -48 })).toBe(false);
+    expect(pontoValido({ lat: -23, lng: Infinity })).toBe(false);
+    expect(pontoValido({ lat: 91, lng: 0 })).toBe(false);
+    expect(pontoValido({ lat: 0, lng: 200 })).toBe(false);
+    // coordenada que veio como texto (JSON, link compartilhado): o ">="
+    // sozinho aceitaria, porque ele converte a string em número
+    expect(pontoValido({ lat: "-23.5", lng: -48.4 } as unknown as LatLng)).toBe(false);
+    expect(pontoValido({ lat: -23.5, lng: "-48.4" } as unknown as LatLng)).toBe(false);
+  });
+
+  it("aceita a rota do usuário", () => {
+    // o km 0 da Maratona de São Paulo, o ponto de partida do vídeo dele
+    expect(pontoValido({ lat: -23.5505, lng: -46.6333 })).toBe(true);
+    expect(pontoValido({ lat: -23.5505, lng: -46.6333, ele: 760 })).toBe(true);
+    expect(pontoValido({ lat: 0, lng: 0 })).toBe(true);
+  });
+});
+
+describe("o traçado joga fora o ponto estragado", () => {
+  const bons: LatLng[] = [
+    { lat: -23.5, lng: -48.4 },
+    { lat: -23.51, lng: -48.41 },
+    { lat: -23.52, lng: -48.42 },
+  ];
+
+  it("o ponto sem coordenada não entra nem desloca os outros", () => {
+    const estragado = [
+      bons[0],
+      undefined as unknown as LatLng,
+      { lat: NaN, lng: NaN } as LatLng,
+      bons[1],
+      bons[2],
+    ];
+    const t = buildTrack(estragado);
+    expect(t.pts).toEqual(bons);
+    expect(t.cum.length).toBe(3);
+    // a medida é a mesma do traçado limpo: o ponto estragado não entra na conta
+    expect(t.total).toBeCloseTo(buildTrack(bons).total, 6);
+  });
+
+  it("todos estragados: traçado vazio, sem estourar", () => {
+    const t = buildTrack([
+      undefined as unknown as LatLng,
+      { lat: NaN, lng: 0 } as LatLng,
+    ]);
+    expect(t.pts).toEqual([]);
+    expect(t.total).toBe(0);
+    // e a amostra do traçado vazio continua respondendo (nada de `undefined.lat`)
+    expect(sampleTrack(t, 0.5).pos).toEqual({ lat: 0, lng: 0 });
   });
 });

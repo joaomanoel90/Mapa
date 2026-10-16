@@ -1,3 +1,9 @@
+/**
+ * Como o arquivo saiu: `fast` = WebCodecs, com o tempo exato de cada quadro;
+ * `realtime` = `MediaRecorder`, que captura a tela no ritmo dela.
+ */
+export type VideoEngine = "fast" | "realtime";
+
 export type VideoContainer = "mp4" | "webm";
 
 export type VideoFormat = {
@@ -87,6 +93,25 @@ export class CancelledError extends Error {
   }
 }
 
+/**
+ * Qual quadro do vídeo desenhar num instante do relógio.
+ *
+ * O desenho é feito na **grade do vídeo** (`i/fps`), e não no instante em que a
+ * tela pediu o quadro. Num monitor de 60 Hz, um vídeo de 24 quadros por segundo
+ * recebe 2 ou 3 quadros de tela alternados (33 ms e 50 ms); desenhando o
+ * instante do relógio, cada captura levaria um meio-caminho entre dois quadros
+ * do vídeo e o arquivo sairia com o movimento picado. Com a grade, cada captura
+ * é um quadro inteiro do vídeo — o mesmo conteúdo que a exportação rápida
+ * escreve —, e o codificador descarta o quadro repetido.
+ *
+ * O resultado é preso às pontas: nunca antes do primeiro, nunca depois do
+ * último.
+ */
+export function indiceDoQuadro(elapsed: number, fps: number, total: number): number {
+  const ultimo = Math.max(0, total - 1);
+  return Math.min(ultimo, Math.max(0, Math.floor(elapsed * fps)));
+}
+
 export async function recordVideo(opts: RecordOptions): Promise<Blob> {
   const { canvas, width, height, fps, durationSec, format, bitrate } = opts;
   canvas.width = width;
@@ -113,6 +138,11 @@ export async function recordVideo(opts: RecordOptions): Promise<Blob> {
   recorder.start(200);
   const startedAt = performance.now();
 
+  /* os quadros saem na grade do vídeo — ver `indiceDoQuadro` */
+  const total = Math.max(1, Math.round(fps * durationSec));
+  const tempoDoQuadro = (i: number) => i / fps;
+  let desenhado = 0;
+
   await new Promise<void>((resolve, reject) => {
     let raf = 0;
     const loop = () => {
@@ -122,16 +152,20 @@ export async function recordVideo(opts: RecordOptions): Promise<Blob> {
         return;
       }
       const elapsed = (performance.now() - startedAt) / 1000;
-      const t = Math.min(1, elapsed / durationSec);
-      try {
-        opts.draw(ctx, t, elapsed);
-      } catch (err) {
-        cancelAnimationFrame(raf);
-        reject(err instanceof Error ? err : new Error("Falha ao renderizar frame"));
-        return;
+      const i = indiceDoQuadro(elapsed, fps, total);
+      const t = total <= 1 ? 1 : i / (total - 1);
+      if (i !== desenhado) {
+        desenhado = i;
+        try {
+          opts.draw(ctx, t, tempoDoQuadro(i));
+        } catch (err) {
+          cancelAnimationFrame(raf);
+          reject(err instanceof Error ? err : new Error("Falha ao renderizar frame"));
+          return;
+        }
+        opts.onProgress?.(t);
       }
-      opts.onProgress?.(t);
-      if (t >= 1) {
+      if (desenhado >= total - 1 || elapsed >= durationSec) {
         cancelAnimationFrame(raf);
         resolve();
         return;

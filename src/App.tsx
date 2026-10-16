@@ -53,6 +53,7 @@ import {
 import { findCharacter } from "./lib/characters";
 import { SceneRenderer, tilesForAnimation, TILE_BUDGET } from "./lib/renderer";
 import { budgetAdvice, maxFollowZoom, tilesNeeded } from "./lib/map-budget";
+import { focoDasParadas } from "./lib/pois";
 import { PhotoCache, photoSources } from "./lib/photos";
 import { mapPassages, passageTimes } from "./lib/passages";
 import { decodeSettings, loadEndpoints, saveEndpoints, saveSettings } from "./lib/persist";
@@ -61,6 +62,7 @@ import {
   CancelledError,
   downloadBlob,
   recordVideo,
+  type VideoEngine,
   type VideoFormat,
 } from "./lib/recorder";
 import { isFastEncodeSupported, recordVideoFast } from "./lib/webcodecs";
@@ -169,6 +171,8 @@ function App() {
     url: string;
     size: number;
     ext: string;
+    /** como o arquivo foi gravado: WebCodecs (rápida) ou `MediaRecorder` */
+    engine: VideoEngine;
   } | null>(null);
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -412,6 +416,20 @@ function App() {
   );
 
   /**
+   * Onde a câmera foca cada parada — **o lugar** dela, que pode estar fora da
+   * linha.
+   *
+   * É a mesma função que o renderizador usa para desenhar, e é ela que entra na
+   * conta dos blocos: com o foco diferente dos dois lados, o aquecimento baixa
+   * os blocos da rota e o vídeo sai borrado na parada (era o "mostra o video
+   * tambem travando").
+   */
+  const focoDoVideo = useMemo(
+    () => focoDasParadas(pois, passagens, track),
+    [pois, passagens, track],
+  );
+
+  /**
    * Maior zoom de acompanhamento que cabe no teto de blocos.
    *
    * Não depende do zoom escolhido — só da rota, do tamanho da tela e do mapa —
@@ -429,8 +447,17 @@ function App() {
       maxZoom: maxZoomFor(settings.basemap),
       camera,
       cinematic: camera.cinematic,
+      foco: focoDoVideo,
     });
-  }, [track, aspect, settings.basemap, settings.cameraMode, cameraDoVideo, pois]);
+  }, [
+    track,
+    aspect,
+    settings.basemap,
+    settings.cameraMode,
+    cameraDoVideo,
+    focoDoVideo,
+    pois,
+  ]);
 
   /** Blocos que a câmera escolhida vai precisar — muda a cada passo do controle. */
   const blocos = useMemo(() => {
@@ -442,6 +469,9 @@ function App() {
       basemap: settings.basemap,
       maxZoom: maxZoomFor(settings.basemap),
       camera,
+      // os blocos que o vídeo vai mesmo usar: com a abertura e as paradas
+      cinematic: camera.cinematic,
+      foco: focoDoVideo,
     });
     return {
       needed,
@@ -455,6 +485,7 @@ function App() {
     settings.basemap,
     settings.cameraMode,
     cameraDoVideo,
+    focoDoVideo,
     pois,
     sugestaoZoom,
   ]);
@@ -1023,6 +1054,7 @@ function App() {
         aspect.h,
         settings.basemap,
         camera.cinematic,
+        focoDoVideo,
       ).length;
       if (needed > TILE_BUDGET) {
         throw new Error(budgetAdvice(needed, sugestaoZoom, camera.mode));
@@ -1113,6 +1145,7 @@ function App() {
         url: URL.createObjectURL(blob),
         size: blob.size,
         ext: activeFormat.ext,
+        engine: rapida ? "fast" : "realtime",
       });
       setPhase("done");
     } catch (err) {
@@ -1446,6 +1479,7 @@ function App() {
           videoUrl={video?.url}
           blobSize={video?.size}
           ext={video?.ext ?? activeFormat.ext}
+          engine={video?.engine}
           width={aspect.w}
           height={aspect.h}
           duration={settings.duration}

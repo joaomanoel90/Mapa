@@ -1,6 +1,6 @@
 import type { RefObject } from "react";
 import { Button } from "./ui";
-import { humanSize } from "../lib/recorder";
+import { humanSize, type VideoEngine } from "../lib/recorder";
 
 export type ExportPhase = "warmup" | "recording" | "done" | "error";
 
@@ -12,6 +12,7 @@ export default function ExportModal({
   videoUrl,
   blobSize,
   ext,
+  engine,
   width,
   height,
   duration,
@@ -27,6 +28,8 @@ export default function ExportModal({
   videoUrl?: string;
   blobSize?: number;
   ext: string;
+  /** como o arquivo foi gravado — a diferença aparece no texto do fim */
+  engine?: VideoEngine;
   width: number;
   height: number;
   duration: number;
@@ -58,6 +61,20 @@ export default function ExportModal({
                 `${width}×${height} · ${duration}s · ${humanSize(blobSize)} · .${ext}`}
               {phase === "error" && (message ?? "Tente novamente ou troque o formato do arquivo.")}
             </p>
+            {/*
+              Como o arquivo foi gravado. A diferença importa: a exportação
+              rápida escreve o tempo exato de cada quadro; a gravação em tempo
+              real fica presa ao ritmo da tela — e num monitor de 60 Hz o vídeo
+              de 24 quadros por segundo sai com o tempo irregular (33 ms e 50 ms
+              alternados). É esta linha que diz qual dos dois rodou.
+            */}
+            {phase === "done" && engine && (
+              <p className="mt-1 text-[11.5px] leading-snug text-zinc-500">
+                {engine === "fast"
+                  ? "Exportação rápida (WebCodecs): cada quadro no tempo exato."
+                  : "Gravação em tempo real: a tela entrega os quadros no ritmo dela. Num monitor de 60 Hz, 30 ou 60 quadros por segundo saem com o tempo regular — com 24 pode ficar um leve engasgo. A exportação rápida, quando o navegador tem WebCodecs para o formato, sai perfeita."}
+              </p>
+            )}
           </div>
           {!isWorking && (
             <button

@@ -1,5 +1,5 @@
 import { gaitOf, type Character } from "./characters";
-import { poiLatLng, type Poi } from "./pois";
+import { focoDasParadas, poiLatLng, type Poi } from "./pois";
 import { hasMark, type Endpoints } from "./endpoints";
 import {
   BASEMAPS,
@@ -13,14 +13,15 @@ import {
 import type { EndCard } from "./stats";
 import { averagePace, elapsedAt, formatClock, formatPace, speedAt } from "./hud";
 import {
+  boostQueCabe,
   cameraTarget,
   CHASE_ALTURA,
   CHASE_TILT,
   fatorDeTilt,
-  STOP_BOOST,
   zoomEfetivo,
   type ChaseConfig,
   type CinematicConfig,
+  type FocusPoint,
 } from "./camera";
 import { routeEnd, timelineOr, type Timeline } from "./timeline";
 import { NEUTRAL_COLOR, type ColoredRoute } from "./coloring";
@@ -330,6 +331,57 @@ export function vistaDe(input: {
   };
 }
 
+/**
+ * A folga (em fração do menor lado) entre o personagem e a borda do quadro.
+ *
+ * O selo dele tem ~34 px de raio em 720 de largura: 6% do menor lado deixam o
+ * selo inteiro dentro da moldura, com a seta.
+ */
+export const MARGEM_DO_PERSONAGEM = 0.06;
+
+/**
+ * O maior peso com que o quadro pode deslizar até a câmera sem deixar o
+ * personagem fora dele.
+ *
+ * O quadro desliza entre o **personagem** (peso 0) e a **câmera** (peso 1); em
+ * qualquer peso, a posição do personagem na tela é uma conta afim, porque a
+ * vista é linear: `tela(s) = base − s·V`, onde `base` é onde ele cai com o peso
+ * zero (o centro embaixo dele, a `altura` do quadro) e `V` é o deslocamento
+ * dele quando o quadro vai inteiro até a câmera (medido **em pixels**, com a
+ * matriz da vista — que já traz o zoom, o giro e a inclinação). Daí saem, eixo
+ * por eixo, os pesos máximos que mantêm o personagem dentro da moldura.
+ *
+ * A conta é exata, e não uma estimativa: com peso zero o personagem está na
+ * âncora por construção (`vistaDe` ancora a vista nele), e tudo o que muda até
+ * o peso um é linear.
+ *
+ * Existe por causa do pedido: *"está até perdendo o personagem do trajeto
+ * quando vai dar o zoom no ponto"*. O pino da parada pode estar a centenas de
+ * metros da linha (o usuário arrasta o pino até a igreja), e o quadro ia até
+ * ele inteiro — o personagem saía pela borda.
+ */
+export function pesoQueCabe(
+  m: Vista,
+  personagem: LatLng,
+  camera: LatLng,
+  altura: number,
+  width: number,
+  height: number,
+): number {
+  const P = project(personagem.lat, personagem.lng, m.z);
+  const Q = project(camera.lat, camera.lng, m.z);
+  const dx = Q.x - P.x;
+  const dy = Q.y - P.y;
+  const vx = m.a * dx + m.c * dy;
+  const vy = m.b * dx + m.d * dy;
+  const margem = MARGEM_DO_PERSONAGEM * Math.min(width, height);
+  /* a âncora do personagem: x no meio do quadro, y na `altura` */
+  const cabeX = Math.abs(vx) > 1e-6 ? (width / 2 - margem) / Math.abs(vx) : Infinity;
+  const livre = (vy > 0 ? altura * height : height - altura * height) - margem;
+  const cabeY = Math.abs(vy) > 1e-6 ? livre / Math.abs(vy) : Infinity;
+  return Math.max(0, Math.min(1, cabeX, cabeY));
+}
+
 /** A projeção de um ponto do mundo (no zoom da vista) para a tela. */
 export function projetorDaVista(v: Vista): (x: number, y: number) => { x: number; y: number } {
   return (x, y) => ({ x: v.a * x + v.c * y + v.e, y: v.b * x + v.d * y + v.f });
@@ -444,6 +496,12 @@ export function tilesForAnimation(
   height: number,
   basemap: BasemapId,
   cinematic?: CinematicConfig | null,
+  /**
+   * Onde fica o ponto de cada parada — a mesma função que o desenho usa.
+   * Sem ela, o aquecimento baixa os blocos da **rota** e o vídeo chega na
+   * parada com o mapa borrado, esperando os blocos do lugar.
+   */
+  foco?: FocusPoint | null,
 ): TileRef[] {
   const bm = BASEMAPS[basemap];
   const maxZoom = bm.maxZoom;
@@ -524,7 +582,6 @@ export function tilesForAnimation(
     // reparasse nas do meio
     const validas = cine.stopTs.filter((ts) => Number.isFinite(ts));
     const escolhidas = validas.length <= LIMITE_VISTAS_DE_PARADA ? validas : spread(validas, LIMITE_VISTAS_DE_PARADA);
-    const zoomParada = Math.min(zoomEfetivo(camera) + STOP_BOOST, maxZoom);
     for (const ts of escolhidas) {
       const s = sampleTrack(track, ts);
       /*
@@ -537,7 +594,38 @@ export function tilesForAnimation(
        * a aproximação: numa rota curta e num quadro largo, todas; numa rota longa
        * em retrato, as primeiras.
        */
-      const v = vista(s.pos, zoomParada, s.heading, true);
+      /*
+       * A vista aquecida é **a que o desenho vai mostrar** no pico da
+       * aproximação: o mesmo lugar (o pino pode estar fora da linha), o mesmo
+       * teto de zoom (`boostQueCabe`) e o mesmo centro — o quadro desliza até o
+       * ponto, mas só até onde o personagem continua na moldura
+       * (`pesoQueCabe`).
+       *
+       * Foi esta conta que, com o ponto da **rota** e o ganho cheio, deixou o
+       * vídeo borrado na parada: os blocos do lugar que aparece na tela não
+       * tinham sido baixados — era o "mostra o video tambem travando".
+       */
+      const alvo = foco?.(ts) ?? s.pos;
+      const boost = boostQueCabe(camera, width, height, haversine(s.pos, alvo), s.pos.lat);
+      const zoomParada = Math.min(zoomEfetivo(camera) + boost, maxZoom);
+      const angulo = chase?.gira ? -s.heading : 0;
+      const alturaQ = chase ? CHASE_ALTURA : 0.5;
+      const matriz = vistaDe({
+        centro: s.pos,
+        zoom: zoomParada,
+        width,
+        height,
+        maxZoom,
+        altura: alturaQ,
+        angulo,
+        tilt: chase ? fatorDeTilt(camera) : 1,
+      });
+      const peso = Math.min(1, pesoQueCabe(matriz, s.pos, alvo, alturaQ, width, height));
+      const centro = {
+        lat: s.pos.lat + (alvo.lat - s.pos.lat) * peso,
+        lng: s.pos.lng + (alvo.lng - s.pos.lng) * peso,
+      };
+      const v = vista(centro, zoomParada, s.heading, true);
       if (map.size + novosDaVista(v) > TILE_BUDGET) break;
       despejar(v);
     }
@@ -861,12 +949,7 @@ export class SceneRenderer {
      * 1.321 px acima do centro da tela. O pedido é "só um zoom e focar no ícone
      * do ponto" — então a câmera vai até o ícone.
      */
-    const focoDaParada = (ts: number) => {
-      const parada = input.stops.find((p) =>
-        (input.passages?.[p.id] ?? [p.t]).some((x) => Math.abs(x - ts) < 1e-6),
-      );
-      return parada ? poiLatLng(parada, track) : sampleTrack(track, ts).pos;
-    };
+    const focoDaParada = focoDasParadas(input.stops, input.passages ?? undefined, track);
 
     /*
      * O alvo da câmera é avaliado alguns décimos de segundo **à frente** do
@@ -961,23 +1044,48 @@ export class SceneRenderer {
      * ícone entra na linha da câmera sem tranco, e o personagem volta para baixo
      * do quadro quando a ênfase acaba. Sem a ênfase o peso é zero e nada muda.
      */
-    const ancorarNoPersonagem = !!chase && target.opening >= 1;
-    const seguir = ancorarNoPersonagem ? target.boost : 1;
-    const centro = ancorarNoPersonagem
+    const posou = target.opening >= 1;
+    const ancorarNoPersonagem = !!chase && posou;
+    /** a altura em que o personagem cai no quadro (0,5 = centro) */
+    const altura = 0.5 + (CHASE_ALTURA - 0.5) * (chase ? target.opening : 0);
+    /** o giro que o mapa recebe neste quadro (0 = norte para cima) */
+    const anguloMapa = chase?.gira ? -rumo * target.opening : 0;
+
+    /*
+     * A vista é montada em duas etapas: a **matriz** (zoom, giro e inclinação)
+     * não depende do centro, e é ela que diz, em pixels, o quanto o personagem
+     * andaria na tela se o quadro fosse inteiro até a câmera. Com isso o peso
+     * do deslocamento é limitado de modo que ele **nunca saia da moldura** — a
+     * câmera puxa o quadro na direção do ponto da parada até onde der, e não
+     * até o fim quando o pino está longe da linha.
+     */
+    const matriz = vistaDe({
+      centro: sample.pos,
+      zoom: this.cam.zoom,
+      width,
+      height,
+      maxZoom,
+      altura,
+      angulo: anguloMapa,
+      tilt,
+    });
+    const pesoIdeal = ancorarNoPersonagem ? target.boost : 1;
+    const seguir = posou
+      ? Math.min(pesoIdeal, pesoQueCabe(matriz, sample.pos, this.cam, altura, width, height))
+      : pesoIdeal;
+    const centro = posou
       ? {
           lat: sample.pos.lat + (this.cam.lat - sample.pos.lat) * seguir,
           lng: sample.pos.lng + (this.cam.lng - sample.pos.lng) * seguir,
         }
       : this.cam;
-    /** o giro que o mapa recebe neste quadro (0 = norte para cima) */
-    const anguloMapa = chase?.gira ? -rumo * target.opening : 0;
     const vista = vistaDe({
       centro,
       zoom: this.cam.zoom,
       width,
       height,
       maxZoom,
-      altura: 0.5 + (CHASE_ALTURA - 0.5) * (chase ? target.opening : 0),
+      altura,
       angulo: anguloMapa,
       tilt,
     });

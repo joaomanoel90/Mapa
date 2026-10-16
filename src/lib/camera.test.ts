@@ -3,7 +3,9 @@ import { buildTrack, fitZoom, boundsOf } from "./geo";
 import {
   CHASE_ZOOM,
   OPEN_CAP_S,
+  RAIO_DO_PAR,
   STOP_BOOST,
+  boostQueCabe,
   cameraTarget,
   janelaDaEnfase,
   openingProgress,
@@ -340,5 +342,54 @@ describe("terceira pessoa", () => {
     expect(terceira.lat).toBeCloseTo(normal.lat, 6);
     expect(terceira.lng).toBeCloseTo(normal.lng, 6);
     expect(terceira.zoom).toBeCloseTo(normal.zoom + CHASE_ZOOM, 6);
+  });
+});
+
+describe("o ganho de zoom da parada cabe no quadro", () => {
+  /* 720x1280 como no vídeo do usuário; a linha está na latitude de São Paulo */
+  const W2 = 720;
+  const H2 = 1280;
+  const SP = -23.5;
+  const camera = { followZoom: 15, chase: { gira: false } };
+
+  it("na linha, é o ganho cheio (nada muda no caso comum)", () => {
+    for (const m of [0, 5, 20]) {
+      expect(boostQueCabe(camera, W2, H2, m, SP)).toBeCloseTo(STOP_BOOST, 6);
+    }
+  });
+
+  it("longe da linha, o ganho encolhe até o personagem caber no quadro", () => {
+    /*
+     * Medido: com 300 m entre o personagem e o pino, em 720x1280, o quadro
+     * aguenta ~1,1 nível a mais de zoom (o ganho cheio é 2,2). Foi assim que o
+     * vídeo do usuário perdeu o personagem na parada: o pino da capela está a
+     * centenas de metros da linha, e o ganho cheio punha o personagem fora da
+     * tela.
+     */
+    const b300 = boostQueCabe(camera, W2, H2, 300, SP);
+    expect(b300).toBeGreaterThan(0);
+    expect(b300).toBeLessThan(STOP_BOOST);
+    // e o que sobra é exatamente o que cabe: a distância vira o raio reservado
+    const base = 15 + CHASE_ZOOM;
+    const metrosPorPixel = (156543.0339 * Math.cos((SP * Math.PI) / 180)) / 2 ** (base + b300);
+    expect(300 / metrosPorPixel).toBeCloseTo(RAIO_DO_PAR * W2, 0);
+  });
+
+  it("nunca fica abaixo do zoom normal (a ênfase não afasta a câmera)", () => {
+    // pino a 5 km da linha: não cabe nenhum ganho — e o zoom fica o de sempre
+    expect(boostQueCabe(camera, W2, H2, 5000, SP)).toBe(0);
+  });
+
+  it("quem manda é o menor lado do quadro (é ele que o personagem atravessa)", () => {
+    // retrato é limitado pela largura, paisagem pela altura: os dois têm 720 no
+    // menor lado e cabem o mesmo zoom
+    expect(boostQueCabe(camera, 1280, 720, 300, SP)).toBeCloseTo(
+      boostQueCabe(camera, W2, H2, 300, SP),
+      9,
+    );
+    // num quadro maior (1080x1080) cabe mais
+    expect(boostQueCabe(camera, 1080, 1080, 300, SP)).toBeGreaterThan(
+      boostQueCabe(camera, W2, H2, 300, SP),
+    );
   });
 });

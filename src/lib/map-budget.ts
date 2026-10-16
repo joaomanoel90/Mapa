@@ -31,7 +31,7 @@ import {
   type CameraConfig,
   type CameraMode,
 } from "./renderer";
-import type { CinematicConfig } from "./camera";
+import type { CinematicConfig, FocusPoint } from "./camera";
 
 /** Menor zoom que o painel oferece — abaixo disso a rota viraria um pontinho. */
 export const MIN_FOLLOW_ZOOM = 11;
@@ -43,6 +43,12 @@ export type BudgetInput = {
   basemap: BasemapId;
   maxZoom: number;
   cinematic?: CinematicConfig | null;
+  /**
+   * Onde fica o ponto de cada parada (o lugar, que pode estar fora da linha).
+   * Sem ela a conta pede os blocos da **rota** e o vídeo sai borrado na parada
+   * — a mesma função que o desenho usa tem de entrar aqui.
+   */
+  foco?: FocusPoint | null;
 };
 
 /** Blocos que a câmera escolhida vai precisar. */
@@ -57,6 +63,7 @@ export function tilesNeeded(
     resto.height,
     resto.basemap,
     resto.cinematic,
+    resto.foco,
   ).length;
 }
 

@@ -1,11 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { VideoFormat } from "./recorder";
 import {
+  codecAceito,
+  codecsH264,
   createMuxer,
   encoderConfigFor,
   framePlan,
   isFastEncodeSupported,
+  macroblocosDoQuadro,
   motivoRapidoIndisponivel,
+  nivelH264Para,
   recordVideoFast,
   webmCodecFor,
 } from "./webcodecs";
@@ -478,12 +482,14 @@ describe("motivoRapidoIndisponivel", () => {
     expect(await motivoRapidoIndisponivel(MP4, 720, 1280, 60)).toBeNull();
   });
 
-  it("diz qual formato e tamanho foram recusados", async () => {
+  it("diz qual formato e tamanho foram recusados, e qual nível o tamanho pede", async () => {
     vi.stubGlobal("VideoFrame", class {});
     vi.stubGlobal("VideoEncoder", { isConfigSupported: async () => ({ supported: false }) });
     const motivo = await motivoRapidoIndisponivel(MP4, 720, 1280, 60);
-    expect(motivo).toContain("MP4 (H.264)");
+    expect(motivo).toContain("H.264");
     expect(motivo).toContain("720×1280");
+    // e a saída: o WebM não tem a limitação de nível
+    expect(motivo).toContain("WebM");
   });
 
   it("conta quando o navegador estoura ao ser perguntado", async () => {
@@ -496,5 +502,107 @@ describe("motivoRapidoIndisponivel", () => {
     const motivo = await motivoRapidoIndisponivel(WEBM_VP9, 1080, 1920, 30);
     expect(motivo).toContain("WebM (VP9)");
     expect(motivo?.length).toBeGreaterThan(10);
+  });
+});
+
+/*
+ * O nível do H.264.
+ *
+ * O app declarava `avc1.42E01E` — Baseline, **nível 3.0** — para qualquer
+ * tamanho. O nível 3.0 aceita 1620 macroblocos por quadro; 720×1280 tem 3600.
+ * Ou seja: o app pedia ao navegador um perfil que não comporta nem um quadro, e
+ * por isso o ⚡ nunca rodou (todas as gravações do usuário saíram em tempo real,
+ * com o ⚡ ligado).
+ */
+describe("o nível do H.264", () => {
+  it("conta os macroblocos como o H.264 conta", () => {
+    expect(macroblocosDoQuadro(720, 1280)).toBe(3600); // 45 × 80
+    expect(macroblocosDoQuadro(1920, 1080)).toBe(8160); // 120 × 68
+    expect(macroblocosDoQuadro(256, 256)).toBe(256);
+  });
+
+  it("720×1280 nunca pede menos que 3.2 — e a 60 fps pede 4.0", () => {
+    // a 30 fps cai exatamente no teto do 3.1 (108 000 MB/s): sobe para 3.2
+    expect(nivelH264Para(720, 1280, 30).nivel).toBe(32);
+    // a 60 fps dá exatamente o teto do 3.2 (216 000): sobe para 4.0
+    expect(nivelH264Para(720, 1280, 60).nivel).toBe(40);
+    // o nível que o app declarava (3.0) não comporta nem um quadro deste tamanho
+    expect(macroblocosDoQuadro(720, 1280)).toBeGreaterThan(1620);
+    expect(nivelH264Para(720, 1280, 60).nivel).toBeGreaterThan(30);
+  });
+
+  it("o nível acompanha o tamanho do quadro", () => {
+    // paisagem pequena cabe em 3.0; 1080p pede 4.0; 4K pede 5.1
+    expect(nivelH264Para(640, 360, 30).nivel).toBe(30);
+    expect(nivelH264Para(1920, 1080, 30).nivel).toBe(40);
+    expect(nivelH264Para(3840, 2160, 30).nivel).toBe(51);
+  });
+
+  it("a cadência conta: o mesmo quadro em 60 fps pode subir de nível", () => {
+    // 1920×1080 = 8160 macroblocos: 30 fps = 244 800 por segundo (cabe no 4.0,
+    // 245 760); 60 fps = 489 600, que só cabe do 4.2 para cima
+    expect(nivelH264Para(1920, 1080, 30).nivel).toBe(40);
+    expect(nivelH264Para(1920, 1080, 60).nivel).toBe(42);
+  });
+
+  it("os codecs gerados levam o nível calculado", () => {
+    const lista = codecsH264(720, 1280, 60);
+    expect(lista[0]).toBe("avc1.640028"); // High 4.0
+    expect(lista).toContain("avc1.4D0028"); // Main 4.0
+    expect(lista).toContain("avc1.420028"); // Baseline 4.0
+    // o nível 3.0 não aparece em nenhum perfil
+    expect(lista.some((c) => c.endsWith("1E"))).toBe(false);
+  });
+
+  it("a configuração do encoder usa o codec escolhido, e não o do formato", () => {
+    const cfg = encoderConfigFor(MP4, 720, 1280, 8_000_000, 60, "avc1.640028");
+    expect(cfg.codec).toBe("avc1.640028");
+    expect(cfg.avc).toEqual({ format: "avc" });
+    // sem override, cai no do formato (compatibilidade com o resto do app)
+    expect(encoderConfigFor(MP4, 720, 1280, 8_000_000, 60).codec).toBe(MP4.codec);
+  });
+});
+
+/*
+ * O navegador só aceitou o perfil do segundo código? Então é ele que grava.
+ *
+ * O Safari só codifica High e Main; um navegador de Android pode recusar o High
+ * e aceitar o Baseline. A ordem da lista garante que o primeiro **confirmado**
+ * seja usado — e não que o app desista no primeiro "não".
+ */
+describe("codecAceito", () => {
+  const comAceite = (aceitos: string[]) => {
+    vi.stubGlobal("VideoFrame", class {});
+    vi.stubGlobal("VideoEncoder", {
+      isConfigSupported: async (cfg: { codec: string }) => ({
+        supported: aceitos.includes(cfg.codec),
+      }),
+    });
+  };
+
+  it("devolve o primeiro perfil que o navegador confirma", async () => {
+    comAceite(["avc1.640028"]);
+    expect(await codecAceito(MP4, 720, 1280, 60)).toBe("avc1.640028");
+  });
+
+  it("pula os perfis recusados até achar um que passe", async () => {
+    comAceite(["avc1.420028"]);
+    expect(await codecAceito(MP4, 720, 1280, 60)).toBe("avc1.420028");
+  });
+
+  it("devolve null quando nenhum perfil passa", async () => {
+    comAceite([]);
+    expect(await codecAceito(MP4, 720, 1280, 60)).toBeNull();
+  });
+
+  it("nos outros formatos, pergunta uma vez só", async () => {
+    comAceite(["vp09.00.10.08"]);
+    expect(await codecAceito(WEBM_VP9, 720, 1280, 60)).toBe("vp09.00.10.08");
+  });
+
+  it("sem WebCodecs, devolve null sem tentar", async () => {
+    vi.stubGlobal("VideoEncoder", undefined);
+    vi.stubGlobal("VideoFrame", undefined);
+    expect(await codecAceito(MP4, 720, 1280, 60)).toBeNull();
   });
 });

@@ -207,6 +207,24 @@ export class TileStore {
       });
   }
 
+  /**
+   * Espera os downloads **em andamento** terminarem (ou o prazo acabar).
+   *
+   * É chamado antes do primeiro quadro da gravação: um bloco que ainda está na
+   * rede quando o desenho pergunta por ele é congelado no nível anterior **até o
+   * fim do vídeo** (`blocoDoQuadro`), e o mapa fica borrado ali para sempre.
+   * Esperar dois ou três segundos no começo troca isso por uma imagem nítida.
+   *
+   * Devolve quantos ainda ficaram pendentes (0 = rede em dia).
+   */
+  async aguardarPendentes(prazoMs = 4000): Promise<number> {
+    const fim = Date.now() + prazoMs;
+    while (this.pending.size > 0 && Date.now() < fim) {
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    return this.pending.size;
+  }
+
   /** total de tiles realmente disponíveis para desenhar */
   get loadedCount(): number {
     let n = 0;
@@ -645,6 +663,39 @@ export function tilesForAnimation(
   if (cine?.opening) push(centro, fitZoom(b, width, height, 0.16), 0, false);
 
   const zoom = Math.min(zoomEfetivo(camera), maxZoom);
+  /*
+   * A **escada de zoom**.
+   *
+   * A câmera não salta do enquadramento geral para o zoom de acompanhamento: ela
+   * pousa, passando por **cada nível inteiro** no caminho (13 → 14 → 15 → 16). O
+   * mesmo acontece na aproximação de uma parada (até 2,2 níveis em ~1,6 s).
+   *
+   * O aquecimento antigo pedia só as duas pontas — o geral e o de
+   * acompanhamento —, então os níveis do meio nunca eram baixados. Quando a
+   * gravação atravessava um deles, o bloco chegava faltando e era congelado no
+   * nível anterior **até o fim do vídeo**: foi assim que o usuário recebeu "210
+   * blocos do mapa não estavam prontos", mesmo com o aquecimento dizendo que não
+   * faltava nada.
+   *
+   * A conta é limitada de propósito: um punhado de vistas por nível (os níveis
+   * baixos precisam de poucos blocos para cobrir a tela inteira), dentro do
+   * teto dos servidores gratuitos.
+   */
+  const pushEscada = (
+    centro: LatLng,
+    de: number,
+    ate: number,
+    rumo: number,
+    gira: boolean,
+  ) => {
+    const baixo = Math.floor(Math.min(de, ate));
+    const alto = Math.ceil(Math.max(de, ate));
+    for (let z = baixo + 1; z <= alto; z++) {
+      const v = vista(centro, z, rumo, gira);
+      if (map.size + novosDaVista(v) > TILE_BUDGET) return;
+      despejar(v);
+    }
+  };
   // amostra por distância: um tile de folga cobre o atraso da câmera suavizada
   const stepMeters = 140;
   const byDistance = Math.round(track.total / stepMeters);
@@ -652,6 +703,25 @@ export function tilesForAnimation(
   for (let i = 0; i <= steps; i++) {
     const s = sampleTrack(track, i / steps);
     push(s.pos, zoom, s.heading, true);
+  }
+
+  if (cine?.opening) {
+    /*
+     * O pouso do voo: do enquadramento geral (centro da rota) até o zoom de
+     * acompanhamento, no começo do percurso. Cinco pontos bastam — o nível
+     * baixo de um deles já cobre o vizinho.
+     */
+    const zGeral = fitZoom(b, width, height, 0.16);
+    for (let i = 0; i <= 4; i++) {
+      const t = (i / 4) * 0.12; // os primeiros 12% do percurso
+      const s = sampleTrack(track, t);
+      const pos = i === 0 ? centro : s.pos;
+      pushEscada(pos, zGeral, zoom, s.heading, true);
+    }
+  } else {
+    // sem voo, ainda assim o zoom pode entrar por degraus: cobre o começo
+    const s = sampleTrack(track, 0);
+    pushEscada(s.pos, zoom - 1, zoom, s.heading, true);
   }
 
   if (cine?.stops && cine.stopTs.length > 0) {
@@ -706,6 +776,12 @@ export function tilesForAnimation(
       const v = vista(centro, zoomParada, s.heading, true);
       if (map.size + novosDaVista(v) > TILE_BUDGET) break;
       despejar(v);
+      /*
+       * A aproximação passa por cada nível inteiro até o pico: sem eles, o meio
+       * da aproximação pedia blocos que o aquecimento não tinha — e esses
+       * ficavam congelados no nível anterior até o fim do vídeo.
+       */
+      pushEscada(centro, zoom, zoomParada, s.heading, true);
     }
   }
   return Array.from(map.values());

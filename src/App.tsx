@@ -74,7 +74,7 @@ import {
   type VideoEngine,
   type VideoFormat,
 } from "./lib/recorder";
-import { motivoRapidoIndisponivel, recordVideoFast } from "./lib/webcodecs";
+import { codecAceito, motivoRapidoIndisponivel, recordVideoFast } from "./lib/webcodecs";
 
 function App() {
   /** Rota recebida por link (`#r=…`). Lida uma única vez, na montagem. */
@@ -203,6 +203,14 @@ function App() {
     /** quantos blocos já faltavam **antes** de gravar, mesmo após as tentativas */
     blocosFaltando: number;
     /**
+     * O fps final **não** é o pedido por causa do teto do tempo real (e não do
+     * divisor da tela). A mensagem do painel muda conforme o motivo — antes ela
+     * dizia "60 não fecha com a tela de 60 Hz", que é falso.
+     */
+    fpsLimitadoPeloTeto: boolean;
+    /** por que o ⚡ não rodou nesta gravação (null = rodou) */
+    motivoMotor: string | null;
+    /**
      * Com que regularidade os quadros saíram (só a gravação em tempo real
      * mede: é lá que a tela pode engasgar). `null` na exportação rápida, que
      * escreve o tempo de cada quadro por conta própria.
@@ -220,6 +228,15 @@ function App() {
    * painel junto do interruptor do ⚡.
    */
   const [avisoRapido, setAvisoRapido] = useState<string | null>(null);
+
+  /**
+   * O motivo do motor **desta** gravação (calculado no começo dela).
+   *
+   * O `avisoRapido` é a prévia feita no painel; este é o que a janela de
+   * gravação mostra — e vale também na fase final, quando o painel antes ficava
+   * sem explicação nenhuma de por que o arquivo saiu em tempo real.
+   */
+  const [avisoMotorGravar, setAvisoMotorGravar] = useState<string | null>(null);
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const cancelRef = useRef(false);
@@ -1136,6 +1153,26 @@ function App() {
       if (!ctx) throw new Error("Canvas 2D indisponível neste navegador.");
       canvasForRecord = canvas;
 
+      /*
+       * Qual motor vai gravar — decidido **antes** do aquecimento.
+       *
+       * O ⚡ precisa do codec resolvido (`codecAceito`): no H.264 o nível tem de
+       * sair do tamanho do quadro, e um navegador que siga a especificação
+       * recusa `avc1.42E01E` (nível 3.0) em 720×1280. Resolver aqui, uma vez,
+       * evita perguntar duas coisas diferentes ao navegador e deixa a janela
+       * dizer a verdade já na fase de carregamento.
+       */
+      const motivoRapido = settings.fastExport
+        ? await motivoRapidoIndisponivel(activeFormat, aspect.w, aspect.h, settings.fps)
+        : "a exportação rápida (⚡) está desligada no painel";
+      const rapida = settings.fastExport && motivoRapido === null;
+      const bitrateFinal = Math.round(settings.bitrateMbps * 1_000_000);
+      const codecRapido = rapida
+        ? await codecAceito(activeFormat, aspect.w, aspect.h, settings.fps, bitrateFinal)
+        : null;
+      if (cancelRef.current) throw new CancelledError();
+      setAvisoMotorGravar(rapida ? null : motivoRapido);
+
       /** desenha um quadro no canvas de exportação */
       paint = (t: number, elapsed: number) =>
         renderer.render(ctx, aspect.w, aspect.h, {
@@ -1247,6 +1284,14 @@ function App() {
        * meio.
        */
       renderer.congelarBlocos(true);
+      /*
+       * Último cuidado antes do primeiro quadro: espera o que ainda está na
+       * rede. O que não chegou até aqui seria congelado no nível anterior no
+       * vídeo inteiro (era parte dos "210 blocos" do painel).
+       */
+      const aindaBaixando = await renderer.tiles.aguardarPendentes(4000);
+      if (aindaBaixando > 0) setExportMsg(undefined);
+      if (cancelRef.current) throw new CancelledError();
       setExportProgress(0);
       setPhase("recording");
 
@@ -1261,22 +1306,35 @@ function App() {
        * anda aos pulos.
        */
       /*
-       * O ⚡ roda se estiver ligado **e** o navegador souber codificar (a mesma
-       * resposta que o painel já mostra). Quando não roda, o motivo vai junto:
-       * cair para o tempo real em silêncio foi o que fez o usuário gravar 60
-       * quadros por segundo no motor errado.
+       * Em tempo real, o fps tem de **caber no desenho**.
+       *
+       * O teto de 30 (a 60 cada quadro tem 16,7 ms para desenhar tudo) resolve
+       * metade do problema. A outra metade é a máquina: medido no vídeo do
+       * usuário, mesmo a 30 (33 ms por quadro) um em cada três quadros chegou
+       * 12,2 ms atrasado. Então o app **cronometra** alguns quadros antes de
+       * gravar e desce um degrau se não couber — 30, 20, 15 — em vez de insistir
+       * num ritmo que a tela não sustenta.
        */
-      const rapida =
-        settings.fastExport &&
-        (await motivoRapidoIndisponivel(activeFormat, aspect.w, aspect.h, settings.fps)) === null;
-      if (cancelRef.current) throw new CancelledError();
       const taxaDaTela = rapida ? 0 : await medirTaxaDaTela();
-      /*
-       * Em tempo real, o teto é 30 (`TEMPO_REAL_MAX_FPS`): a 60 cada quadro tem
-       * 16,7 ms para desenhar tudo, e o que não cabe vira quadro atrasado — a
-       * cadência medida no arquivo do usuário caiu para 63% por causa disso.
-       */
-      const fpsFinal = rapida ? settings.fps : fpsDoTempoReal(taxaDaTela, settings.fps);
+      let custoQuadroMs = 0;
+      if (!rapida) {
+        const amostras: number[] = [];
+        for (let i = 0; i < 5; i++) {
+          const t = (i + 1) / 6;
+          const antes = performance.now();
+          paint(t, settings.duration * t);
+          amostras.push(performance.now() - antes);
+        }
+        amostras.sort((a, b) => a - b);
+        custoQuadroMs = amostras[amostras.length >> 1];
+        // o desenho de teste mexeu na câmera: volta ao começo
+        renderer.reset();
+        renderer.congelarBlocos(true);
+      }
+      const fpsFinal = rapida
+        ? settings.fps
+        : fpsDoTempoReal(taxaDaTela, settings.fps, custoQuadroMs);
+      const taxaPedidaLimitada = fpsFinal < settings.fps;
 
       const engine = {
         canvas: canvasForRecord ?? canvasRef.current ?? document.createElement("canvas"),
@@ -1285,7 +1343,7 @@ function App() {
         fps: fpsFinal,
         durationSec: settings.duration,
         format: activeFormat,
-        bitrate: Math.round(settings.bitrateMbps * 1_000_000),
+        bitrate: bitrateFinal,
         onProgress: (t: number) => {
           // atualiza a barra sem re-renderizar a app a cada quadro
           if (t - progressUiRef.current > 0.04 || t >= 1) {
@@ -1312,7 +1370,7 @@ function App() {
        */
       let cadenciaFinal: Cadencia | null = null;
       const blob = rapida
-        ? await recordVideoFast(engine)
+        ? await recordVideoFast({ ...engine, codec: codecRapido ?? undefined })
         : await recordVideo({
             ...engine,
             onCadencia: (c) => {
@@ -1331,6 +1389,8 @@ function App() {
         blocosDeReserva: renderer.blocosDeReserva,
         blocosFaltando,
         cadencia: cadenciaFinal,
+        fpsLimitadoPeloTeto: taxaPedidaLimitada,
+        motivoMotor: rapida ? null : motivoRapido,
       });
       setPhase("done");
     } catch (err) {
@@ -1709,7 +1769,8 @@ function App() {
           blocosDeReserva={video?.blocosDeReserva}
           blocosFaltando={video?.blocosFaltando}
           cadencia={video?.cadencia}
-          avisoMotor={settings.fastExport ? avisoRapido : null}
+          avisoMotor={video ? video.motivoMotor : avisoMotorGravar}
+          fpsLimitadoPeloTeto={video?.fpsLimitadoPeloTeto}
           width={aspect.w}
           height={aspect.h}
           duration={settings.duration}

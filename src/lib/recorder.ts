@@ -319,9 +319,47 @@ export const TEMPO_REAL_MAX_FPS = 30;
  * 2. o **divisor da tela** (`fpsQueCasa`): pedir 24 numa tela de 60 Hz dá
  *    quadros de 33 e 50 ms alternados, mesmo quando o desenho cabe no tempo.
  */
-export function fpsDoTempoReal(taxaDaTela: number, pedido: number): number {
+export function fpsDoTempoReal(taxaDaTela: number, pedido: number, custoQuadroMs = 0): number {
   const pedidoValido = Number.isFinite(pedido) && pedido > 0 ? pedido : TEMPO_REAL_MAX_FPS;
-  return fpsQueCasa(taxaDaTela, Math.min(pedidoValido, TEMPO_REAL_MAX_FPS));
+  const topo = Math.min(pedidoValido, TEMPO_REAL_MAX_FPS);
+  const candidato = fpsQueCasa(taxaDaTela, topo);
+  return custoQuadroMs > 0 ? fpsQueCabeNoDesenho(taxaDaTela, candidato, custoQuadroMs) : candidato;
+}
+
+/** Quanto do intervalo de um quadro o desenho pode ocupar (o resto é a captura). */
+export const FOLGA_DO_DESENHO = 0.6;
+
+/** Os degraus de fps que o app aceita descer, do mais suave ao mais econômico. */
+export const DEGRAUS_DE_FPS = [60, 50, 40, 30, 25, 20, 15, 12, 10];
+
+/**
+ * O fps mais alto em que **o desenho cabe** no intervalo de um quadro.
+ *
+ * O teto de 30 resolve metade do problema (16,7 ms por quadro é pouco numa
+ * máquina comum); a outra metade é que nem 33 ms bastam em todo aparelho: no
+ * vídeo do usuário, a 30 quadros por segundo, **1 em cada 3** quadros chegou
+ * 12,2 ms atrasado. Em vez de insistir num ritmo que a tela não sustenta, o app
+ * mede o custo de desenhar alguns quadros e desce até caber — com 60% do
+ * intervalo como teto para o desenho (o resto é a captura e o codificador).
+ *
+ * Descer de 30 para 20 troca uma cadência irregular (68% no intervalo) por uma
+ * regular — e regularidade é o que o olho lê como "fluido".
+ */
+export function fpsQueCabeNoDesenho(
+  taxaDaTela: number,
+  pedido: number,
+  custoQuadroMs: number,
+): number {
+  const teto = Math.min(pedido, TEMPO_REAL_MAX_FPS);
+  if (!(custoQuadroMs > 0)) return fpsQueCasa(taxaDaTela, teto);
+  for (const degrau of DEGRAUS_DE_FPS) {
+    if (degrau > teto) continue;
+    const intervalo = 1000 / degrau;
+    if (custoQuadroMs <= intervalo * FOLGA_DO_DESENHO) {
+      return fpsQueCasa(taxaDaTela, degrau);
+    }
+  }
+  return fpsQueCasa(taxaDaTela, 10);
 }
 
 /**

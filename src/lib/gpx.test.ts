@@ -201,7 +201,13 @@ describe("parseGpx — XML inválido ou hostil", () => {
     const ultimo = r.points[r.points.length - 1];
     expect(ultimo.lat).toBeCloseTo((total - 1) * 0.0001, 6);
     expect(r.points[0]).toEqual({ lat: 0, lng: 0 });
-  });
+    /*
+     * Este é o caso mais pesado do arquivo (36 mil pontos para decimar) e no
+     * runner do CI ele já chegou perto do limite padrão de 5 s — sob carga, o
+     * teste falhava por tempo e derrubava a verificação inteira. O limite aqui
+     * é de segurança, não de desempenho: o que importa é o resultado.
+     */
+  }, 30_000);
 
   it("não marca como reduzido o arquivo que cabe no teto", () => {
     expect(parseGpx(gpx(trk(p(1, 1) + p(2, 2)))).reduced).toBe(false);

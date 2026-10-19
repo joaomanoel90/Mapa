@@ -46,6 +46,11 @@ import {
   toGpx,
 } from "./lib/gpx";
 import {
+  ArquivoVazioError,
+  LeituraIndisponivelError,
+  lerTextoDoArquivo,
+} from "./lib/files";
+import {
   DEFAULT_ENDPOINTS,
   hasEndpointMarks,
   mergeSharedEndpoints,
@@ -965,7 +970,14 @@ function App() {
   const importarGpx = useCallback(async (file: File) => {
     setGpxMsg(null);
     try {
-      const dados = parseGpx(await file.text());
+      /*
+       * `file.text()` não existe em todo navegador (WebView antigo de Android,
+       * iOS até 13, navegador embutido de aplicativo) — e onde falta, o app
+       * culpava o arquivo com o aviso genérico. `lerTextoDoArquivo` tem o
+       * `FileReader` como reserva e devolve o motivo certo quando os dois
+       * falham.
+       */
+      const dados = parseGpx(await lerTextoDoArquivo(file));
 
       const temTracado = dados.points.length > 1;
       // o traçado completo fica guardado; os waypoints são a versão editável
@@ -1019,10 +1031,27 @@ function App() {
       if (dados.reduced) partes.push(`reduzido a ${pontos.length} pontos`);
       setGpxMsg({ tipo: "info", texto: `GPX importado: ${partes.join(" · ")}.` });
     } catch (err) {
-      const texto =
-        err instanceof GpxError
-          ? err.message
-          : "Não foi possível ler o arquivo. Verifique se é um GPX válido.";
+      /*
+       * Cada falha tem o seu recado. O aviso genérico de antes ("verifique se é
+       * um GPX válido") culpava o arquivo até quando o problema era o navegador
+       * não saber abrir um `File` — foi o que aconteceu com o usuário, cujo GPX
+       * é válido.
+       */
+      let texto: string;
+      if (
+        err instanceof GpxError ||
+        err instanceof ArquivoVazioError ||
+        err instanceof LeituraIndisponivelError
+      ) {
+        texto = err.message;
+      } else {
+        const nome = file.name || "o arquivo";
+        const kb = Math.max(1, Math.round(file.size / 1024));
+        texto =
+          `Não foi possível ler "${nome}" (${kb} KB). O arquivo pode estar corrompido ou ` +
+          `em um formato que este navegador não abre — se ele está na nuvem, salve no ` +
+          `aparelho antes de escolher.`;
+      }
       setGpxMsg({ tipo: "erro", texto });
     }
   }, []);

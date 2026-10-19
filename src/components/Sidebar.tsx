@@ -1,4 +1,4 @@
-import { memo, useRef } from "react";
+import { memo } from "react";
 import CitySearch from "./CitySearch";
 import EndCardPanel from "./EndCardPanel";
 import EndpointEditor from "./EndpointEditor";
@@ -142,7 +142,6 @@ function Sidebar(props: Props) {
     avisoRapido,
   } = props;
 
-  const gpxInput = useRef<HTMLInputElement | null>(null);
   const avgKmh = hasRoute && s.duration > 0 ? (distance / 1000 / s.duration) * 3600 : 0;
   const character = findCharacter(s.characterId);
   const aspect = ASPECTS.find((a) => a.id === s.aspect) ?? ASPECTS[0];
@@ -218,9 +217,47 @@ function Sidebar(props: Props) {
               <span className="text-[10.5px] text-zinc-500">Strava, Garmin, Komoot…</span>
             </div>
             <div className="flex gap-1.5">
-              <Button onClick={() => gpxInput.current?.click()} className="flex-1" title="Abrir uma trilha gravada (.gpx)">
-                📂 Importar
-              </Button>
+              {/*
+                O seletor de arquivo é aberto pelo **rótulo**, não por
+                `input.click()`.
+
+                O botão antigo chamava `.click()` num input com `className="hidden"`
+                — e no Safari (iPhone/iPad) clicar programaticamente num input com
+                `display: none` **não abre nada**. O usuário tocou em "Importar" e
+                não aconteceu nada: nenhum arquivo escolhido, nenhuma mensagem.
+
+                Com o rótulo envolvendo o input, quem abre o seletor é o próprio
+                navegador — funciona em todos, sem JavaScript no meio. O input
+                continua escondido, mas com `sr-only` (recortado, não
+                `display: none`), que é o que os leitores de tela e o Safari
+                esperam.
+              */}
+              <label
+                className="inline-flex flex-1 cursor-pointer items-center justify-center gap-1.5 rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-xs font-semibold text-zinc-300 transition-all hover:border-white/25 hover:text-white active:scale-[0.98]"
+                title="Abrir uma trilha gravada (.gpx)"
+              >
+                <span aria-hidden="true">📂</span> Importar
+                <input
+                  type="file"
+                  /*
+                   * Lista larga de propósito: no Android o seletor filtra por
+                   * **tipo MIME**, e um `.gpx` baixado do Strava chega como
+                   * `application/octet-stream` ou `text/plain` em muitos
+                   * aparelhos — com a lista curta, o arquivo aparecia apagado (e
+                   * às vezes nem aparecia). Quem valida o conteúdo é o
+                   * `parseGpx`.
+                   */
+                  accept=".gpx,.xml,.txt,application/gpx+xml,application/xml,text/xml,text/plain,application/octet-stream"
+                  className="sr-only"
+                  aria-label="Escolher arquivo GPX"
+                  onChange={(e) => {
+                    const arquivo = e.target.files?.[0];
+                    if (arquivo) onImportGpx(arquivo);
+                    // permite reimportar o mesmo arquivo em seguida
+                    e.target.value = "";
+                  }}
+                />
+              </label>
               <Button
                 onClick={onExportGpx}
                 disabled={!hasRoute}
@@ -230,19 +267,6 @@ function Sidebar(props: Props) {
                 ⬇️ Exportar
               </Button>
             </div>
-            <input
-              ref={gpxInput}
-              type="file"
-              accept=".gpx,application/gpx+xml,application/xml,text/xml"
-              className="hidden"
-              aria-label="Escolher arquivo GPX"
-              onChange={(e) => {
-                const arquivo = e.target.files?.[0];
-                if (arquivo) onImportGpx(arquivo);
-                // permite reimportar o mesmo arquivo em seguida
-                e.target.value = "";
-              }}
-            />
             {avisoSalvar && (
               <div className="mb-2 rounded-xl border border-amber-400/30 bg-amber-500/10 px-3 py-2 text-[11px] leading-snug text-amber-100">
                 {avisoSalvar}

@@ -20,6 +20,7 @@ export default function ExportModal({
   blocosFaltando,
   cadencia,
   avisoMotor,
+  fpsLimitadoPeloTeto,
   width,
   height,
   duration,
@@ -74,6 +75,14 @@ export default function ExportModal({
    * saber que o navegador tinha recusado o codificador.
    */
   avisoMotor?: string | null;
+  /**
+   * O fps final menor que o pedido foi por causa do **teto do tempo real**, e
+   * não do divisor da tela.
+   *
+   * A mensagem antiga dizia "a tela entrega 60 e não fecha com 60", que é falso:
+   * 30 divide 60. Confundir os dois motivos fazia o usuário duvidar do número.
+   */
+  fpsLimitadoPeloTeto?: boolean;
   width: number;
   height: number;
   duration: number;
@@ -124,13 +133,35 @@ export default function ExportModal({
                   : "Gravação em tempo real: quem carimba o tempo é a tela."}
                 {engine === "realtime" && fps != null && fpsPedido != null && (
                   <>
-                    {fps !== fpsPedido
-                      ? ` A tela${
-                          taxaDaTela ? ` entrega ${Math.round(taxaDaTela)} quadros por segundo e` : ""
-                        } não fecha com ${numero(fpsPedido)}: gravado em ${numero(fps)} quadros por segundo, que é o que sai com o tempo regular (o pedido de ${numero(fpsPedido)} sairia com durações alternadas de 33 ms e 50 ms — é isso que faz o mapa parecer pular).`
-                      : ` Gravado em ${numero(fps)} quadros por segundo, que fecha com a tela${
-                          taxaDaTela ? ` (${Math.round(taxaDaTela)} Hz)` : ""
-                        } — o tempo sai regular.`}
+                    {fps !== fpsPedido && fpsLimitadoPeloTeto && (
+                      <>
+                        {" "}
+                        Pedido {numero(fpsPedido)}, gravado em {numero(fps)}: em tempo real o
+                        desenho tem de caber no intervalo de um quadro, e a {numero(fpsPedido)} são
+                        só {numero(Math.round((1000 / fpsPedido) * 10) / 10)} ms por quadro. O app
+                        escolheu {numero(fps)} porque coube — e medir o desenho desta máquina é o
+                        que decidiu. Para {numero(fpsPedido)}, use a exportação rápida (⚡): ela não
+                        espera o relógio.
+                      </>
+                    )}
+                    {fps !== fpsPedido && !fpsLimitadoPeloTeto && (
+                      <>
+                        {" "}
+                        A tela
+                        {taxaDaTela ? ` entrega ${Math.round(taxaDaTela)} quadros por segundo e` : ""}{" "}
+                        não divide {numero(fpsPedido)}: gravado em {numero(fps)} quadros por
+                        segundo, que sai com o tempo regular (o pedido de {numero(fpsPedido)}{" "}
+                        sairia com durações alternadas — é isso que faz o mapa parecer pular).
+                      </>
+                    )}
+                    {fps === fpsPedido && (
+                      <>
+                        {" "}
+                        Gravado em {numero(fps)} quadros por segundo, que fecha com a tela
+                        {taxaDaTela ? ` (${Math.round(taxaDaTela)} Hz)` : ""} — o tempo sai
+                        regular.
+                      </>
+                    )}
                   </>
                 )}
                 {engine === "realtime" && (
@@ -165,10 +196,12 @@ export default function ExportModal({
                   depender da tela.
                 </p>
               )}
-            {avisoMotor && (phase === "warmup" || phase === "recording") && (
+            {avisoMotor && phase !== "error" && (
               <p className="mt-1 text-[11.5px] leading-snug text-amber-300/80">
-                ⚡ indisponível: {avisoMotor}. Esta gravação sai em tempo real, no máximo a 30
-                quadros por segundo.
+                ⚡ indisponível: {avisoMotor}.{" "}
+                {phase === "done"
+                  ? "Por isso este arquivo saiu da gravação em tempo real."
+                  : "Esta gravação sai em tempo real, no máximo a 30 quadros por segundo."}
               </p>
             )}
             {(blocosFaltando ?? 0) > 0 && phase !== "error" && (

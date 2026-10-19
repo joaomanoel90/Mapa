@@ -1,6 +1,13 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from "vitest";
-import { fpsQueCasa, indiceDoQuadro, recordVideo, tempoDoQuadro, type VideoFormat } from "./recorder";
+import {
+  fpsQueCasa,
+  indiceDoQuadro,
+  medirCadencia,
+  recordVideo,
+  tempoDoQuadro,
+  type VideoFormat,
+} from "./recorder";
 
 /*
  * O `MediaRecorder` não inventa os instantes: ele carimba cada quadro com o
@@ -222,6 +229,7 @@ describe("a captura da gravação em tempo real", () => {
       taxas.push(fps);
       return stream;
     };
+    let cadencia: ReturnType<typeof medirCadencia> | null = null;
     const anterior = (globalThis as { MediaRecorder?: unknown }).MediaRecorder;
     (globalThis as { MediaRecorder?: unknown }).MediaRecorder = RecorderFalso;
     try {
@@ -235,6 +243,9 @@ describe("a captura da gravação em tempo real", () => {
         bitrate: 1_000_000,
         draw: (_ctx, t, elapsed) => {
           desenhados.push({ t, elapsed });
+        },
+        onCadencia: (c) => {
+          cadencia = c;
         },
       });
       expect(blob.size).toBeGreaterThan(0);
@@ -258,8 +269,76 @@ describe("a captura da gravação em tempo real", () => {
       }
       expect(desenhados.map((d) => d.t)).toEqual([...desenhados.map((d) => d.t)].sort((a, b) => a - b));
       expect(desenhados[desenhados.length - 1].t).toBeGreaterThan(0.2);
+      // e a cadência é medida e entregue: um intervalo por quadro desenhado,
+      // contado a partir dos instantes reais do desenho
+      expect(cadencia).not.toBeNull();
+      const c = cadencia as unknown as ReturnType<typeof medirCadencia>;
+      expect(c.intervalos.length).toBe(desenhados.length - 1);
+      expect(c.tipico).toBeGreaterThan(0);
+      expect(c.regular).toBeGreaterThan(0.5);
     } finally {
       (globalThis as { MediaRecorder?: unknown }).MediaRecorder = anterior;
     }
   }, 15000);
+});
+
+/*
+ * A cadência: com que regularidade os quadros saíram.
+ *
+ * É o número que separa o vídeo que flui do que trava — e que não depende da
+ * rota nem do zoom. Medido nos três mp4 do usuário: o que ele achou fluido
+ * tinha 93% dos quadros no mesmo intervalo; o de 30 quadros por segundo, 78%;
+ * o de 24, 46%. O passo do mapa por quadro era o mesmo (~7 px) nos três.
+ */
+describe("a cadência da gravação", () => {
+  /** instantes de `n` quadros, com o intervalo dado em ms */
+  const instantes = (n: number, ms: number, variar?: (i: number) => number) => {
+    const out = [0];
+    for (let i = 1; i < n; i++) out.push((i * ms + (variar?.(i) ?? 0)) / 1000);
+    return out;
+  };
+
+  it("quadros igualmente espaçados dão cadência 100%", () => {
+    const c = medirCadencia(instantes(120, 1000 / 60));
+    expect(c.regular).toBe(1);
+    expect(c.tipico).toBeCloseTo(1000 / 60, 6);
+    expect(c.intervalos).toHaveLength(119);
+  });
+
+  it("reconhece a cadência do vídeo que o usuário achou fluido (93% a 19 ms)", () => {
+    // ~53 quadros por segundo, com 7% deles chegando tarde (38 ms)
+    const c = medirCadencia(instantes(100, 18.9, (i) => (i % 14 === 0 ? 18.9 : 0)));
+    expect(Math.round(c.regular * 100)).toBeGreaterThanOrEqual(90);
+    expect(c.tipico).toBeCloseTo(18.9, 1);
+  });
+
+  it("reconhece a cadência do vídeo que travava (78% a 33 ms)", () => {
+    // 30 quadros por segundo com um em cada cinco vindo em 50 ms
+    const c = medirCadencia(instantes(100, 1000 / 30, (i) => (i % 5 === 0 ? 1000 / 30 : 0)));
+    expect(c.regular).toBeLessThan(0.9);
+    expect(Math.round(c.regular * 100)).toBeCloseTo(78, -1);
+  });
+
+  it("não se engana com um engasgo grande no meio", () => {
+    const base = instantes(90, 1000 / 30);
+    base[45] += 0.4; // meio segundo de engasgo
+    const c = medirCadencia(base);
+    expect(c.tipico).toBeCloseTo(1000 / 30, 6);
+    expect(c.regular).toBeLessThan(0.99);
+    expect(c.regular).toBeGreaterThan(0.9);
+  });
+
+  it("aguenta entrada vazia, um quadro só e valores inválidos", () => {
+    expect(medirCadencia([])).toEqual({ intervalos: [], tipico: 0, regular: 0 });
+    expect(medirCadencia([0.5])).toEqual({ intervalos: [], tipico: 0, regular: 0 });
+    // NaN e Infinity saem da conta; sobram os três instantes válidos → dois intervalos
+    const comRuim = medirCadencia([0, Number.NaN, 1 / 30, Number.POSITIVE_INFINITY, 2 / 30]);
+    expect(comRuim.intervalos).toHaveLength(2);
+    expect(comRuim.regular).toBe(1);
+  });
+
+  it("instantes fora de ordem não produzem intervalo negativo", () => {
+    const c = medirCadencia([0, 1 / 30, 2 / 30, 1 / 30, 3 / 30]);
+    expect(c.intervalos.every((d) => d > 0)).toBe(true);
+  });
 });

@@ -1,6 +1,6 @@
 import type { RefObject } from "react";
 import { Button } from "./ui";
-import { humanSize, type VideoEngine } from "../lib/recorder";
+import { humanSize, type Cadencia, type VideoEngine } from "../lib/recorder";
 
 export type ExportPhase = "warmup" | "recording" | "done" | "error";
 
@@ -17,6 +17,7 @@ export default function ExportModal({
   fpsPedido,
   taxaDaTela,
   blocosDeReserva,
+  cadencia,
   width,
   height,
   duration,
@@ -46,6 +47,15 @@ export default function ExportModal({
    * vídeo (trocar de imagem no meio de um quadro por outro é o "pulo").
    */
   blocosDeReserva?: number;
+  /**
+   * Quão regular foi a cadência da gravação em tempo real.
+   *
+   * O número que separa o vídeo que flui do que trava: nos mp4 do usuário, o
+   * que ele achou fluido tinha **93%** dos quadros no mesmo intervalo; o que
+   * travava, 78% (e o mais antigo, 46%). O passo do mapa por quadro era o mesmo
+   * nos três — o que muda é a **regularidade**, não o tamanho do passo.
+   */
+  cadencia?: Cadencia | null;
   width: number;
   height: number;
   duration: number;
@@ -114,6 +124,25 @@ export default function ExportModal({
                 )}
               </p>
             )}
+            {phase === "done" && cadencia && cadencia.intervalos.length > 0 && (
+              <p className="mt-1 text-[11.5px] leading-snug text-zinc-500">
+                Cadência: {Math.round(cadencia.regular * 100)}% dos quadros no mesmo intervalo
+                ({numero(cadencia.tipico)} ms).
+              </p>
+            )}
+            {phase === "done" &&
+              engine === "realtime" &&
+              cadencia &&
+              cadencia.intervalos.length > 0 &&
+              cadencia.regular < 0.9 && (
+                <p className="mt-1 text-[11.5px] leading-snug text-amber-300/80">
+                  A tela não sustentou o ritmo: {Math.round((1 - cadencia.regular) * 100)}% dos
+                  quadros vieram fora do tempo, e é isso que o olho lê como travada — mesmo com a
+                  velocidade média certa. Use a <strong className="font-semibold">exportação
+                  rápida (⚡)</strong>: ela desenha e escreve cada quadro no tempo exato, sem
+                  depender da tela.
+                </p>
+              )}
             {phase === "done" && (blocosDeReserva ?? 0) > 0 && (
               <p className="mt-1 text-[11.5px] leading-snug text-amber-300/80">
                 {blocosDeReserva} {blocosDeReserva === 1 ? "bloco" : "blocos"} do mapa não

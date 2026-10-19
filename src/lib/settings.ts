@@ -166,7 +166,14 @@ export const DEFAULT_SETTINGS: Settings = {
   title: "Minha rota",
   subtitle: "",
   aspect: "16:9",
-  fps: 30,
+  /*
+   * 60 por padrão: é o que faz o mapa fluir. Medido nos mp4 do usuário, o que
+   * ele achou fluido tinha ~53 quadros por segundo com 93% deles no mesmo
+   * intervalo; a 30, o mesmo movimento andava o mesmo tanto por quadro, mas um
+   * em cada cinco quadros vinha fora do tempo — e é isso que o olho lê como
+   * travada. Quem já tem preferências salvas mantém a sua.
+   */
+  fps: 60,
   formatId: "",
   bitrateMbps: 10,
   fastExport: true,

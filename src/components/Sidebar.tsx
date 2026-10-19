@@ -699,12 +699,19 @@ function Sidebar(props: Props) {
                 mais que o outro): é para os quadros do arquivo ficarem
                 igualmente espaçados.
               */}
-              {!s.fastExport && (
-                <p className="mt-1 text-[10.5px] leading-snug text-zinc-500">
-                  Em tempo real, o fps é ajustado para dividir a taxa da tela — num monitor de 60
-                  Hz, 24 vira 20 — para os quadros saírem igualmente espaçados.
-                </p>
-              )}
+              {/*
+                O número que decide a fluidez é este — medido nos vídeos do
+                usuário: o que ele achou fluido tinha ~53 quadros por segundo,
+                com 93% deles no mesmo intervalo; a 30, o mesmo mapa andava o
+                mesmo tanto por quadro, mas 22% dos quadros vinham fora do
+                tempo, e o olho lê isso como travada.
+              */}
+              <p className="mt-1 text-[10.5px] leading-snug text-zinc-500">
+                60 é o que faz o mapa fluir: o mesmo movimento dividido em mais quadros, com o
+                mesmo intervalo entre eles.{" "}
+                {!s.fastExport &&
+                  "Em tempo real o fps é ajustado para dividir a taxa da tela (num monitor de 60 Hz, 24 vira 20)."}
+              </p>
             </div>
             <div>
               <Label>Qualidade</Label>

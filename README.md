@@ -112,6 +112,27 @@ No **iPhone/iPad o suporte costuma ser melhor pelo WebCodecs** do que pelo `Medi
 exportação rápida não estiver disponível e o botão aparecer desabilitado, é o limite do navegador.
 A pré-visualização funciona em todos.
 
+### O que faz o mapa fluir (medido nos vídeos do usuário)
+
+O usuário comparou três exportações e disse que uma delas "flui melhor o mapa e o trajeto". Medindo
+os três arquivos com a mesma janela do quadro (fundo do mapa, sem HUD nem pino), o que separa o que
+flui do que trava **não é o tamanho do passo** — nos três o mapa anda ~7 px por quadro:
+
+| arquivo | quadros por segundo | quadros no intervalo típico | veredito |
+|---|---|---|---|
+| "Meia Maratona de Sorocaba" (o que flui) | ~53 | **93%** | ✔ |
+| rotacast 18-27 | 30 | 78% | ✘ |
+| rotacast 12-16 | 24 | 46% | ✘ |
+
+É a **regularidade** da cadência: quando a tela engasga, o quadro seguinte chega tarde, e o olho lê
+como travada — mesmo com a velocidade média certa. Duas coisas seguem disso:
+
+1. **60 quadros por segundo é o padrão** (`fps` em `DEFAULT_SETTINGS`): o mesmo movimento dividido em
+   mais quadros, com o mesmo intervalo entre eles.
+2. **A gravação em tempo real mede e mostra a própria cadência** (`medirCadencia`, no painel do fim).
+   Abaixo de 90% dos quadros no intervalo típico, o painel avisa e recomenda a exportação rápida (⚡),
+   que escreve cada quadro no tempo exato, sem depender da tela.
+
 ### Serviços gratuitos usados
 
 | Serviço | Para quê | Limite |
@@ -889,7 +910,7 @@ ou cortados.
 
 ```bash
 npm run typecheck  # tsc --noEmit
-npm test           # Vitest (736 casos)
+npm test           # Vitest (742 casos)
 npm run check:dist # o build saiu autocontido e sem /src/?
 ```
 

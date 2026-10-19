@@ -42,6 +42,8 @@ function Painel() {
       cardNote: settings.cardNote,
     } satisfies CardFields,
     RESUMO,
+    // o mesmo do app: em branco, a cartela usa o número do arquivo
+    true,
   );
   return <EndCardPanel resumo={RESUMO} cartela={cartela} settings={settings} update={update} />;
 }
@@ -130,21 +132,21 @@ describe("campos da cartela", () => {
     expect(campo("Distância").value).toBe("");
   });
 
-  it("mostra a prévia só depois de algo ser escrito", () => {
+  it("sem nada escrito, a prévia já mostra os números do arquivo", () => {
     // a prévia é a fileira de números com o rótulo embaixo (o maiúsculo é do CSS)
-    const previa = () =>
+    const previa = (valor: string) =>
       [...container.querySelectorAll("div")].some(
-        (d) => d.textContent === "distância" && d.previousElementSibling?.textContent === "49 km",
+        (d) => d.textContent === "distância" && d.previousElementSibling?.textContent === valor,
       );
-    expect(container.textContent).toContain("não aparece");
-    expect(previa()).toBe(false);
+    expect(container.textContent).toContain("usa os números do arquivo");
+    expect(previa("71,03 km")).toBe(true);
 
     const el = campo("Distância");
     el.focus();
     digitar(el, "49 km");
 
     expect(container.textContent).toContain("aparece no fim do vídeo");
-    expect(previa()).toBe(true);
+    expect(previa("49 km")).toBe(true);
   });
 
   it("digitar em um campo não tira o foco nem apaga o que foi escrito no de cima", () => {

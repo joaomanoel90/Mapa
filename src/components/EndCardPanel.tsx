@@ -55,10 +55,12 @@ function Campo({
 /**
  * Cartela final: campos digitáveis + prévia do que o vídeo vai mostrar.
  *
- * Os números **não** entram sozinhos: quem escreve é você, e o valor que o
- * arquivo mediu aparece como dica ao lado (o botão abaixo copia tudo de uma
- * vez, para não ter que digitar olhando o Strava). É o que permite uma cartela
- * numa rota desenhada à mão, que não tem arquivo nenhum para medir.
+ * Com o interruptor ligado, a cartela **entra com o que o arquivo mediu** e o
+ * campo em branco é o que manda o número do arquivo. Digitar por cima troca
+ * aquele número (é o que serve para a rota desenhada à mão, que não tem
+ * arquivo para medir). Antes, só existia cartela se alguém digitasse alguma
+ * coisa — e quem ligava o interruptor e não mexia nos campos recebia o vídeo
+ * sem cartela nenhuma.
  */
 export default function EndCardPanel({
   resumo,
@@ -91,7 +93,11 @@ export default function EndCardPanel({
       <div className="flex items-center justify-between text-[12px]">
         <span className="text-zinc-400">🏁 Cartela final</span>
         <span className="text-[11px] text-zinc-500">
-          {preenchidos ? "aparece no fim do vídeo" : "não aparece"}
+          {!s.endCard
+            ? "desligada"
+            : preenchidos
+              ? "aparece no fim do vídeo"
+              : "usa os números do arquivo"}
         </span>
       </div>
 
@@ -115,6 +121,11 @@ export default function EndCardPanel({
           sugestao.date ? `vazio = ${sugestao.date}` : "ex.: com os amigos do pedal",
         )}
       </div>
+
+      <p className="mt-1.5 text-[10.5px] leading-snug text-zinc-500">
+        Em branco, entra o número do arquivo. A cartela aparece depois que o
+        percurso termina, com o mapa parado.
+      </p>
 
       {(sugestao.distance || sugestao.elevation || sugestao.time || sugestao.date) && (
         <button

@@ -223,6 +223,28 @@ describe("endCard", () => {
     expect(card?.tiles[0].label).toBe("distância");
   });
 
+  /*
+   * O pedido do usuário: "adicione a cartela no final do vídeo". O interruptor
+   * já vinha ligado, mas a cartela só nascia se alguém digitasse — e o vídeo
+   * terminava sem nada. Com o preenchimento pelo arquivo, ligar basta.
+   */
+  it("campo em branco usa o número do arquivo quando o preenchimento está ligado", () => {
+    const card = endCard(vazio, COM_TUDO, true);
+    expect(card?.tiles.map((t) => t.label)).toEqual(["distância", "elevação", "tempo"]);
+    expect(card?.tiles.map((t) => t.value)).toEqual(["71,03 km", "+142 m", "1 h"]);
+  });
+
+  it("o que foi digitado continua mandando sobre o arquivo", () => {
+    const card = endCard({ ...vazio, cardDistance: "42 km" }, COM_TUDO, true);
+    expect(card?.tiles[0].value).toBe("42 km");
+    expect(card?.tiles.map((t) => t.label)).toEqual(["distância", "elevação", "tempo"]);
+  });
+
+  it("sem hora no arquivo, a linha do tempo não é inventada", () => {
+    const card = endCard(vazio, { ...COM_TUDO, time: null }, true);
+    expect(card?.tiles.map((t) => t.label)).toEqual(["distância", "elevação"]);
+  });
+
   it("sem nada escrito, não há cartela — nem com data no arquivo", () => {
     const semHora = rideSummary([{ lat: 0, lng: 0 }, { lat: 0, lng: 1 }], 1000);
     expect(endCard(vazio, semHora)).toBeNull();

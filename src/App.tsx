@@ -208,8 +208,10 @@ function App() {
      * dizia "60 não fecha com a tela de 60 Hz", que é falso.
      */
     fpsLimitadoPeloTeto: boolean;
-    /** por que o ⚡ não rodou nesta gravação (null = rodou) */
+    /** por que o ⚡ não rodou nesta gravação (null = rodou ou o navegador suporta) */
     motivoMotor: string | null;
+    /** o ⚡ não rodou porque o interruptor do painel estava desligado */
+    rapidoDesligado: boolean;
     /**
      * Com que regularidade os quadros saíram (só a gravação em tempo real
      * mede: é lá que a tela pode engasgar). `null` na exportação rápida, que
@@ -227,7 +229,7 @@ function App() {
    * segundo no motor errado. Agora a resposta é calculada antes, e aparece no
    * painel junto do interruptor do ⚡.
    */
-  const [avisoRapido, setAvisoRapido] = useState<string | null>(null);
+  const [avisoRapido, setAvisoRapido] = useState<string | null | undefined>(undefined);
 
   /**
    * O motivo do motor **desta** gravação (calculado no começo dela).
@@ -237,6 +239,19 @@ function App() {
    * sem explicação nenhuma de por que o arquivo saiu em tempo real.
    */
   const [avisoMotorGravar, setAvisoMotorGravar] = useState<string | null>(null);
+
+  /**
+   * O ⚡ estava **desligado no painel** nesta gravação?
+   *
+   * É diferente de "o navegador não sabe": no primeiro caso existe solução a um
+   * clique — e o painel do fim passa a dizer isso, em vez de só constatar que o
+   * arquivo saiu em tempo real. O usuário gravou 65% de cadência sem saber que
+   * o interruptor era a única coisa no caminho.
+   */
+  const [rapidoDesligadoGravar, setRapidoDesligadoGravar] = useState(false);
+
+  /** pedido de "ligar o ⚡ e gravar de novo", esperando o ajuste chegar ao estado */
+  const [relancarComRapido, setRelancarComRapido] = useState(false);
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const cancelRef = useRef(false);
@@ -284,6 +299,7 @@ function App() {
    */
   useEffect(() => {
     let vivo = true;
+    setAvisoRapido(undefined);
     void motivoRapidoIndisponivel(activeFormat, aspect.w, aspect.h, settings.fps)
       .then((motivo) => {
         if (vivo) setAvisoRapido(motivo);
@@ -1162,16 +1178,28 @@ function App() {
        * evita perguntar duas coisas diferentes ao navegador e deixa a janela
        * dizer a verdade já na fase de carregamento.
        */
-      const motivoRapido = settings.fastExport
-        ? await motivoRapidoIndisponivel(activeFormat, aspect.w, aspect.h, settings.fps)
-        : "a exportação rápida (⚡) está desligada no painel";
-      const rapida = settings.fastExport && motivoRapido === null;
+      /*
+       * A pergunta ao navegador é feita **mesmo com o ⚡ desligado**: sem isso o
+       * painel só sabia dizer "desligada no painel" — e não se o interruptor era
+       * a única coisa entre o usuário e o tempo exato. Com a resposta em mãos,
+       * o fim da gravação pode oferecer o que resolve.
+       */
+      const suporteRapido = await motivoRapidoIndisponivel(
+        activeFormat,
+        aspect.w,
+        aspect.h,
+        settings.fps,
+      );
+      const rapidoDesligado = !settings.fastExport;
+      const motivoRapido = suporteRapido;
+      const rapida = !rapidoDesligado && motivoRapido === null;
       const bitrateFinal = Math.round(settings.bitrateMbps * 1_000_000);
       const codecRapido = rapida
         ? await codecAceito(activeFormat, aspect.w, aspect.h, settings.fps, bitrateFinal)
         : null;
       if (cancelRef.current) throw new CancelledError();
-      setAvisoMotorGravar(rapida ? null : motivoRapido);
+      setAvisoMotorGravar(motivoRapido);
+      setRapidoDesligadoGravar(rapidoDesligado);
 
       /** desenha um quadro no canvas de exportação */
       paint = (t: number, elapsed: number) =>
@@ -1390,7 +1418,8 @@ function App() {
         blocosFaltando,
         cadencia: cadenciaFinal,
         fpsLimitadoPeloTeto: taxaPedidaLimitada,
-        motivoMotor: rapida ? null : motivoRapido,
+        motivoMotor: motivoRapido,
+        rapidoDesligado,
       });
       setPhase("done");
     } catch (err) {
@@ -1412,6 +1441,18 @@ function App() {
     endpoints,
     linhaDoTempo,
   ]);
+
+  /*
+   * "Ligar o ⚡ e gravar de novo": ligar o interruptor não basta — o usuário
+   * teria de fechar o painel e procurar o botão de gravar. O pedido fica em
+   * espera, o ajuste chega ao estado e a gravação recomeça já com o ⚡ ligado
+   * (este `startExport` é o da renderização em que `fastExport` virou `true`).
+   */
+  useEffect(() => {
+    if (!relancarComRapido || !settings.fastExport) return;
+    setRelancarComRapido(false);
+    void startExport();
+  }, [relancarComRapido, settings.fastExport, startExport]);
 
   const closeModal = useCallback(() => {
     cancelRef.current = true;
@@ -1543,7 +1584,7 @@ function App() {
             onExportGpx={exportarGpx}
             gpxMsg={gpxMsg}
             avisoSalvar={avisoSalvar}
-            avisoRapido={settings.fastExport ? avisoRapido : null}
+            avisoRapido={avisoRapido}
           />
         </aside>
 
@@ -1770,6 +1811,12 @@ function App() {
           blocosFaltando={video?.blocosFaltando}
           cadencia={video?.cadencia}
           avisoMotor={video ? video.motivoMotor : avisoMotorGravar}
+          rapidoDesligado={video ? video.rapidoDesligado : rapidoDesligadoGravar}
+          onLigarRapido={() => {
+            update("fastExport", true);
+            closeModal();
+            setRelancarComRapido(true);
+          }}
           fpsLimitadoPeloTeto={video?.fpsLimitadoPeloTeto}
           width={aspect.w}
           height={aspect.h}

@@ -20,6 +20,8 @@ export default function ExportModal({
   blocosFaltando,
   cadencia,
   avisoMotor,
+  rapidoDesligado,
+  onLigarRapido,
   fpsLimitadoPeloTeto,
   width,
   height,
@@ -75,6 +77,13 @@ export default function ExportModal({
    * saber que o navegador tinha recusado o codificador.
    */
   avisoMotor?: string | null;
+  /**
+   * O ⚡ não rodou porque o **interruptor** do painel estava desligado (e não
+   * porque o navegador recusou). Muda a conclusão: existe solução a um clique.
+   */
+  rapidoDesligado?: boolean;
+  /** liga o ⚡ e começa outra gravação — o botão do painel do fim */
+  onLigarRapido?: () => void;
   /**
    * O fps final menor que o pedido foi por causa do **teto do tempo real**, e
    * não do divisor da tela.
@@ -196,12 +205,34 @@ export default function ExportModal({
                   depender da tela.
                 </p>
               )}
-            {avisoMotor && phase !== "error" && (
+            {(avisoMotor || rapidoDesligado) && phase !== "error" && (
               <p className="mt-1 text-[11.5px] leading-snug text-amber-300/80">
-                ⚡ indisponível: {avisoMotor}.{" "}
-                {phase === "done"
-                  ? "Por isso este arquivo saiu da gravação em tempo real."
-                  : "Esta gravação sai em tempo real, no máximo a 30 quadros por segundo."}
+                {rapidoDesligado ? (
+                  <>
+                    ⚡ <strong className="font-semibold">desligado no painel.</strong>{" "}
+                    {avisoMotor
+                      ? `Neste navegador ele também não rodaria: ${avisoMotor}.`
+                      : "Este navegador suporta a exportação rápida."}{" "}
+                    {phase === "done" && !avisoMotor && (
+                      <>
+                        Este arquivo saiu em tempo real só por causa do interruptor: ligado, cada
+                        quadro sai no tempo exato
+                        {fpsPedido ? `, a ${numero(fpsPedido)} quadros por segundo` : ""}, sem
+                        depender da tela.
+                      </>
+                    )}
+                    {phase !== "done" && !avisoMotor && (
+                      <>Ligue-o para gravar com o tempo exato — o tempo real fica preso à tela.</>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    ⚡ indisponível: {avisoMotor}.{" "}
+                    {phase === "done"
+                      ? "Por isso este arquivo saiu da gravação em tempo real."
+                      : "Esta gravação sai em tempo real, no máximo a 30 quadros por segundo."}
+                  </>
+                )}
               </p>
             )}
             {(blocosFaltando ?? 0) > 0 && phase !== "error" && (
@@ -286,6 +317,11 @@ export default function ExportModal({
             {isWorking && (
               <Button variant="danger" onClick={onCancel}>
                 Cancelar
+              </Button>
+            )}
+            {phase === "done" && rapidoDesligado && !avisoMotor && onLigarRapido && (
+              <Button variant="primary" onClick={onLigarRapido} className="px-4 py-2.5">
+                ⚡ Ligar e gravar de novo
               </Button>
             )}
             {phase === "done" && (

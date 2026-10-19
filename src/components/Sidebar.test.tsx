@@ -31,12 +31,15 @@ function Painel({
   cobertura = { ele: 0, time: 0 },
   blocos = { needed: 300, fits: true, sugestao: null },
   avisoSalvar = null,
+  avisoRapido,
   onImportGpx = () => undefined,
 }: {
   inicial?: Partial<Settings>;
   cobertura?: { ele: number; time: number };
   blocos?: { needed: number; fits: boolean; sugestao: number | null };
   avisoSalvar?: string | null;
+  /** `null` = o navegador suporta o ⚡; texto = motivo de não suportar */
+  avisoRapido?: string | null;
   onImportGpx?: (f: File) => void;
 }) {
   const [settings, setSettings] = useState<Settings>({ ...DEFAULT_SETTINGS, ...inicial });
@@ -85,6 +88,7 @@ function Painel({
       onExportGpx={nada}
       gpxMsg={null}
       avisoSalvar={avisoSalvar}
+      avisoRapido={avisoRapido}
       resumo={{ distanceM: TRACK.total, elevation: null, time: null, points: TRACK.pts.length }}
       cartela={null}
     />
@@ -316,5 +320,54 @@ describe("painel: importar GPX", () => {
     expect(recebidos[0].name).toBe("rota.gpx");
     // e o campo é limpo, para dar para escolher o mesmo arquivo de novo
     expect(input.value).toBe("");
+  });
+});
+
+describe("painel: o ⚡ desligado diz se o navegador daria conta", () => {
+  it("desligado num navegador capaz, oferece ligar ali mesmo", () => {
+    montar(<Painel inicial={{ fastExport: false }} avisoRapido={null} />);
+    const texto = container.textContent ?? "";
+    expect(texto).toContain("mas este navegador suporta");
+    expect(texto).not.toContain("não rodaria");
+    clicar(botao("Ligar o ⚡"));
+    expect(botao("Exportação rápida").getAttribute("aria-checked")).toBe("true");
+    // o aviso de "desligado" some junto com o problema
+    expect(container.textContent ?? "").not.toContain("Ligar o ⚡");
+  });
+
+  it("desligado num navegador sem WebCodecs, diz o motivo", () => {
+    montar(
+      <Painel
+        inicial={{ fastExport: false }}
+        avisoRapido="este navegador não tem WebCodecs (a exportação rápida precisa dele)"
+      />,
+    );
+    const texto = container.textContent ?? "";
+    expect(texto).toContain("não rodaria: este navegador não tem WebCodecs");
+    expect(texto).not.toContain("Ligar o ⚡");
+  });
+
+  it("ligado, não repete a conversa do interruptor", () => {
+    montar(<Painel avisoRapido={null} />);
+    expect(container.textContent ?? "").not.toContain("mas este navegador suporta");
+  });
+});
+
+describe("painel: o botão de gravar anuncia o motor", () => {
+  it("com o ⚡ disponível, o botão promete a exportação rápida", () => {
+    montar(<Painel avisoRapido={null} />);
+    expect(botao("Gravar e baixar vídeo").textContent ?? "").toContain("(⚡)");
+  });
+
+  it("com o ⚡ desligado, o botão já diz que é tempo real", () => {
+    montar(<Painel inicial={{ fastExport: false }} avisoRapido={null} />);
+    expect(botao("Gravar em tempo real")).not.toBeNull();
+    const textos = Array.from(container.querySelectorAll("button")).map((b) => b.textContent ?? "");
+    expect(textos.some((t) => t.includes("Gravar e baixar vídeo"))).toBe(false);
+  });
+
+  it("com o ⚡ recusado pelo navegador, também é tempo real", () => {
+    montar(<Painel avisoRapido="este navegador não tem WebCodecs" />);
+    expect(botao("Gravar em tempo real")).not.toBeNull();
   });
 });

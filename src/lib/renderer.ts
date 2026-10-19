@@ -34,6 +34,7 @@ import {
   boundsOf,
   buildTrack,
   fitZoom,
+  cumDoDesenho,
   formatDistance,
   haversine,
   project,
@@ -3453,7 +3454,13 @@ function hudClock(
   cardSeconds: number | null,
 ): { segundos: number | null; fonte: "arquivo" | "cartela" | null } {
   if (times) {
-    const real = elapsedAt(track.pts, track.cum, t, times);
+    /*
+     * O relógio tem de andar no **mesmo** caminho que o personagem. Com o `cum`
+     * medido, o índice certo para o mesmo `t` era outro (as duas distâncias
+     * divergem até 39× num segmento) e o relógio do HUD acelerava e travava
+     * junto com o mapa.
+     */
+    const real = elapsedAt(track.pts, cumDoDesenho(track), t, times);
     if (real !== null) return { segundos: real, fonte: "arquivo" };
   }
   if (cardSeconds && cardSeconds > 0) {

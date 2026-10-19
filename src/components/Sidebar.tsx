@@ -692,15 +692,17 @@ function Sidebar(props: Props) {
                 size="sm"
               />
               {/*
-                Na gravação em tempo real quem carimba o tempo é a tela: o fps
-                pedido precisa dividir a taxa dela, senão os quadros do arquivo
-                saem com durações alternadas e o mapa anda aos pulos (24 numa
-                tela de 60 Hz é o pior caso).
+                Na gravação em tempo real quem carimba o tempo é a tela, e o
+                fps pedido é ajustado para a divisora mais próxima dela. Não é
+                mais uma questão de velocidade (o conteúdo do quadro sai do
+                relógio, então o mapa anda igual mesmo quando um quadro dura
+                mais que o outro): é para os quadros do arquivo ficarem
+                igualmente espaçados.
               */}
               {!s.fastExport && (
                 <p className="mt-1 text-[10.5px] leading-snug text-zinc-500">
-                  Em tempo real, o fps precisa dividir a taxa da tela: num monitor de 60 Hz, 24
-                  sai aos pulos — 30 ou 60 saem certos.
+                  Em tempo real, o fps é ajustado para dividir a taxa da tela — num monitor de 60
+                  Hz, 24 vira 20 — para os quadros saírem igualmente espaçados.
                 </p>
               )}
             </div>

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from "vitest";
-import { fpsQueCasa, indiceDoQuadro, recordVideo, type VideoFormat } from "./recorder";
+import { fpsQueCasa, indiceDoQuadro, recordVideo, tempoDoQuadro, type VideoFormat } from "./recorder";
 
 /*
  * O `MediaRecorder` não inventa os instantes: ele carimba cada quadro com o
@@ -68,12 +68,12 @@ describe("o fps da gravação em tempo real", () => {
 });
 
 /*
- * O desenho é feito na **grade do vídeo** (`i/fps`), e não no instante em que a
- * tela pediu o quadro: com `captureStream(0)` + `requestFrame()` cada captura é
- * um quadro inteiro do vídeo, e o passo do mapa entre dois quadros do arquivo é
- * sempre o mesmo.
+ * A **cadência** do desenho é a grade do vídeo (`i/fps`); o **conteúdo** de cada
+ * quadro é o relógio, porque é o relógio que o `MediaRecorder` carimba no
+ * arquivo. As duas coisas são independentes de propósito — ver
+ * `tempoDoQuadro`.
  */
-describe("o quadro desenhado na gravação em tempo real", () => {
+describe("a cadência do desenho na gravação em tempo real", () => {
   it("sai na grade do vídeo, e não no instante do relógio", () => {
     expect(indiceDoQuadro(0, 24, 240)).toBe(0);
     expect(indiceDoQuadro(0.016, 24, 240)).toBe(0);
@@ -100,11 +100,69 @@ describe("o quadro desenhado na gravação em tempo real", () => {
     expect(indiceDoQuadro(-1, 30, 200)).toBe(0);
   });
 
-  it("o tempo de vídeo de cada quadro é i/fps", () => {
+  it("o degrau de cada quadro é i/fps", () => {
     for (const fps of [24, 30, 60]) {
       for (const i of [0, 1, 7, 23, 1441]) {
         expect(indiceDoQuadro(i / fps, fps, 10_000) * (1 / fps)).toBeCloseTo(i / fps, 9);
       }
+    }
+  });
+});
+
+/*
+ * O conteúdo de cada quadro sai do **relógio** — o mesmo em que o arquivo é
+ * carimbado.
+ *
+ * Este é o conserto do "travadinha em todo o vídeo": o desenho era feito por
+ * índice (`i/fps`), então um quadro que ficava 46 ms na tela carregava o mesmo
+ * passo de mapa que um de 20 ms. A velocidade aparente oscilava até 1,7× de um
+ * quadro para o outro, 30 vezes por segundo. Está medido nos dois mp4 do
+ * usuário: no que funcionava, os quadros longos andavam 1,49× mais que os
+ * curtos; no que travava, 1,01×.
+ */
+describe("o instante do vídeo que cada quadro representa", () => {
+  it("sai do relógio, e não da contagem de quadros", () => {
+    expect(tempoDoQuadro(0.025, 60)).toBeCloseTo(0.025 / 60, 9);
+    expect(tempoDoQuadro(0.042, 60)).toBeCloseTo(0.042 / 60, 9);
+    // os dois intervalos medidos no arquivo de 18-27, um seguido do outro
+    const razao = tempoDoQuadro(0.042, 60) / tempoDoQuadro(0.025, 60);
+    expect(razao).toBeCloseTo(1.68, 2);
+  });
+
+  it("um quadro que ficou 1,5× mais tempo na tela carrega 1,5× mais caminho", () => {
+    const curto = tempoDoQuadro(0.033, 60);
+    const longo = tempoDoQuadro(0.05, 60);
+    expect(longo / curto).toBeCloseTo(1.515, 2);
+    /*
+     * Pela contagem de quadros (o método antigo), 50 ms e 33 ms caíam no mesmo
+     * degrau na maior parte das vezes: a razão ficava em ~1, que é a oscilação
+     * de velocidade que o usuário viu.
+     */
+    const porIndice = (e: number) => Math.floor(e * 30) / 30;
+    expect(porIndice(3.05) / porIndice(3.033)).toBeCloseTo(1.01, 2);
+  });
+
+  it("não acumula atraso: o quadro depois de um engasgo está no instante certo", () => {
+    expect(tempoDoQuadro(3.1, 60)).toBeCloseTo(3.1 / 60, 9);
+    expect(tempoDoQuadro(3.15, 60)).toBeCloseTo(3.15 / 60, 9);
+    // e um engasgo de 50 ms carrega os 50 ms, em vez de "dois passos iguais"
+    expect(tempoDoQuadro(3.15, 60) - tempoDoQuadro(3.1, 60)).toBeCloseTo(0.05 / 60, 9);
+  });
+
+  it("fica preso entre o começo e o fim", () => {
+    expect(tempoDoQuadro(-1, 60)).toBe(0);
+    expect(tempoDoQuadro(90, 60)).toBe(1);
+    expect(tempoDoQuadro(0, 0)).toBe(0);
+    expect(tempoDoQuadro(1, Number.NaN)).toBe(1);
+    expect(tempoDoQuadro(Number.NaN, 60)).toBe(0);
+  });
+
+  it("nunca anda para trás", () => {
+    let anterior = -1;
+    for (let ms = 0; ms <= 60_000; ms += 7) {
+      const t = tempoDoQuadro(ms / 1000, 60);
+      expect(t).toBeGreaterThanOrEqual(anterior);
+      anterior = t;
     }
   });
 });
@@ -130,10 +188,10 @@ describe("a captura da gravação em tempo real", () => {
     codec: "vp8",
   };
 
-  it("pede um quadro capturado por quadro desenhado, na grade do vídeo", async () => {
+  it("pede um quadro capturado por quadro desenhado, com o conteúdo no relógio", async () => {
     const taxas: number[] = [];
     const pedidos: number[] = [];
-    const desenhados: number[] = [];
+    const desenhados: { t: number; elapsed: number }[] = [];
     const trilha = {
       requestFrame: () => pedidos.push(pedidos.length),
       stop: () => undefined,
@@ -175,8 +233,8 @@ describe("a captura da gravação em tempo real", () => {
         durationSec: 0.25,
         format: FORMATO,
         bitrate: 1_000_000,
-        draw: (_ctx, _t, elapsed) => {
-          desenhados.push(elapsed);
+        draw: (_ctx, t, elapsed) => {
+          desenhados.push({ t, elapsed });
         },
       });
       expect(blob.size).toBeGreaterThan(0);
@@ -189,8 +247,17 @@ describe("a captura da gravação em tempo real", () => {
        */
       expect(pedidos.length).toBe(desenhados.length);
       expect(desenhados.length).toBe(8); // o quadro 0 + os sete da grade
-      // e o tempo de cada quadro é o da grade (1/30 s), nunca o do relógio
-      expect(desenhados.map((t) => Math.round(t * 30))).toEqual([0, 1, 2, 3, 4, 5, 6, 7]);
+      /*
+       * O instante de cada quadro é o do **relógio** dividido pela duração —
+       * exatamente o que o `MediaRecorder` carimba no arquivo. É por isso que a
+       * velocidade não oscila quando a tela entrega quadros de durações
+       * diferentes.
+       */
+      for (const { t, elapsed } of desenhados) {
+        expect(t).toBeCloseTo(elapsed / 0.25, 9);
+      }
+      expect(desenhados.map((d) => d.t)).toEqual([...desenhados.map((d) => d.t)].sort((a, b) => a - b));
+      expect(desenhados[desenhados.length - 1].t).toBeGreaterThan(0.2);
     } finally {
       (globalThis as { MediaRecorder?: unknown }).MediaRecorder = anterior;
     }

@@ -86,14 +86,20 @@ arquivo de exemplo que o usuário mandou (60 s, 720×1280, 1.441 quadros):
 
 1. **Um quadro capturado por quadro desenhado.** O caminho de sempre deixa o navegador escolher o
    instante da captura; com `captureStream(0)` + `requestFrame()` a captura sai colada no quadro que
-   acabou de ser desenhado. O desenho é feito na **grade do vídeo** (`indiceDoQuadro`, `i/fps`), de
-   modo que cada quadro do arquivo é um quadro inteiro do vídeo.
-2. **O `fps` tem de dividir a taxa da tela** (`fpsQueCasa`, medindo a tela com
-   `requestAnimationFrame`). Pedir 24 numa tela de 60 Hz é o pior caso: os quadros saem de 2 e 3
-   quadros de tela — durações agrupadas em **999 e 1.500** (1/30.000 s), ou 33 ms e 50 ms
-   alternados, exatamente o que o arquivo dele mostra — e, como a velocidade é a mesma, o que se vê
-   é o movimento oscilando a cada quadro: é o *"o mapa fica pulando"*. Numa tela de 60 Hz, 24 vira
-   **20**; 30 e 60 continuam 30 e 60. A janela avisa quando o fps foi trocado.
+   acabou de ser desenhado. A **cadência** é a grade do vídeo (`indiceDoQuadro`, `i/fps`).
+2. **O conteúdo de cada quadro sai do relógio** (`tempoDoQuadro`), não do índice do degrau. O
+   `MediaRecorder` carimba cada captura no instante em que ela aconteceu — 20 ms, 33 ms, 46 ms, o
+   que a tela der —, então o desenho tem de andar no mesmo relógio. Desenhando por índice, um quadro
+   que ficava 46 ms na tela carregava o mesmo passo de mapa que um de 20 ms: a velocidade aparente
+   oscilava até 1,7× de um quadro para o outro, e é isso o *"travadinha em todo o vídeo"*. Medido nos
+   dois mp4 do usuário (passo do mapa nos quadros longos ÷ nos curtos): **1,49×** no arquivo que
+   funcionava e **1,01×** no que travava. O voo de abertura escapava porque ali o passo é de fração
+   de pixel.
+3. **O `fps` é ajustado para dividir a taxa da tela** (`fpsQueCasa`, medindo a tela com
+   `requestAnimationFrame`) — não mais por causa da velocidade, mas para os quadros do arquivo
+   ficarem igualmente espaçados. Pedir 24 numa tela de 60 Hz dá quadros de 33 ms e 50 ms
+   alternados; a janela então usa **20**, que sai de 50 em 50 ms. A janela avisa quando o fps foi
+   trocado.
 
 Quando o vídeo termina, a janela diz **qual motor rodou** ("Exportação rápida (WebCodecs)" ou
 "Gravação em tempo real") e, no tempo real, em que fps o arquivo saiu: é a primeira coisa a olhar se
@@ -883,7 +889,7 @@ ou cortados.
 
 ```bash
 npm run typecheck  # tsc --noEmit
-npm test           # Vitest (731 casos)
+npm test           # Vitest (736 casos)
 npm run check:dist # o build saiu autocontido e sem /src/?
 ```
 

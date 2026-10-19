@@ -193,15 +193,11 @@ export function fpsQueCasa(taxaDaTela: number, pedido: number): number {
 }
 
 /**
- * Qual quadro do vídeo desenhar num instante do relógio.
+ * Em que **degrau** da grade do vídeo está o instante do relógio.
  *
- * O desenho é feito na **grade do vídeo** (`i/fps`), e não no instante em que a
- * tela pediu o quadro. Num monitor de 60 Hz, um vídeo de 24 quadros por segundo
- * recebe 2 ou 3 quadros de tela alternados (33 ms e 50 ms); desenhando o
- * instante do relógio, cada captura levaria um meio-caminho entre dois quadros
- * do vídeo e o arquivo sairia com o movimento picado. Com a grade, cada captura
- * é um quadro inteiro do vídeo — o mesmo conteúdo que a exportação rápida
- * escreve —, e o codificador descarta o quadro repetido.
+ * Serve para decidir **quantas vezes por segundo desenhar** — não para decidir
+ * *o que* desenhar. Quem diz o que desenhar é `tempoDoQuadro`, que usa o
+ * relógio; ver a explicação lá.
  *
  * O resultado é preso às pontas: nunca antes do primeiro, nunca depois do
  * último.
@@ -209,6 +205,36 @@ export function fpsQueCasa(taxaDaTela: number, pedido: number): number {
 export function indiceDoQuadro(elapsed: number, fps: number, total: number): number {
   const ultimo = Math.max(0, total - 1);
   return Math.min(ultimo, Math.max(0, Math.floor(elapsed * fps)));
+}
+
+/**
+ * O momento do vídeo (0..1) que um quadro desenhado no relógio representa.
+ *
+ * **É o relógio, e não a contagem de quadros.** O `MediaRecorder` carimba cada
+ * quadro com o instante em que ele foi capturado — 33 ms, 20 ms, 46 ms, o que a
+ * tela der —, e o conteúdo tem de andar no **mesmo** relógio. Desenhando por
+ * índice (`i/fps`, como era), num monitor de 60 Hz com 30 quadros por segundo o
+ * arquivo recebia quadros de 20 ms e de 46 ms carregando **o mesmo** passo de
+ * mapa: a velocidade aparente oscilava até 1,7× de um quadro para o outro, 30
+ * vezes por segundo — o "travadinha em todo o vídeo" que o usuário viu, e que
+ * não aparece no voo de abertura só porque ali o passo é de fração de pixel.
+ *
+ * Está medido nos dois arquivos dele (passo do mapa nos quadros de intervalo
+ * longo ÷ nos de intervalo curto):
+ *
+ * | arquivo | intervalos | longo | curto | razão |
+ * |---|---|---|---|---|
+ * | 12-16 (funcionava) | 33 e 50 ms | 11,11 px | 7,45 px | **1,49×** |
+ * | 18-27 (travava) | 20 a 46 ms | 8,47 px | 8,37 px | **1,01×** |
+ *
+ * 1,5× é o certo: o tempo quase dobrou, então o deslocamento quase dobra. Com o
+ * conteúdo saindo do relógio, um quadro perdido não muda a velocidade — ele só
+ * carrega o pedaço maior que lhe cabe.
+ */
+export function tempoDoQuadro(elapsed: number, durationSec: number): number {
+  const total = Number.isFinite(durationSec) && durationSec > 0 ? durationSec : 1;
+  const t = Number.isFinite(elapsed) ? elapsed : 0;
+  return Math.max(0, Math.min(1, t / total));
 }
 
 export async function recordVideo(opts: RecordOptions): Promise<Blob> {
@@ -263,9 +289,15 @@ export async function recordVideo(opts: RecordOptions): Promise<Blob> {
   recorder.start(200);
   const startedAt = performance.now();
 
-  /* os quadros saem na grade do vídeo — ver `indiceDoQuadro` */
+  /*
+   * `total` é o número de degraus da grade, e é ele que decide **quantas vezes
+   * por segundo** desenhar (e capturar). O conteúdo de cada quadro, porém, sai
+   * do **relógio** (`tempoDoQuadro`): é o mesmo relógio em que o `MediaRecorder`
+   * carimba os quadros do arquivo. Antes o conteúdo saía do índice do degrau, e
+   * aí um quadro de 46 ms carregava o mesmo passo de mapa que um de 20 ms — a
+   * velocidade aparente oscilava e o vídeo "travava" em todo o percurso.
+   */
   const total = Math.max(1, Math.round(fps * durationSec));
-  const tempoDoQuadro = (i: number) => i / fps;
   let desenhado = 0;
 
   await new Promise<void>((resolve, reject) => {
@@ -278,11 +310,16 @@ export async function recordVideo(opts: RecordOptions): Promise<Blob> {
       }
       const elapsed = (performance.now() - startedAt) / 1000;
       const i = indiceDoQuadro(elapsed, fps, total);
-      const t = total <= 1 ? 1 : i / (total - 1);
       if (i !== desenhado) {
         desenhado = i;
+        /*
+         * O momento do conteúdo vem do relógio (é o que o arquivo vai carimbar);
+         * o segundo argumento do `draw` é esse mesmo instante, para quem
+         * desenha saber há quanto tempo o vídeo começou.
+         */
+        const t = tempoDoQuadro(elapsed, durationSec);
         try {
-          opts.draw(ctx, t, tempoDoQuadro(i));
+          opts.draw(ctx, t, elapsed);
           trilha?.requestFrame?.();
         } catch (err) {
           cancelAnimationFrame(raf);
@@ -292,6 +329,24 @@ export async function recordVideo(opts: RecordOptions): Promise<Blob> {
         opts.onProgress?.(t);
       }
       if (desenhado >= total - 1 || elapsed >= durationSec) {
+        /*
+         * Fecha no quadro final (a cartela) mesmo que o navegador tenha
+         * engasgado no último degrau: o fim do vídeo não pode ficar no meio do
+         * percurso.
+         */
+        if (desenhado < total - 1) {
+          desenhado = total - 1;
+          const t = tempoDoQuadro(Math.max(elapsed, durationSec), durationSec);
+          try {
+            opts.draw(ctx, t, durationSec);
+            trilha?.requestFrame?.();
+          } catch (err) {
+            cancelAnimationFrame(raf);
+            reject(err instanceof Error ? err : new Error("Falha ao renderizar frame"));
+            return;
+          }
+          opts.onProgress?.(t);
+        }
         cancelAnimationFrame(raf);
         resolve();
         return;

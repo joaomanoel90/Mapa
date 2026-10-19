@@ -944,14 +944,14 @@ export class SceneRenderer {
    * usuário pediu para resolver ("entender a rota, baixar todo o mapa necessário
    * para depois criar o vídeo").
    */
-  async warmup(
+  /** Os blocos únicos que a animação inteira vai desenhar. */
+  private refsDaAnimacao(
     track: Track,
     camera: CameraConfig,
     width: number,
     height: number,
-    onProgress: (p: number) => void,
     foco?: FocusPoint | null,
-  ): Promise<void> {
+  ): TileRef[] {
     const refs = tilesForAnimation(
       track,
       camera,
@@ -962,52 +962,103 @@ export class SceneRenderer {
       foco,
     );
     const seen = new Set<string>();
-    const unique = refs.filter((r) => {
+    return refs.filter((r) => {
       const k = `${r.z}/${r.x}/${r.y}`;
       if (seen.has(k)) return false;
       seen.add(k);
       return true;
     });
+  }
+
+  /** baixa uma lista de blocos, seis de cada vez (uso moderado dos servidores) */
+  private async baixar(refs: TileRef[], onProgress: (p: number) => void): Promise<void> {
     let done = 0;
-    const missing: TileRef[] = [];
-    // fetchTile baixa E aplica o filtro do estilo (Escuro/Clean)
     const load = (ref: TileRef) =>
       this.store
         .fetchTile(ref.z, ref.x, ref.y)
         .then((img) => {
           if (img) this.store.put(ref.z, ref.x, ref.y, img);
-          else missing.push(ref);
         })
-        .catch(() => missing.push(ref))
+        .catch(() => undefined)
         .finally(() => {
           done++;
-          onProgress(Math.min(0.97, done / Math.max(1, unique.length)));
+          onProgress(Math.min(0.97, done / Math.max(1, refs.length)));
         });
-    const run = (list: TileRef[]) => {
-      // servidores gratuitos: mantemos a concorrência baixa por educação
-      const concurrency = 6;
-      let cursor = 0;
-      const workers = new Array(Math.min(concurrency, Math.max(1, list.length)))
-        .fill(0)
-        .map(async () => {
-          while (cursor < list.length) {
-            const ref = list[cursor++];
-            await load(ref);
-          }
-        });
-      return Promise.all(workers).then(() => undefined);
-    };
+    const concurrency = 6;
+    let cursor = 0;
+    const workers = new Array(Math.min(concurrency, Math.max(1, refs.length)))
+      .fill(0)
+      .map(async () => {
+        while (cursor < refs.length) {
+          const ref = refs[cursor++];
+          await load(ref);
+        }
+      });
+    await Promise.all(workers).then(() => undefined);
+  }
 
-    await run(unique);
+  async warmup(
+    track: Track,
+    camera: CameraConfig,
+    width: number,
+    height: number,
+    onProgress: (p: number) => void,
+    foco?: FocusPoint | null,
+  ): Promise<void> {
+    const unique = this.refsDaAnimacao(track, camera, width, height, foco);
+    await this.baixar(unique, onProgress);
 
     // segunda passada: tiles que falharam por instabilidade de rede
+    const missing = unique.filter((r) => !this.store.get(r.z, r.x, r.y));
     if (missing.length > 0 && missing.length < unique.length) {
       await new Promise((r) => setTimeout(r, 250));
-      const retry = missing.filter((r) => isFailedTile(r.url));
-      missing.length = 0;
-      if (retry.length) await run(retry);
+      await this.baixar(
+        missing.filter((r) => isFailedTile(r.url)),
+        () => undefined,
+      );
     }
     onProgress(1);
+  }
+
+  /**
+   * Prepara o mapa **antes** de gravar e conta o que ficou faltando.
+   *
+   * O `warmup` já baixava tudo, mas um bloco que o servidor recusa (limite de
+   * uso dos servidores gratuitos, instabilidade) ficava faltando em silêncio: o
+   * usuário só descobria no fim da gravação, com o painel dizendo "233 blocos
+   * saíram do nível anterior". Aí não há mais o que fazer — o vídeo já está
+   * pronto e o mapa está borrado nele.
+   *
+   * Aqui a falha tem segunda e terceira chance, com espera crescente (os
+   * servidores gratuitos recusam rajadas e aceitam de novo em instantes), e o
+   * que sobrar é **contado antes do primeiro quadro** — o app pode avisar em vez
+   * de descobrir depois.
+   */
+  async preparar(
+    track: Track,
+    camera: CameraConfig,
+    width: number,
+    height: number,
+    onProgress: (p: number) => void,
+    foco?: FocusPoint | null,
+  ): Promise<{ total: number; faltando: number }> {
+    const unique = this.refsDaAnimacao(track, camera, width, height, foco);
+    const faltamAgora = () => unique.filter((r) => !this.store.get(r.z, r.x, r.y));
+
+    await this.baixar(unique, onProgress);
+
+    for (let tentativa = 0; tentativa < 3; tentativa++) {
+      const faltam = faltamAgora();
+      if (faltam.length === 0) break;
+      // rede fora do ar não melhora esperando: desiste depois da 1ª rodada
+      if (faltam.length === unique.length && tentativa > 0) break;
+      await new Promise((r) => setTimeout(r, 300 * (tentativa + 1)));
+      await this.baixar(faltam, () => undefined);
+    }
+
+    onProgress(1);
+    const faltando = faltamAgora().length;
+    return { total: unique.length, faltando };
   }
 
   render(ctx: CanvasRenderingContext2D, width: number, height: number, input: FrameState) {

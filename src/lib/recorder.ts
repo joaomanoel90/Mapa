@@ -125,12 +125,32 @@ export type Cadencia = {
   intervalos: number[];
   /** o intervalo típico (mediana), em ms */
   tipico: number;
-  /** fração dos quadros que caem a ±5% do intervalo típico (0..1) */
+  /** fração dos quadros que caem dentro da tolerância do intervalo típico (0..1) */
   regular: number;
+  /**
+   * Quando um quadro sai do intervalo típico, **quanto** ele atrasa (mediana dos
+   * desvios, em ms); zero se todos caem dentro.
+   *
+   * É o número que o olho sente. A porcentagem no intervalo diz *quantos* se
+   * atrasaram; este diz *quanto* — e um atraso de 16 ms (um quadro inteiro a 60
+   * por segundo) não parece o mesmo que 3 ms.
+   */
+  atraso: number;
 };
 
-/** A tolerância do "mesmo intervalo": 5% (33 ms aceita 31,7 a 34,7). */
-const TOLERANCIA_CADENCIA = 0.05;
+/** A tolerância relativa do "mesmo intervalo": 5% (33 ms aceita 31,7 a 34,7). */
+export const TOLERANCIA_CADENCIA = 0.05;
+
+/**
+ * O piso da tolerância, em ms.
+ *
+ * A 60 quadros por segundo o intervalo é de 16,7 ms, e 5% dele são **0,8 ms** —
+ * menos que o tremor normal de um navegador (um quadro de 16,6 e outro de 17,5
+ * já contariam como "fora do tempo"). Sem o piso, a mesma gravação era medida
+ * com régua mais dura a 60 do que a 30, e a porcentagem não era comparável
+ * entre os dois. Com 1 ms, a régua é a mesma nos dois casos.
+ */
+export const PISO_TOLERANCIA_MS = 1;
 
 /**
  * Mede a cadência a partir dos **instantes** (em segundos) de cada quadro
@@ -146,14 +166,31 @@ export function medirCadencia(instantes: number[]): Cadencia {
     const d = (validos[i] - validos[i - 1]) * 1000;
     if (d > 0) dt.push(d);
   }
-  if (dt.length === 0) return { intervalos: [], tipico: 0, regular: 0 };
+  if (dt.length === 0) return { intervalos: [], tipico: 0, regular: 0, atraso: 0 };
   const ordenado = [...dt].sort((a, b) => a - b);
   const meio = ordenado.length >> 1;
   const tipico =
     ordenado.length % 2 === 1 ? ordenado[meio] : (ordenado[meio - 1] + ordenado[meio]) / 2;
-  if (!(tipico > 0)) return { intervalos: dt, tipico: 0, regular: 0 };
-  const dentro = dt.filter((d) => Math.abs(d - tipico) <= tipico * TOLERANCIA_CADENCIA).length;
-  return { intervalos: dt, tipico, regular: dentro / dt.length };
+  if (!(tipico > 0)) return { intervalos: dt, tipico: 0, regular: 0, atraso: 0 };
+  const folga = Math.max(tipico * TOLERANCIA_CADENCIA, PISO_TOLERANCIA_MS);
+  const desvios = dt.map((d) => Math.abs(d - tipico));
+  const fora = desvios.filter((v) => v > folga);
+  const dentro = dt.length - fora.length;
+  /*
+   * "Quando atrasa, atrasa quanto": a mediana dos desvios de quem saiu do
+   * intervalo. Não é a média — um único engasgo de meio segundo não pode virar
+   * a resposta para "o quanto costuma atrasar".
+   */
+  let atraso = 0;
+  if (fora.length > 0) {
+    const ordenados = [...fora].sort((a, b) => a - b);
+    const m = ordenados.length >> 1;
+    const mediana =
+      ordenados.length % 2 === 1 ? ordenados[m] : (ordenados[m - 1] + ordenados[m]) / 2;
+    // arredondado a 0,1 ms: ruído de ponto flutuante não é atraso
+    atraso = Math.round(mediana * 10) / 10;
+  }
+  return { intervalos: dt, tipico, regular: dentro / dt.length, atraso };
 }
 
 /**
@@ -253,6 +290,38 @@ export function fpsQueCasa(taxaDaTela: number, pedido: number): number {
   }
   if (melhor <= 0) return Math.max(6, Math.min(desejado, Math.round(tela)));
   return Math.max(6, Math.round(melhor * 100) / 100);
+}
+
+/**
+ * O teto de fps da gravação em **tempo real**.
+ *
+ * A 60 quadros por segundo cada quadro tem **16,7 ms** para desenhar o mapa
+ * inteiro (blocos, rota, personagem, HUD) e entregá-lo ao gravador. Numa máquina
+ * comum esse orçamento não fecha: medido no vídeo do usuário, a 60 fps só **63%**
+ * dos quadros saíram no mesmo intervalo, e 1 em cada 3 chegou 8, 16 ou 25 ms
+ * atrasado — exatamente o que ele viu como "travada". O mesmo desenho a 30 fps
+ * tem 33 ms por quadro e sobra folga.
+ *
+ * Então o tempo real grava no máximo a 30; quem quer 60 usa a **exportação
+ * rápida (⚡)**, que não espera o relógio — ela desenha cada quadro e escreve o
+ * tempo exato, então o custo do desenho não vira atraso no arquivo.
+ */
+export const TEMPO_REAL_MAX_FPS = 30;
+
+/**
+ * O fps da gravação em tempo real: o pedido, limitado pelo que a tela
+ * sustenta.
+ *
+ * Duas contas em série, e cada uma resolve um problema diferente:
+ *
+ * 1. o **teto de 30** (`TEMPO_REAL_MAX_FPS`): 60 não cabe no orçamento de um
+ *    quadro e o que não cabe vira quadro atrasado — a causa medida da "travada";
+ * 2. o **divisor da tela** (`fpsQueCasa`): pedir 24 numa tela de 60 Hz dá
+ *    quadros de 33 e 50 ms alternados, mesmo quando o desenho cabe no tempo.
+ */
+export function fpsDoTempoReal(taxaDaTela: number, pedido: number): number {
+  const pedidoValido = Number.isFinite(pedido) && pedido > 0 ? pedido : TEMPO_REAL_MAX_FPS;
+  return fpsQueCasa(taxaDaTela, Math.min(pedidoValido, TEMPO_REAL_MAX_FPS));
 }
 
 /**

@@ -62,14 +62,14 @@ import {
   availableFormats,
   CancelledError,
   downloadBlob,
-  fpsQueCasa,
+  fpsDoTempoReal,
   medirTaxaDaTela,
   recordVideo,
   type Cadencia,
   type VideoEngine,
   type VideoFormat,
 } from "./lib/recorder";
-import { isFastEncodeSupported, recordVideoFast } from "./lib/webcodecs";
+import { motivoRapidoIndisponivel, recordVideoFast } from "./lib/webcodecs";
 
 function App() {
   /** Rota recebida por link (`#r=…`). Lida uma única vez, na montagem. */
@@ -195,6 +195,8 @@ function App() {
     taxaDaTela: number;
     /** blocos do mapa que saíram do nível anterior por não estarem prontos */
     blocosDeReserva: number;
+    /** quantos blocos já faltavam **antes** de gravar, mesmo após as tentativas */
+    blocosFaltando: number;
     /**
      * Com que regularidade os quadros saíram (só a gravação em tempo real
      * mede: é lá que a tela pode engasgar). `null` na exportação rápida, que
@@ -202,6 +204,17 @@ function App() {
      */
     cadencia: Cadencia | null;
   } | null>(null);
+
+  /**
+   * Por que a exportação rápida (⚡) não pode rodar neste navegador, se for o
+   * caso. `null` = ela roda (ou o ⚡ está desligado por escolha).
+   *
+   * Antes o app descobria isso só na hora de gravar, e caía para a gravação em
+   * tempo real **sem avisar**: foi assim que o usuário gravou a 60 quadros por
+   * segundo no motor errado. Agora a resposta é calculada antes, e aparece no
+   * painel junto do interruptor do ⚡.
+   */
+  const [avisoRapido, setAvisoRapido] = useState<string | null>(null);
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const cancelRef = useRef(false);
@@ -241,6 +254,25 @@ function App() {
   const update = useCallback(<K extends keyof Settings>(key: K, value: Settings[K]) => {
     setSettings((prev) => ({ ...prev, [key]: value }));
   }, []);
+
+  /*
+   * O ⚡ dá para rodar? A resposta depende do formato escolhido, do tamanho do
+   * quadro e do fps — por isso é recalculada quando um deles muda. O resultado
+   * vai para o painel (junto do interruptor) e para a janela de gravação.
+   */
+  useEffect(() => {
+    let vivo = true;
+    void motivoRapidoIndisponivel(activeFormat, aspect.w, aspect.h, settings.fps)
+      .then((motivo) => {
+        if (vivo) setAvisoRapido(motivo);
+      })
+      .catch(() => {
+        if (vivo) setAvisoRapido("não foi possível verificar o WebCodecs neste navegador");
+      });
+    return () => {
+      vivo = false;
+    };
+  }, [activeFormat, aspect.w, aspect.h, settings.fps]);
 
   useEffect(() => {
     // a gravação conta o que aconteceu: com uma foto grande, o `localStorage`
@@ -1131,7 +1163,17 @@ function App() {
 
       // mostra o mapa carregando no canvas (não fica uma tela preta)
       paint(0, 0);
-      await renderer.warmup(
+      /*
+       * `preparar` = baixar + insistir no que falhou + **contar** o que sobrou.
+       *
+       * O aquecimento antigo baixava uma vez e seguia em frente: um bloco
+       * recusado pelo servidor ficava faltando em silêncio, e o usuário só
+       * descobria no fim, com "233 blocos saíram do nível anterior" no painel —
+       * com o vídeo já gravado e o mapa borrado nele. Agora sobram três
+       * tentativas com espera crescente, e o que ainda faltar é contado antes do
+       * primeiro quadro, para o aviso aparecer enquanto dá tempo de agir.
+       */
+      const { faltando: blocosFaltando } = await renderer.preparar(
         track,
         camera,
         aspect.w,
@@ -1189,12 +1231,23 @@ function App() {
        * alternadas (33 ms e 50 ms numa tela de 60 Hz com 24 pedidos) e o mapa
        * anda aos pulos.
        */
+      /*
+       * O ⚡ roda se estiver ligado **e** o navegador souber codificar (a mesma
+       * resposta que o painel já mostra). Quando não roda, o motivo vai junto:
+       * cair para o tempo real em silêncio foi o que fez o usuário gravar 60
+       * quadros por segundo no motor errado.
+       */
       const rapida =
         settings.fastExport &&
-        (await isFastEncodeSupported(activeFormat, aspect.w, aspect.h, settings.fps));
+        (await motivoRapidoIndisponivel(activeFormat, aspect.w, aspect.h, settings.fps)) === null;
       if (cancelRef.current) throw new CancelledError();
       const taxaDaTela = rapida ? 0 : await medirTaxaDaTela();
-      const fpsFinal = rapida ? settings.fps : fpsQueCasa(taxaDaTela, settings.fps);
+      /*
+       * Em tempo real, o teto é 30 (`TEMPO_REAL_MAX_FPS`): a 60 cada quadro tem
+       * 16,7 ms para desenhar tudo, e o que não cabe vira quadro atrasado — a
+       * cadência medida no arquivo do usuário caiu para 63% por causa disso.
+       */
+      const fpsFinal = rapida ? settings.fps : fpsDoTempoReal(taxaDaTela, settings.fps);
 
       const engine = {
         canvas: canvasForRecord ?? canvasRef.current ?? document.createElement("canvas"),
@@ -1247,6 +1300,7 @@ function App() {
         fpsPedido: settings.fps,
         taxaDaTela,
         blocosDeReserva: renderer.blocosDeReserva,
+        blocosFaltando,
         cadencia: cadenciaFinal,
       });
       setPhase("done");
@@ -1400,6 +1454,7 @@ function App() {
             onExportGpx={exportarGpx}
             gpxMsg={gpxMsg}
             avisoSalvar={avisoSalvar}
+            avisoRapido={settings.fastExport ? avisoRapido : null}
           />
         </aside>
 
@@ -1623,7 +1678,9 @@ function App() {
           fpsPedido={video?.fpsPedido}
           taxaDaTela={video?.taxaDaTela}
           blocosDeReserva={video?.blocosDeReserva}
+          blocosFaltando={video?.blocosFaltando}
           cadencia={video?.cadencia}
+          avisoMotor={settings.fastExport ? avisoRapido : null}
           width={aspect.w}
           height={aspect.h}
           duration={settings.duration}

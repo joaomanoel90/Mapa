@@ -79,6 +79,14 @@ type Props = {
   gpxMsg: { tipo: "erro" | "info"; texto: string } | null;
   /** aviso de gravação das preferências (foto grande, armazenamento cheio) */
   avisoSalvar?: string | null;
+  /**
+   * Por que o ⚡ não pode rodar neste navegador (null = pode).
+   *
+   * Antes o app só descobria na hora de gravar e caía para o tempo real em
+   * silêncio — foi assim que o usuário gravou 60 quadros por segundo no motor
+   * errado, com 63% de cadência no fim. O aviso tem de aparecer **antes**.
+   */
+  avisoRapido?: string | null;
   /** o que o arquivo mediu (sugestões e contagem) */
   resumo: RideSummary;
   /** a cartela montada com o que foi digitado — null quando não há nada */
@@ -131,6 +139,7 @@ function Sidebar(props: Props) {
     onExportGpx,
     gpxMsg,
     avisoSalvar,
+    avisoRapido,
   } = props;
 
   const gpxInput = useRef<HTMLInputElement | null>(null);
@@ -707,10 +716,10 @@ function Sidebar(props: Props) {
                 tempo, e o olho lê isso como travada.
               */}
               <p className="mt-1 text-[10.5px] leading-snug text-zinc-500">
-                60 é o que faz o mapa fluir: o mesmo movimento dividido em mais quadros, com o
-                mesmo intervalo entre eles.{" "}
-                {!s.fastExport &&
-                  "Em tempo real o fps é ajustado para dividir a taxa da tela (num monitor de 60 Hz, 24 vira 20)."}
+                60 é o que faz o mapa fluir — com o ⚡ ligado.{" "}
+                {!s.fastExport
+                  ? "Em tempo real o app usa no máximo 30 e ajusta para dividir a taxa da tela (num monitor de 60 Hz, 24 vira 20): a 60 o desenho não cabe em 16,7 ms e cada quadro atrasado é o que se vê como travada."
+                  : "Sem o ⚡, o app cai para 30 no tempo real."}
               </p>
             </div>
             <div>
@@ -751,9 +760,15 @@ function Sidebar(props: Props) {
             />
             <p className="text-[11px] leading-snug text-zinc-500">
               Renderiza o vídeo o mais rápido que o aparelho conseguir, com fps exato, em vez de
-              gravar em tempo real. Se o navegador não souber codificar o formato escolhido, a
-              gravação em tempo real entra no lugar automaticamente.
+              gravar em tempo real. É o único caminho que segura 60 quadros por segundo com o tempo
+              certo, sem depender da tela.
             </p>
+            {s.fastExport && avisoRapido && (
+              <p className="rounded-lg border border-amber-400/30 bg-amber-500/10 p-2 text-[11px] leading-snug text-amber-200">
+                ⚡ indisponível: {avisoRapido}. A gravação sairá em tempo real — e nesse modo o app
+                usa no máximo 30 quadros por segundo, que é o que cabe no tempo de um quadro.
+              </p>
+            )}
           </div>
           <div className="space-y-2">
             <Toggle

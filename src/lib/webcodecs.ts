@@ -152,6 +152,35 @@ export async function isFastEncodeSupported(
 }
 
 /**
+ * Por que a exportação rápida (⚡) não pode rodar — ou `null` se ela pode.
+ *
+ * A pergunta já existia (`isFastEncodeSupported`) e a resposta era um simples
+ * "não": o app caía para a gravação em tempo real **em silêncio**. Foi assim que
+ * o usuário gravou 60 segundos em tempo real a 60 fps achando que estava no ⚡
+ * — e o painel do fim veio com 63% de cadência. Um "não" sem motivo não dá o que
+ * fazer; o motivo diz se é o navegador, o formato ou o tamanho.
+ */
+export async function motivoRapidoIndisponivel(
+  format: VideoFormat,
+  width: number,
+  height: number,
+  fps = 30,
+): Promise<string | null> {
+  if (typeof VideoEncoder === "undefined" || typeof VideoFrame === "undefined") {
+    return "este navegador não tem WebCodecs (a exportação rápida precisa dele)";
+  }
+  try {
+    const { supported } = await VideoEncoder.isConfigSupported(
+      encoderConfigFor(format, width, height, 8_000_000, fps),
+    );
+    if (supported) return null;
+    return `este navegador não sabe codificar ${format.label} em ${width}×${height}`;
+  } catch {
+    return `o navegador recusou ${format.label} em ${width}×${height}`;
+  }
+}
+
+/**
  * Renderiza e codifica o vídeo o mais rápido possível.
  *
  * Lança `CancelledError` se `shouldCancel()` virar verdadeiro no meio.

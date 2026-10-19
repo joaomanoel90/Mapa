@@ -125,13 +125,29 @@ flui do que trava **não é o tamanho do passo** — nos três o mapa anda ~7 px
 | rotacast 12-16 | 24 | 46% | ✘ |
 
 É a **regularidade** da cadência: quando a tela engasga, o quadro seguinte chega tarde, e o olho lê
-como travada — mesmo com a velocidade média certa. Duas coisas seguem disso:
+como travada — mesmo com a velocidade média certa.
 
-1. **60 quadros por segundo é o padrão** (`fps` em `DEFAULT_SETTINGS`): o mesmo movimento dividido em
-   mais quadros, com o mesmo intervalo entre eles.
-2. **A gravação em tempo real mede e mostra a própria cadência** (`medirCadencia`, no painel do fim).
-   Abaixo de 90% dos quadros no intervalo típico, o painel avisa e recomenda a exportação rápida (⚡),
-   que escreve cada quadro no tempo exato, sem depender da tela.
+O limite disso está medido no arquivo seguinte que o usuário mandou: **60 quadros por segundo no
+tempo real, com o painel dizendo "Cadência: 63% dos quadros no mesmo intervalo (16,7 ms)"**. A 60 cada
+quadro tem **16,7 ms** para desenhar o mapa inteiro e entregá-lo ao gravador; quando não cabe, o quadro
+seguinte sai 8, 16 ou 25 ms depois. A 30 sobram 33 ms. Então:
+
+1. **O tempo real grava no máximo a 30** (`TEMPO_REAL_MAX_FPS` / `fpsDoTempoReal`), mesmo com 60 pedido
+   — e 60 continua sendo possível na **exportação rápida (⚡)**, que não espera o relógio da tela: ela
+   desenha cada quadro e escreve o tempo exato.
+2. **O padrão segue 60** (`fps` em `DEFAULT_SETTINGS`), porque no ⚡ (o caminho recomendado) é o que
+   flui. Sem o ⚡, o app cai para 30 em vez de produzir quadros atrasados.
+3. **A gravação em tempo real mede e mostra a própria cadência** (`medirCadencia`, no painel do fim):
+   a porcentagem de quadros no intervalo típico e, quando algum sai do tempo, **quanto** ele sai. A
+   tolerância tem piso de 1 ms (`PISO_TOLERANCIA_MS`) — a ±5% em 60 fps seriam 0,8 ms, menos que o
+   tremor normal do navegador, e a régua ficaria mais dura a 60 do que a 30.
+4. **O ⚡ avisa antes de gravar.** `motivoRapidoIndisponivel` diz *por que* ele não roda (sem WebCodecs,
+   formato/tamanho recusado), e o aviso aparece junto do interruptor e na janela de gravação — antes o
+   app caía para o tempo real **em silêncio**.
+5. **Os blocos do mapa têm novas tentativas e são contados antes de gravar** (`SceneRenderer.preparar`).
+   Um bloco recusado pelos servidores gratuitos ficava faltando em silêncio, e o usuário só descobria no
+   fim ("233 blocos saíram do nível anterior"). Agora são três tentativas com espera crescente, e o que
+   sobrar aparece no aviso antes do primeiro quadro.
 
 ### Serviços gratuitos usados
 
@@ -910,7 +926,7 @@ ou cortados.
 
 ```bash
 npm run typecheck  # tsc --noEmit
-npm test           # Vitest (742 casos)
+npm test           # Vitest (757 casos)
 npm run check:dist # o build saiu autocontido e sem /src/?
 ```
 

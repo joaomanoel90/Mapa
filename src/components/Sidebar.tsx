@@ -793,6 +793,36 @@ function Sidebar(props: Props) {
                 usa no máximo 30 quadros por segundo, que é o que cabe no tempo de um quadro.
               </p>
             )}
+            {/*
+              O interruptor desligado **não** diz se o navegador daria conta. A
+              pergunta ao WebCodecs é feita de qualquer jeito, e a resposta
+              aparece aqui: "este navegador suporta, é só ligar" ou o motivo de
+              ele não rodar. Antes, quem gravava em tempo real com 65% de
+              cadência só lia "desligada no painel" e não sabia que a solução
+              estava a um clique.
+            */}
+            {!s.fastExport && (
+              <p className="rounded-lg border border-white/10 bg-white/5 p-2 text-[11px] leading-snug text-zinc-400">
+                {avisoRapido === undefined ? (
+                  <>⚡ desligado. Verificando se este navegador consegue rodá-lo…</>
+                ) : avisoRapido === null ? (
+                  <>
+                    ⚡ <strong className="font-semibold text-zinc-200">desligado</strong>, mas este
+                    navegador suporta: é o único caminho para 60 quadros por segundo com o tempo
+                    exato, sem depender da tela.{" "}
+                    <button
+                      type="button"
+                      onClick={() => update("fastExport", true)}
+                      className="font-semibold text-violet-300 underline decoration-violet-400/40 underline-offset-2 transition hover:text-violet-200"
+                    >
+                      Ligar o ⚡
+                    </button>
+                  </>
+                ) : (
+                  <>⚡ desligado — e neste navegador ele não rodaria: {avisoRapido}.</>
+                )}
+              </p>
+            )}
           </div>
           <div className="space-y-2">
             <Toggle
@@ -830,7 +860,15 @@ function Sidebar(props: Props) {
             disabled={!hasRoute || formats.length === 0}
             className="w-full py-3 text-sm"
           >
-            🎬 Gravar e baixar vídeo
+            {/*
+              O botão diz em que motor a gravação vai sair. Sem isso, quem
+              escolhe 60 quadros com o ⚡ desligado aperta "gravar" acreditando
+              que vai receber 60 — e recebe 30 em tempo real, com a cadência da
+              tela. O rótulo é a última chance de o usuário perceber.
+            */}
+            {s.fastExport && avisoRapido === null
+              ? "🎬 Gravar e baixar vídeo (⚡)"
+              : "🎬 Gravar em tempo real"}
           </Button>
           {formats.length === 0 ? (
             <p className="rounded-xl border border-red-400/30 bg-red-500/10 p-2.5 text-[11px] leading-snug text-red-200">

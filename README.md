@@ -947,7 +947,7 @@ ou cortados.
 
 ```bash
 npm run typecheck  # tsc --noEmit
-npm test           # Vitest (779 casos)
+npm test           # Vitest (789 casos)
 npm run check:dist # o build saiu autocontido e sem /src/?
 ```
 

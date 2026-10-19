@@ -149,6 +149,27 @@ seguinte sai 8, 16 ou 25 ms depois. A 30 sobram 33 ms. Então:
    fim ("233 blocos saíram do nível anterior"). Agora são três tentativas com espera crescente, e o que
    sobrar aparece no aviso antes do primeiro quadro.
 
+### Importar GPX: os dois motivos de não funcionar no celular
+
+1. **O seletor de arquivo era aberto por `input.click()` num input `display: none`.** No Safari
+   (iPhone/iPad) isso simplesmente **não abre nada**: o usuário toca em "Importar" e não acontece
+   nada — nem arquivo escolhido, nem mensagem. Agora quem abre o seletor é o **rótulo** (`<label>`)
+   envolvendo o input, que fica escondido com `sr-only` (recortado, não `display: none`). É o
+   navegador quem abre, sem JavaScript no meio.
+2. **O `accept` era curto demais.** No Android o seletor filtra por **tipo MIME**, e um `.gpx`
+   baixado do Strava chega como `application/octet-stream` ou `text/plain` em muitos aparelhos — o
+   arquivo aparecia apagado ou nem aparecia. A lista agora inclui esses tipos, mais `.xml` e `.txt`;
+   quem valida o conteúdo é o `parseGpx`.
+3. **A leitura não depende de `file.text()`.** Onde ele falta (WebView antigo de Android, iOS até 13,
+   navegador embutido de aplicativo), `lerTextoDoArquivo` usa o `FileReader` como reserva. Antes, esse
+   caso caía no aviso genérico *"Não foi possível ler o arquivo. Verifique se é um GPX válido."* —
+   culpando um arquivo que estava perfeito. Agora cada falha tem o seu recado: arquivo de 0 byte
+   (comum ao escolher direto da nuvem) diz para salvar no aparelho, e falta de leitor fala do
+   navegador.
+
+O teste de regressão usa o GPX real do usuário (5.704 pontos) num `File` **sem** `.text()` — que é
+exatamente o cenário do `jsdom` e o dos navegadores que falhavam.
+
 ### Serviços gratuitos usados
 
 | Serviço | Para quê | Limite |
@@ -926,7 +947,7 @@ ou cortados.
 
 ```bash
 npm run typecheck  # tsc --noEmit
-npm test           # Vitest (757 casos)
+npm test           # Vitest (768 casos)
 npm run check:dist # o build saiu autocontido e sem /src/?
 ```
 

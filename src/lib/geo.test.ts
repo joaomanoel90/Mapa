@@ -19,6 +19,7 @@ import {
   pontoValido,
   project,
   sampleTrack,
+  totalDoDesenho,
   smoothedPoints,
   unproject,
   visibleRuns,
@@ -75,7 +76,10 @@ describe("buildTrack", () => {
 
   it("aguenta lista vazia e lista de um ponto", () => {
     // cum sempre começa em 0, mesmo sem pontos — sampleTrack nem chega a usá-lo
-    expect(buildTrack([])).toEqual({ pts: [], cum: [0], total: 0 });
+    const vazio = buildTrack([]);
+    expect(vazio.pts).toEqual([]);
+    expect(vazio.cum).toEqual([0]);
+    expect(vazio.total).toBe(0);
     const one = buildTrack([{ lat: 1, lng: 2 }]);
     expect(one.total).toBe(0);
     expect(one.pts).toHaveLength(1);
@@ -132,6 +136,67 @@ describe("sampleTrack", () => {
 
   it("trata t inválido sem quebrar", () => {
     expect(sampleTrack(track, NaN).pos).toEqual({ lat: 0, lng: 0 });
+  });
+
+  /*
+   * O defeito que sobreviveu a todas as correções de motor: o `cum` usado para
+   * posicionar era o **medido** (com o vaivém do GPS removido) e não acompanha
+   * o comprimento dos segmentos desenhados — num trecho valia 0,09× e no
+   * vizinho 39×. Com o tempo andando em passo constante, o mapa rastejava e
+   * depois pulava (medido no GPX real: 407 quadros parados, saltos de 82 m).
+   */
+  it("anda no mesmo passo em todo o traçado, mesmo com o vaivém do GPS", () => {
+    const pts: { lat: number; lng: number }[] = [];
+    for (let i = 0; i <= 600; i++) {
+      const lat = -23.5 + i * 0.00003;
+      const lng = -48.4 + (Math.sin(i * 2.7) * 8) / 111320; // ±8 m de vaivém
+      pts.push({ lat, lng });
+      // um trecho em que o GPS repete o ponto (parada no semáforo)
+      if (i === 300) for (let k = 0; k < 30; k++) pts.push({ lat, lng });
+    }
+    const ruidosa = buildTrack(pts);
+    expect(totalDoDesenho(ruidosa)).toBeGreaterThan(ruidosa.total); // o vaivém infla
+
+    /*
+     * O que o olho vê é o **arco percorrido** a cada quadro: reconstruído aqui
+     * a partir da posição amostrada e do segmento em que ela caiu, sem usar o
+     * número que o próprio `sampleTrack` devolve.
+     */
+    const cum = ruidosa.drawCum!;
+    const arco = (i: number) => {
+      const s = sampleTrack(ruidosa, i);
+      const a = ruidosa.pts[s.index];
+      const b = ruidosa.pts[s.index + 1] ?? a;
+      const vx = b.lng - a.lng;
+      const vy = b.lat - a.lat;
+      const den = vx * vx + vy * vy;
+      const f = den > 0 ? ((s.pos.lng - a.lng) * vx + (s.pos.lat - a.lat) * vy) / den : 0;
+      return cum[s.index] + (cum[s.index + 1] - cum[s.index]) * f;
+    };
+    const n = 400;
+    const passos: number[] = [];
+    for (let i = 1; i <= n; i++) passos.push(arco(i / n) - arco((i - 1) / n));
+    const menor = Math.min(...passos);
+    const maior = Math.max(...passos);
+    expect(menor).toBeGreaterThan(0);
+    // antes da correção o mesmo trecho dava degraus de 0,09× a 39×
+    expect(maior / menor).toBeLessThan(1.05);
+  });
+
+  it("a distância devolvida continua sendo a medida (os números não mudam)", () => {
+    const pts: { lat: number; lng: number }[] = [];
+    for (let i = 0; i <= 300; i++) {
+      pts.push({
+        lat: -23.5 + i * 0.00003,
+        lng: -48.4 + (Math.cos(i * 1.9) * 9) / 111320,
+      });
+    }
+    const t = buildTrack(pts);
+    expect(sampleTrack(t, 0).distance).toBeCloseTo(0, 6);
+    expect(sampleTrack(t, 1).distance).toBeCloseTo(t.total, 6);
+    expect(sampleTrack(t, 0.5).distance).toBeCloseTo(t.total / 2, 6);
+    // e o total mostrado é o medido, não o do desenho
+    expect(t.total).toBeLessThan(totalDoDesenho(t));
   });
 
   it("não quebra com trilha vazia ou de um ponto", () => {

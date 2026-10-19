@@ -45,10 +45,53 @@ export function bearing(a: LatLng, b: LatLng): number {
 
 export type Track = {
   pts: LatLng[];
-  /** distância acumulada (m) até cada ponto; cum[0] = 0 */
+  /**
+   * Distância acumulada **medida** (m) até cada ponto; `cum[0] = 0`.
+   *
+   * É a distância com o vaivém do GPS removido (ver `measuredCumulative`) e é
+   * ela que alimenta os **números** do vídeo: distância, ritmo, marcas de km.
+   *
+   * Não serve para posicionar nada na tela: os pontos desenhados são os do
+   * arquivo, sem suavizar, e o `cum` medido não acompanha o comprimento desses
+   * segmentos. Quem anda sobre o traçado usa `drawCum`.
+   */
   cum: number[];
   total: number;
+  /**
+   * Distância acumulada **do traçado desenhado** (m) até cada ponto.
+   *
+   * O `cum` medido é 2% menor (é o que tira o ruído do GPS), mas essa diferença
+   * **não é a mesma em cada ponto**: num segmento ela vale 0,09× o comprimento
+   * real e no vizinho 39×. Como o tempo anda em passo constante, `sampleTrack`
+   * lendo o `cum` medido fazia o mapa rastejar num trecho e pular até 82 m no
+   * seguinte — quadro a quadro, medido no GPX de 21 km do usuário: passo mediano
+   * de 5,7 m, **407 quadros parados** e saltos de 14,6 m (p95). É o "trava e
+   * depois pula" que ele descreve desde a primeira gravação.
+   *
+   * Aqui a distância é a dos segmentos que a tela desenha, então o passo por
+   * quadro é constante (6,81 m, medido no mesmo arquivo).
+   *
+   * Opcional para não quebrar traçados montados à mão (testes, chamadas
+   * antigas): sem ele, tudo cai no `cum`/`total` de sempre.
+   */
+  drawCum?: number[];
+  /** distância total do traçado desenhado (m) */
+  drawTotal?: number;
 };
+
+/** O `cum` que acompanha a geometria desenhada (com recuo para `track.cum`). */
+export function cumDoDesenho(track: Track): number[] {
+  return track.drawCum ?? track.cum;
+}
+
+/** O total que acompanha a geometria desenhada (com recuo para `track.total`). */
+export function totalDoDesenho(track: Track): number {
+  const t = track.drawTotal;
+  if (typeof t === "number" && Number.isFinite(t) && t > 0) return t;
+  const cum = track.drawCum;
+  if (cum && cum.length > 0) return cum[cum.length - 1];
+  return track.total;
+}
 
 /**
  * Teto de pontos do traçado usado para desenhar.
@@ -377,8 +420,26 @@ export function buildTrack(input: LatLng[]): Track {
    * três pontos de um teste de unidade, o filtro devolve a mesma coisa: os
    * pontos do meio de uma reta caem na própria reta.
    */
-  const cum = pts.length < 3 ? cumulative(pts) : measuredCumulative(pts);
-  return { pts, cum, total: cum[cum.length - 1] ?? 0 };
+  /*
+   * Duas distâncias de propósito:
+   *
+   * - `cum`/`total` — medida, com o ruído do GPS removido: são os números que
+   *   aparecem no vídeo (distância, ritmo, marcas de km);
+   * - `drawCum`/`drawTotal` — o comprimento real do traçado desenhado: é o
+   *   relógio do **movimento** na tela.
+   *
+   * Misturar as duas foi o "pula" que sobreviveu a todas as correções de motor:
+   * o tempo andava por um caminho e a câmera, por outro.
+   */
+  const drawCum = cumulative(pts);
+  const cum = pts.length < 3 ? drawCum : measuredCumulative(pts);
+  return {
+    pts,
+    cum,
+    total: cum[cum.length - 1] ?? 0,
+    drawCum,
+    drawTotal: drawCum[drawCum.length - 1] ?? 0,
+  };
 }
 
 /** Teto de pontos do traçado de desenho (exposto para testes e diagnóstico). */
@@ -403,8 +464,13 @@ export function sampleTrack(track: Track, t: number): Sample {
     return { pos: pts[0], heading: 0, index: 0, distance: 0 };
   }
   const clamped = Math.max(0, Math.min(1, isFinite(t) ? t : 0));
-  const target = clamped * track.total;
-  const cum = track.cum;
+  /*
+   * A fração `t` é do **tempo**, e o tempo tem de andar sobre a linha que está
+   * na tela. Lendo o `cum` medido aqui, o personagem acelerava 39× num segmento
+   * e parava no seguinte (ver `Track.drawCum`).
+   */
+  const cum = cumDoDesenho(track);
+  const target = clamped * totalDoDesenho(track);
   let i = 1;
   let hi = cum.length - 1;
   while (i < hi) {
@@ -426,7 +492,12 @@ export function sampleTrack(track: Track, t: number): Sample {
   if (!isFinite(head) || (Math.abs(b.lat - a.lat) < 1e-9 && Math.abs(b.lng - a.lng) < 1e-9)) {
     head = 0;
   }
-  return { pos, heading: head, index: idx - 1, distance: target };
+  /*
+   * A distância devolvida continua sendo a **medida** — a dos números do vídeo
+   * (distância, ritmo) —, e não a do desenho. As duas diferem ~2%, então usar a
+   * fração do tempo mantém o HUD batendo com o total exibido do começo ao fim.
+   */
+  return { pos, heading: head, index: idx - 1, distance: clamped * track.total };
 }
 
 /**
@@ -452,7 +523,13 @@ export function rumoSuave(track: Track, t: number, janelaM: number): number {
   const pts = track.pts;
   if (pts.length === 0) return 0;
   if (pts.length === 1) return 0;
-  const total = track.total;
+  /*
+   * A janela é medida no **traçado desenhado**: os pesos saem do comprimento de
+   * cada segmento e as direções, dos mesmos pontos. Com o `cum` medido (o do
+   * ruído removido), o peso de um segmento era 0,09× ou 39× o seu comprimento
+   * real, e a média pendia para o lado errado justamente nas curvas.
+   */
+  const total = totalDoDesenho(track);
   if (!(total > 0)) return bearing(pts[0], pts[1]);
   const janela = Math.max(1e-6, Number.isFinite(janelaM) ? janelaM : 0);
   const alvo = Math.max(0, Math.min(1, isFinite(t) ? t : 0)) * total;
@@ -462,7 +539,7 @@ export function rumoSuave(track: Track, t: number, janelaM: number): number {
   // média das direções (como vetores, para a volta circular sair certa)
   let sx = 0;
   let sy = 0;
-  const cum = track.cum;
+  const cum = cumDoDesenho(track);
   // primeiro segmento que contém `a`
   let i = 0;
   while (i < cum.length - 2 && cum[i + 1] <= a) i++;

@@ -3089,6 +3089,95 @@ describe("o aquecimento dos blocos na parada", () => {
     expect(com.baixados).toBe(com.pedidos.size);
   });
 
+  /*
+   * O `preparar`: baixar, **insistir** no que falhou e **contar** o que sobrou.
+   *
+   * O usuário recebeu "233 blocos do mapa não estavam prontos" no fim de uma
+   * gravação: os servidores gratuitos recusaram parte dos downloads e o app
+   * seguia em frente em silêncio, com o mapa borrado no vídeo inteiro. Agora a
+   * falha tem novas tentativas, e o que sobrar é contado **antes** do primeiro
+   * quadro.
+   */
+  it("o `preparar` insiste nos blocos que falharam e termina com zero faltando", async () => {
+    const r = new SceneRenderer("dark");
+    const tentativas = new Map<string, number>();
+    const bloco = { width: 256, height: 256 };
+    r.tiles.fetchTile = async (z: number, x: number, y: number) => {
+      const k = `${z}/${x}/${y}`;
+      const n = (tentativas.get(k) ?? 0) + 1;
+      tentativas.set(k, n);
+      // a primeira rodada falha inteira: é o caso da rajada recusada
+      return n === 1 ? null : (bloco as never);
+    };
+
+    const { total, faltando } = await r.preparar(
+      CAMINHO,
+      { ...camera, cinematic: cine },
+      1080,
+      1920,
+      () => undefined,
+      null,
+    );
+
+    expect(total).toBe(tentativas.size);
+    expect(total).toBeGreaterThan(0);
+    expect(faltando).toBe(0);
+    // todo bloco foi pedido de novo — nenhum ficou faltando em silêncio
+    expect([...tentativas.values()].every((n) => n >= 2)).toBe(true);
+    expect(r.loadedTiles).toBe(total);
+  });
+
+  it("conta os blocos que não chegaram nem depois das tentativas", async () => {
+    const r = new SceneRenderer("dark");
+    const pedidos = new Set<string>();
+    r.tiles.fetchTile = async (z: number, x: number, y: number) => {
+      pedidos.add(`${z}/${x}/${y}`);
+      return null;
+    };
+
+    const { total, faltando } = await r.preparar(
+      CAMINHO,
+      { ...camera, cinematic: cine },
+      1080,
+      1920,
+      () => undefined,
+      null,
+    );
+
+    expect(total).toBe(pedidos.size);
+    expect(faltando).toBe(total);
+    expect(r.loadedTiles).toBe(0);
+  });
+
+  it("não repete o download de quem chegou na primeira tentativa", async () => {
+    const r = new SceneRenderer("dark");
+    const tentativas = new Map<string, number>();
+    const bloco = { width: 256, height: 256 };
+    r.tiles.fetchTile = async (z: number, x: number, y: number) => {
+      const k = `${z}/${x}/${y}`;
+      tentativas.set(k, (tentativas.get(k) ?? 0) + 1);
+      // uma em cada três falha na primeira rodada
+      const primeiro = tentativas.get(k) === 1;
+      return primeiro && (x + y) % 3 === 0 ? null : (bloco as never);
+    };
+
+    const { total, faltando } = await r.preparar(
+      CAMINHO,
+      { ...camera, cinematic: cine },
+      1080,
+      1920,
+      () => undefined,
+      null,
+    );
+
+    expect(faltando).toBe(0);
+    expect(total).toBe(tentativas.size);
+    for (const [k, n] of tentativas) {
+      const [z, x, y] = k.split("/").map(Number);
+      expect(n).toBe(z === z && (x + y) % 3 === 0 ? 2 : 1);
+    }
+  });
+
   it("sem o foco, os blocos do lugar da parada ficavam de fora", () => {
     // é o que o app fazia antes: o foco (e portanto a vista) era o ponto da rota
     const semFoco = new Set(

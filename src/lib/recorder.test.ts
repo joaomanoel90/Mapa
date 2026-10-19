@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from "vitest";
 import {
+  fpsDoTempoReal,
   fpsQueCasa,
   indiceDoQuadro,
   medirCadencia,
@@ -329,8 +330,8 @@ describe("a cadência da gravação", () => {
   });
 
   it("aguenta entrada vazia, um quadro só e valores inválidos", () => {
-    expect(medirCadencia([])).toEqual({ intervalos: [], tipico: 0, regular: 0 });
-    expect(medirCadencia([0.5])).toEqual({ intervalos: [], tipico: 0, regular: 0 });
+    expect(medirCadencia([])).toEqual({ intervalos: [], tipico: 0, regular: 0, atraso: 0 });
+    expect(medirCadencia([0.5])).toEqual({ intervalos: [], tipico: 0, regular: 0, atraso: 0 });
     // NaN e Infinity saem da conta; sobram os três instantes válidos → dois intervalos
     const comRuim = medirCadencia([0, Number.NaN, 1 / 30, Number.POSITIVE_INFINITY, 2 / 30]);
     expect(comRuim.intervalos).toHaveLength(2);
@@ -340,5 +341,101 @@ describe("a cadência da gravação", () => {
   it("instantes fora de ordem não produzem intervalo negativo", () => {
     const c = medirCadencia([0, 1 / 30, 2 / 30, 1 / 30, 3 / 30]);
     expect(c.intervalos.every((d) => d > 0)).toBe(true);
+  });
+});
+
+/*
+ * O teto do tempo real.
+ *
+ * A 60 quadros por segundo cada quadro tem 16,7 ms para desenhar o mapa inteiro
+ * e entregá-lo ao gravador. No vídeo do usuário, só 63% dos quadros saíram no
+ * mesmo intervalo — 1 em cada 3 chegou 8, 16 ou 25 ms atrasado, e é isso que o
+ * olho lê como travada. A 30 sobram 33 ms por quadro.
+ */
+describe("o fps da gravação em tempo real", () => {
+  it("nunca passa de 30, mesmo com 60 pedido numa tela de 60 Hz", () => {
+    expect(fpsDoTempoReal(60, 60)).toBe(30);
+    expect(fpsDoTempoReal(60, 30)).toBe(30);
+    // numa tela de 144 Hz, o divisor mais próximo de 30 é 144/5 = 28,8
+    expect(fpsDoTempoReal(144, 60)).toBe(28.8);
+  });
+
+  it("continua ajustando para dividir a taxa da tela", () => {
+    // 24 numa tela de 60 Hz sai com 33 e 50 ms alternados: vira 20
+    expect(fpsDoTempoReal(60, 24)).toBe(20);
+    expect(fpsDoTempoReal(50, 60)).toBe(25);
+    // tela de 120 Hz aceita 24 exato
+    expect(fpsDoTempoReal(120, 24)).toBe(24);
+  });
+
+  it("sem medida da tela, fica no teto", () => {
+    expect(fpsDoTempoReal(0, 60)).toBe(30);
+    expect(fpsDoTempoReal(Number.NaN, 30)).toBe(30);
+    expect(fpsDoTempoReal(0, 24)).toBe(24);
+  });
+
+  it("o pedido inválido não derruba a gravação", () => {
+    expect(fpsDoTempoReal(60, Number.NaN)).toBe(30);
+    expect(fpsDoTempoReal(60, -5)).toBe(30);
+  });
+});
+
+/*
+ * A régua da cadência é a mesma a 30 e a 60 quadros por segundo.
+ *
+ * A tolerância era só 5% do intervalo: 0,83 ms a 60 fps, menos que o tremor
+ * normal do navegador. Sem o piso de 1 ms, a mesma gravação era medida com
+ * régua mais dura a 60 do que a 30 — e o número que o painel mostra não podia
+ * ser comparado entre os dois.
+ */
+describe("a régua da cadência", () => {
+  /**
+   * O mesmo tremor, a 30 ou a 60 quadros por segundo: ±0,45 ms em cada
+   * instante vira ±0,9 ms no intervalo — dentro do piso de 1 ms, e fora dos
+   * 0,83 ms que a tolerância relativa daria a 60.
+   */
+  const comTremor = (ms: number, n = 120) => {
+    // ruído determinístico que **não** alterna em +/− (a alternância perfeita
+    // move a mediana para um dos lados, o que não é o caso real)
+    const ruido = (i: number) => (((i * 7919) % 1001) / 1000 - 0.5) * 0.9;
+    const out = [0];
+    for (let i = 1; i < n; i++) out.push((i * ms + ruido(i)) / 1000);
+    return out;
+  };
+
+  it("o mesmo tremor dá a mesma porcentagem a 30 e a 60", () => {
+    const a30 = medirCadencia(comTremor(1000 / 30));
+    const a60 = medirCadencia(comTremor(1000 / 60));
+    expect(a30.regular).toBe(1);
+    expect(a60.regular).toBe(1);
+  });
+
+  it("um atraso de verdade continua contando como atraso", () => {
+    const instantes = [0];
+    for (let i = 1; i < 60; i++) {
+      // 1 em cada 10 quadros chega um quadro inteiro depois (33 ms a mais)
+      instantes.push((i * (1000 / 60) + (i % 10 === 0 ? 1000 / 30 : 0)) / 1000);
+    }
+    const c = medirCadencia(instantes);
+    expect(c.regular).toBeLessThan(0.95);
+    expect(c.regular).toBeGreaterThan(0.8);
+  });
+
+  it("diz quanto atrasa quando um quadro sai do tempo", () => {
+    const ms = 1000 / 30;
+    const instantes = [0];
+    for (let i = 1; i < 100; i++) {
+      // 1 em cada 20 quadros chega 16 ms depois
+      instantes.push((i * ms + (i % 20 === 0 ? 16 : 0)) / 1000);
+    }
+    const c = medirCadencia(instantes);
+    expect(c.atraso).toBeGreaterThan(10);
+    expect(c.atraso).toBeLessThan(25);
+  });
+
+  it("cadência perfeita não inventa atraso", () => {
+    const c = medirCadencia(Array.from({ length: 60 }, (_, i) => (i * 1000) / 60 / 1000));
+    expect(c.regular).toBe(1);
+    expect(c.atraso).toBe(0);
   });
 });

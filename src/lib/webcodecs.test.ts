@@ -5,6 +5,7 @@ import {
   encoderConfigFor,
   framePlan,
   isFastEncodeSupported,
+  motivoRapidoIndisponivel,
   recordVideoFast,
   webmCodecFor,
 } from "./webcodecs";
@@ -453,5 +454,47 @@ describe("recordVideoFast", () => {
     vi.stubGlobal("VideoEncoder", undefined);
     vi.stubGlobal("VideoFrame", undefined);
     await expect(recordVideoFast(opcoes(WEBM_VP9))).rejects.toThrow(/WebCodecs/);
+  });
+});
+
+/*
+ * O motivo é a diferença entre "não deu" e "não deu por isto".
+ *
+ * O app caía para a gravação em tempo real sem dizer nada: o usuário ligou o ⚡,
+ * recebeu um arquivo de tempo real a 60 quadros por segundo e só descobriu pelo
+ * painel do fim, com 63% de cadência.
+ */
+describe("motivoRapidoIndisponivel", () => {
+  it("explica que falta WebCodecs no navegador", async () => {
+    vi.stubGlobal("VideoEncoder", undefined);
+    vi.stubGlobal("VideoFrame", undefined);
+    const motivo = await motivoRapidoIndisponivel(MP4, 720, 1280, 60);
+    expect(motivo).toContain("WebCodecs");
+  });
+
+  it("devolve null quando o navegador aceita o formato", async () => {
+    vi.stubGlobal("VideoFrame", class {});
+    vi.stubGlobal("VideoEncoder", { isConfigSupported: async () => ({ supported: true }) });
+    expect(await motivoRapidoIndisponivel(MP4, 720, 1280, 60)).toBeNull();
+  });
+
+  it("diz qual formato e tamanho foram recusados", async () => {
+    vi.stubGlobal("VideoFrame", class {});
+    vi.stubGlobal("VideoEncoder", { isConfigSupported: async () => ({ supported: false }) });
+    const motivo = await motivoRapidoIndisponivel(MP4, 720, 1280, 60);
+    expect(motivo).toContain("MP4 (H.264)");
+    expect(motivo).toContain("720×1280");
+  });
+
+  it("conta quando o navegador estoura ao ser perguntado", async () => {
+    vi.stubGlobal("VideoFrame", class {});
+    vi.stubGlobal("VideoEncoder", {
+      isConfigSupported: async () => {
+        throw new Error("sem encoder");
+      },
+    });
+    const motivo = await motivoRapidoIndisponivel(WEBM_VP9, 1080, 1920, 30);
+    expect(motivo).toContain("WebM (VP9)");
+    expect(motivo?.length).toBeGreaterThan(10);
   });
 });

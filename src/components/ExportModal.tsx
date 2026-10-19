@@ -17,7 +17,9 @@ export default function ExportModal({
   fpsPedido,
   taxaDaTela,
   blocosDeReserva,
+  blocosFaltando,
   cadencia,
+  avisoMotor,
   width,
   height,
   duration,
@@ -56,6 +58,22 @@ export default function ExportModal({
    * nos três — o que muda é a **regularidade**, não o tamanho do passo.
    */
   cadencia?: Cadencia | null;
+  /**
+   * Quantos blocos **já faltavam antes de gravar**, mesmo depois das tentativas.
+   *
+   * É o número que o app não mostrava: os blocos que não chegaram saem do nível
+   * anterior (esticados) no vídeo inteiro, e antes isso só aparecia no fim, com
+   * o arquivo pronto. Vindo daqui, o aviso já diz o tamanho do estrago enquanto
+   * o vídeo está sendo gravado.
+   */
+  blocosFaltando?: number;
+  /**
+   * Por que o ⚡ não vai rodar nesta gravação (null/ausente = vai).
+   *
+   * Sem isto, quem ligou o ⚡ e recebeu um arquivo de tempo real não tinha como
+   * saber que o navegador tinha recusado o codificador.
+   */
+  avisoMotor?: string | null;
   width: number;
   height: number;
   duration: number;
@@ -127,7 +145,11 @@ export default function ExportModal({
             {phase === "done" && cadencia && cadencia.intervalos.length > 0 && (
               <p className="mt-1 text-[11.5px] leading-snug text-zinc-500">
                 Cadência: {Math.round(cadencia.regular * 100)}% dos quadros no mesmo intervalo
-                ({numero(cadencia.tipico)} ms).
+                ({numero(cadencia.tipico)} ms)
+                {cadencia.atraso > 0.5 && (
+                  <> — quando um quadro sai do tempo, sai {numero(cadencia.atraso)} ms</>
+                )}
+                .
               </p>
             )}
             {phase === "done" &&
@@ -143,6 +165,21 @@ export default function ExportModal({
                   depender da tela.
                 </p>
               )}
+            {avisoMotor && (phase === "warmup" || phase === "recording") && (
+              <p className="mt-1 text-[11.5px] leading-snug text-amber-300/80">
+                ⚡ indisponível: {avisoMotor}. Esta gravação sai em tempo real, no máximo a 30
+                quadros por segundo.
+              </p>
+            )}
+            {(blocosFaltando ?? 0) > 0 && phase !== "error" && (
+              <p className="mt-1 text-[11.5px] leading-snug text-amber-300/80">
+                {blocosFaltando} {blocosFaltando === 1 ? "bloco" : "blocos"} do mapa não
+                {blocosFaltando === 1 ? "chegou" : "chegaram"} nem depois das novas tentativas:
+                esse pedaço sai do nível anterior
+                (esticado) no vídeo. Costuma ser limite dos servidores gratuitos — tente de novo em
+                alguns minutos.
+              </p>
+            )}
             {phase === "done" && (blocosDeReserva ?? 0) > 0 && (
               <p className="mt-1 text-[11.5px] leading-snug text-amber-300/80">
                 {blocosDeReserva} {blocosDeReserva === 1 ? "bloco" : "blocos"} do mapa não

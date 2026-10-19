@@ -85,12 +85,75 @@ export type RecordOptions = {
   draw: (ctx: CanvasRenderingContext2D, t: number, elapsed: number) => void;
   onProgress?: (t: number) => void;
   shouldCancel?: () => boolean;
+  /**
+   * A cadência da gravação, entregue no fim.
+   *
+   * Na gravação em tempo real é a única testemunha do que aconteceu: se a tela
+   * engasgou, os intervalos entre quadros ficam desiguais e o vídeo trava —
+   * mesmo com a velocidade média certa. O painel do fim mostra o número.
+   */
+  onCadencia?: (c: Cadencia) => void;
 };
 
 export class CancelledError extends Error {
   constructor() {
     super("Gravação cancelada");
   }
+}
+
+/**
+ * A **cadência** de uma gravação: com que regularidade os quadros foram
+ * desenhados.
+ *
+ * É a medida que separa o vídeo que flui do que trava — e ela não depende da
+ * rota nem do zoom, então vale comparar uma gravação com outra. Nos três mp4 do
+ * usuário (mesma medição, janelas equivalentes):
+ *
+ * | arquivo | fps | quadros no intervalo típico |
+ * |---|---|---|
+ * | “Meia Maratona de Sorocaba” (o que ele achou fluido) | ~53 | **93%** |
+ * | 18-27 (travava) | 30 | 78% |
+ * | 12-16 | 24 | 46% |
+ *
+ * Ou seja: o que ele gostou não é um passo menor por quadro (os três andam ~7 px
+ * por quadro) — é o **mesmo intervalo entre um quadro e outro**, mais vezes por
+ * segundo. Quando a tela engasga, o quadro seguinte vem tarde; a cadência cai e
+ * o olho lê como travada, mesmo que a velocidade média esteja certa.
+ */
+export type Cadencia = {
+  /** intervalos entre quadros desenhados, em ms */
+  intervalos: number[];
+  /** o intervalo típico (mediana), em ms */
+  tipico: number;
+  /** fração dos quadros que caem a ±5% do intervalo típico (0..1) */
+  regular: number;
+};
+
+/** A tolerância do "mesmo intervalo": 5% (33 ms aceita 31,7 a 34,7). */
+const TOLERANCIA_CADENCIA = 0.05;
+
+/**
+ * Mede a cadência a partir dos **instantes** (em segundos) de cada quadro
+ * desenhado.
+ *
+ * Função pura para poder ser medida no teste: os instantes vêm do mesmo relógio
+ * do desenho, e é só isso que a conta precisa.
+ */
+export function medirCadencia(instantes: number[]): Cadencia {
+  const validos = instantes.filter((t) => Number.isFinite(t));
+  const dt: number[] = [];
+  for (let i = 1; i < validos.length; i++) {
+    const d = (validos[i] - validos[i - 1]) * 1000;
+    if (d > 0) dt.push(d);
+  }
+  if (dt.length === 0) return { intervalos: [], tipico: 0, regular: 0 };
+  const ordenado = [...dt].sort((a, b) => a - b);
+  const meio = ordenado.length >> 1;
+  const tipico =
+    ordenado.length % 2 === 1 ? ordenado[meio] : (ordenado[meio - 1] + ordenado[meio]) / 2;
+  if (!(tipico > 0)) return { intervalos: dt, tipico: 0, regular: 0 };
+  const dentro = dt.filter((d) => Math.abs(d - tipico) <= tipico * TOLERANCIA_CADENCIA).length;
+  return { intervalos: dt, tipico, regular: dentro / dt.length };
 }
 
 /**
@@ -299,6 +362,8 @@ export async function recordVideo(opts: RecordOptions): Promise<Blob> {
    */
   const total = Math.max(1, Math.round(fps * durationSec));
   let desenhado = 0;
+  /** os instantes de cada quadro desenhado — a cadência sai daqui (ver `medirCadencia`) */
+  const instantes: number[] = [0];
 
   await new Promise<void>((resolve, reject) => {
     let raf = 0;
@@ -318,6 +383,7 @@ export async function recordVideo(opts: RecordOptions): Promise<Blob> {
          * desenha saber há quanto tempo o vídeo começou.
          */
         const t = tempoDoQuadro(elapsed, durationSec);
+        instantes.push(elapsed);
         try {
           opts.draw(ctx, t, elapsed);
           trilha?.requestFrame?.();
@@ -375,6 +441,8 @@ export async function recordVideo(opts: RecordOptions): Promise<Blob> {
   }
   await stopped;
   stream.getTracks().forEach((tr) => tr.stop());
+
+  opts.onCadencia?.(medirCadencia(instantes));
 
   if (chunks.length === 0) throw new Error("Nada foi gravado. Tente outro formato de vídeo.");
   return new Blob(chunks, { type: format.mime.split(";")[0] });

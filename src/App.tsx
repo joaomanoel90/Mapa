@@ -65,6 +65,7 @@ import {
   fpsQueCasa,
   medirTaxaDaTela,
   recordVideo,
+  type Cadencia,
   type VideoEngine,
   type VideoFormat,
 } from "./lib/recorder";
@@ -194,6 +195,12 @@ function App() {
     taxaDaTela: number;
     /** blocos do mapa que saíram do nível anterior por não estarem prontos */
     blocosDeReserva: number;
+    /**
+     * Com que regularidade os quadros saíram (só a gravação em tempo real
+     * mede: é lá que a tela pode engasgar). `null` na exportação rápida, que
+     * escreve o tempo de cada quadro por conta própria.
+     */
+    cadencia: Cadencia | null;
   } | null>(null);
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -1216,7 +1223,20 @@ function App() {
         },
       };
 
-      const blob = rapida ? await recordVideoFast(engine) : await recordVideo(engine);
+      /*
+       * A cadência é preenchida pelo gravador **durante** a gravação (é ele que
+       * vê os instantes de cada quadro); a exportação rápida não mede porque
+       * não depende da tela — ela escreve o tempo exato de cada quadro.
+       */
+      let cadenciaFinal: Cadencia | null = null;
+      const blob = rapida
+        ? await recordVideoFast(engine)
+        : await recordVideo({
+            ...engine,
+            onCadencia: (c) => {
+              cadenciaFinal = c;
+            },
+          });
       setVideo({
         blob,
         url: URL.createObjectURL(blob),
@@ -1227,6 +1247,7 @@ function App() {
         fpsPedido: settings.fps,
         taxaDaTela,
         blocosDeReserva: renderer.blocosDeReserva,
+        cadencia: cadenciaFinal,
       });
       setPhase("done");
     } catch (err) {
@@ -1602,6 +1623,7 @@ function App() {
           fpsPedido={video?.fpsPedido}
           taxaDaTela={video?.taxaDaTela}
           blocosDeReserva={video?.blocosDeReserva}
+          cadencia={video?.cadencia}
           width={aspect.w}
           height={aspect.h}
           duration={settings.duration}

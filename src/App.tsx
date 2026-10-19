@@ -604,6 +604,9 @@ function App() {
           cardNote: settings.cardNote,
         },
         resumo,
+        // campo em branco usa o número do arquivo: com o interruptor ligado, a
+        // cartela aparece sem precisar digitar nada
+        true,
       ),
     [
       settings.cardDistance,

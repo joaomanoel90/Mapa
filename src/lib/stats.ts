@@ -172,22 +172,40 @@ function campo(v: string): string {
 /**
  * Monta a cartela final.
  *
- * Os números vêm **do que foi digitado** — o arquivo só sugere. Isso deixa a
+ * Os números vêm **do que foi digitado**; o arquivo só sugere. Isso deixa a
  * cartela servir para uma rota desenhada à mão (que não tem altitude nem hora)
  * e para quem quer escrever o número que o Strava mostrou, sem digitar no
  * escuro: o painel mostra a sugestão ao lado de cada campo.
  *
+ * Com `preencherComArquivo`, o campo **em branco** passa a mostrar o que o
+ * arquivo mediu. Era o pedido do usuário ("adicione a cartela no final do
+ * vídeo"): o interruptor da cartela já vinha ligado, mas ela só existia se
+ * alguém digitasse alguma coisa — e o vídeo terminava sem cartela nenhuma. Com
+ * o preenchimento, ligar o interruptor basta, e quem quiser outro número é só
+ * escrever por cima.
+ *
  * `null` quando não há nada para mostrar, e aí o vídeo termina sem cartela.
  */
-export function endCard(f: CardFields, file: RideSummary): EndCard | null {
+export function endCard(
+  f: CardFields,
+  file: RideSummary,
+  preencherComArquivo = false,
+): EndCard | null {
   const sugestao = cardSuggestions(file);
 
+  /** o que foi digitado manda; em branco, entra o arquivo (se pedido) */
+  const numero = (digitado: string, doArquivo: string | null): string => {
+    const escrito = campo(digitado);
+    if (escrito) return escrito;
+    return preencherComArquivo ? campo(doArquivo ?? "") : "";
+  };
+
   const tiles: SummaryTile[] = [];
-  const dist = campo(f.cardDistance);
+  const dist = numero(f.cardDistance, sugestao.distance);
   if (dist) tiles.push({ value: dist, label: "distância" });
-  const ele = campo(f.cardElevation);
+  const ele = numero(f.cardElevation, sugestao.elevation);
   if (ele) tiles.push({ value: ele, label: "elevação" });
-  const tempo = campo(f.cardTime);
+  const tempo = numero(f.cardTime, sugestao.time);
   if (tempo) tiles.push({ value: tempo, label: "tempo" });
 
   const nota = campo(f.cardNote);

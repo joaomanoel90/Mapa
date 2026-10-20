@@ -2,7 +2,13 @@ import { describe, expect, it } from "vitest";
 import { buildTrack } from "./geo";
 import { BASEMAPS } from "./tiles";
 import { TILE_BUDGET } from "./renderer";
-import { MIN_FOLLOW_ZOOM, budgetAdvice, maxFollowZoom, tilesNeeded } from "./map-budget";
+import {
+  MIN_FOLLOW_ZOOM,
+  budgetAdvice,
+  maxFollowZoom,
+  planejarCamera,
+  tilesNeeded,
+} from "./map-budget";
 
 /** Traçado reto de `km` quilômetros, no formato de um interesse. */
 function percurso(km: number, n = 4000) {
@@ -85,9 +91,29 @@ describe("maior zoom que cabe", () => {
     expect(maxFollowZoom({ ...base, track: buildTrack(percurso(30)) })).toBe(17.5);
   });
 
-  it("devolve null quando nem o zoom mínimo cabe", () => {
-    // 5.000 km: nem no zoom 11 os blocos cabem
+  it("numa travessia de continente, o zoom desce até a escala do continente", () => {
+    /*
+     * Era aqui que a rota intercontinental morria: o piso era o zoom 11 (escala
+     * de cidade) e uma travessia de 5.000 km não cabia em nenhum zoom — a
+     * exportação era recusada mandando usar "Rota toda". Em escala de
+     * continente (3) o "Seguir" volta a ser possível.
+     */
     const z = maxFollowZoom({ ...base, track: buildTrack(percurso(5000)) });
+    expect(z).not.toBeNull();
+    expect(z as number).toBeLessThan(11);
+    expect(z as number).toBeGreaterThanOrEqual(MIN_FOLLOW_ZOOM);
+    // e a escolha realmente cabe no teto
+    const n = tilesNeeded({
+      ...base,
+      track: buildTrack(percurso(5000)),
+      camera: { mode: "follow", followZoom: z as number },
+    });
+    expect(n).toBeLessThanOrEqual(1400);
+  });
+
+  it("devolve null quando nem o zoom mínimo cabe", () => {
+    // com um teto de 20 blocos não há enquadramento nenhum que sirva
+    const z = maxFollowZoom({ ...base, track: buildTrack(percurso(5000)), budget: 20 });
     expect(z).toBeNull();
   });
 
@@ -164,5 +190,56 @@ describe("aviso da rota longa", () => {
   it("na câmera “Rota toda” não sugere zoom nenhum", () => {
     const texto = budgetAdvice(9000, 13.5, "fit");
     expect(texto).not.toContain("zoom");
+  });
+});
+
+describe("o vídeo de uma travessia intercontinental", () => {
+  const travessia = () => buildTrack(percurso(5000));
+  const cameraAlta = { mode: "follow" as const, followZoom: 17 };
+
+  it("sai no zoom que cabe, em vez de ser recusado", () => {
+    const plano = planejarCamera({ ...base, track: travessia(), camera: cameraAlta });
+    expect(plano.reduzido).toBe(true);
+    expect(plano.zoom).not.toBeNull();
+    expect(plano.camera.mode).toBe("follow");
+    expect(plano.camera.followZoom).toBe(plano.zoom);
+    expect(plano.camera.followZoom as number).toBeLessThan(17);
+    // o que vai ser baixado cabe no teto
+    const n = tilesNeeded({ ...base, track: travessia(), camera: plano.camera });
+    expect(n).toBeLessThanOrEqual(1400);
+  });
+
+  it("cai para a “Rota toda” só quando nem o zoom mínimo cabe", () => {
+    const plano = planejarCamera({
+      ...base,
+      track: travessia(),
+      camera: cameraAlta,
+      budget: 20,
+    });
+    expect(plano.reduzido).toBe(true);
+    expect(plano.zoom).toBeNull();
+    expect(plano.camera.mode).toBe("fit");
+  });
+
+  it("rota curta não muda nada", () => {
+    const plano = planejarCamera({
+      ...base,
+      track: buildTrack(percurso(5)),
+      camera: { mode: "follow", followZoom: 16 },
+    });
+    expect(plano.reduzido).toBe(false);
+    expect(plano.camera.followZoom).toBe(16);
+    expect(plano.zoom).toBeNull();
+  });
+
+  it("“Rota toda” já escolhida não é mexida", () => {
+    const plano = planejarCamera({
+      ...base,
+      track: travessia(),
+      camera: { mode: "fit", followZoom: 16 },
+      budget: 20,
+    });
+    expect(plano.camera.mode).toBe("fit");
+    expect(plano.reduzido).toBe(false);
   });
 });

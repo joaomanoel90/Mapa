@@ -58,7 +58,7 @@ import {
 } from "./lib/endpoints";
 import { findCharacter } from "./lib/characters";
 import { SceneRenderer, tilesForAnimation, TILE_BUDGET } from "./lib/renderer";
-import { budgetAdvice, maxFollowZoom, tilesNeeded } from "./lib/map-budget";
+import { maxFollowZoom, planejarCamera, tilesNeeded } from "./lib/map-budget";
 import { focoDasParadas } from "./lib/pois";
 import { PhotoCache, photoSources } from "./lib/photos";
 import { mapPassages, passageTimes } from "./lib/passages";
@@ -249,6 +249,15 @@ function App() {
    * o interruptor era a única coisa no caminho.
    */
   const [rapidoDesligadoGravar, setRapidoDesligadoGravar] = useState(false);
+
+  /**
+   * O que o app ajustou na câmera para a rota caber no orçamento de blocos.
+   *
+   * Numa rota intercontinental o zoom do painel não cabe: o vídeo sai num zoom
+   * menor (ou na "Rota toda"), e isto é o que a janela de gravação diz — mudar a
+   * câmera do usuário em silêncio seria pior que recusar.
+   */
+  const [avisoRotaGravar, setAvisoRotaGravar] = useState<string | null>(null);
 
   /** pedido de "ligar o ⚡ e gravar de novo", esperando o ajuste chegar ao estado */
   const [relancarComRapido, setRelancarComRapido] = useState(false);
@@ -1161,7 +1170,25 @@ function App() {
       subtitle: settings.subtitle,
     };
     const stops = sortPois(pois);
-    const camera = cameraDoVideo(stops);
+    /*
+     * A câmera **com que o vídeo vai sair** — resolvida antes de aquecer.
+     *
+     * Numa rota intercontinental a conta de blocos estourava e a exportação era
+     * recusada, mandando usar "Rota toda" mesmo com o "Seguir" possível num zoom
+     * de continente. Agora o app desce o zoom até caber (e, se nem assim, cai
+     * para o enquadramento único) — e diz o que fez na janela de gravação.
+     */
+    const plano = planejarCamera({
+      track,
+      width: aspect.w,
+      height: aspect.h,
+      basemap: settings.basemap,
+      maxZoom: maxZoomFor(settings.basemap),
+      camera: cameraDoVideo(stops),
+      cinematic: cameraDoVideo(stops).cinematic,
+      foco: focoDoVideo,
+    });
+    const camera = plano.camera;
 
     let paint: (t: number, elapsed: number) => void = () => undefined;
     let canvasForRecord: HTMLCanvasElement | null = null;
@@ -1230,7 +1257,12 @@ function App() {
           cardPhoto: settings.cardPhoto,
         });
 
-      // os servidores gratuitos pedem uso moderado
+      /*
+       * O aquecimento já usa a câmera planejada: o número aqui é o que **vai**
+       * ser baixado. Se ainda estourar (rota enorme até no enquadramento
+       * único), o erro diz o que fazer — mas agora isso é a exceção, não o
+       * caminho de uma travessia.
+       */
       const needed = tilesForAnimation(
         track,
         camera,
@@ -1241,8 +1273,17 @@ function App() {
         focoDoVideo,
       ).length;
       if (needed > TILE_BUDGET) {
-        throw new Error(budgetAdvice(needed, sugestaoZoom, camera.mode));
+        throw new Error(
+          `Esta rota precisaria de ${needed} blocos de mapa — demais para os servidores gratuitos. ` +
+            "Divida o percurso em trechos menores.",
+        );
       }
+      if (plano.reduzido) setAvisoRotaGravar(plano.zoom !== null
+        ? `Rota longa: esta rota precisaria de ${plano.blocos} blocos no zoom escolhido. ` +
+          `O vídeo saiu no zoom ${plano.zoom}, que é o que cabe nos servidores gratuitos.`
+        : `Rota longa: nem no zoom mínimo a rota caberia nos blocos dos servidores gratuitos. ` +
+          "O vídeo saiu com a câmera “Rota toda”.");
+      else setAvisoRotaGravar(null);
 
       /*
        * As fotos são decodificadas antes do primeiro quadro: o desenho é
@@ -1817,6 +1858,7 @@ function App() {
           cadencia={video?.cadencia}
           avisoMotor={video ? video.motivoMotor : avisoMotorGravar}
           rapidoDesligado={video ? video.rapidoDesligado : rapidoDesligadoGravar}
+          avisoRota={avisoRotaGravar}
           onLigarRapido={() => {
             update("fastExport", true);
             closeModal();

@@ -351,6 +351,35 @@ aponta para onde vai); a foto **não** gira, para a cara não sair de cabeça pa
 baixo. Enquanto a foto não chega, o emoji continua no lugar: o personagem nunca
 some do vídeo.
 
+### Travessias longas (intercontinental)
+
+Dá para simular uma travessia entre continentes:
+
+1. **Tipo de deslocamento → Livre (✏️)**: linha reta entre os pontos. O roteador
+   de ruas não cruza oceano — e nem deveria.
+2. Clique a partida e a chegada (por exemplo, São Paulo e Lisboa), escolha o
+   personagem (o ✈️ combina) e a duração.
+
+O que acontecia antes: a conta de blocos estourava, a exportação era recusada com
+"demais para os servidores gratuitos, mesmo no zoom mínimo" e a única saída era a
+câmera "Rota toda". O piso do zoom de acompanhamento era **11** — escala de
+cidade, impraticável para milhares de km.
+
+Agora o piso é **3** (escala de continente), e ao gravar o app escolhe a câmera
+que cabe:
+
+| rota (720×1280, terceira pessoa) | zoom que cabe | blocos |
+|---|---|---|
+| 1.000 km | 12 | ~1.390 |
+| 3.000 km | 10 | ~1.370 |
+| 7.900 km (São Paulo → Lisboa) | 9 | ~1.400 |
+| 12.000 km ou mais | 7 | ~1.400 |
+
+Quando o ajuste acontece, a janela de gravação diz em que zoom o vídeo saiu — e a
+câmera do painel **não** é alterada: o ajuste vale para aquela gravação. Se nem no
+zoom mínimo couber (rota absurda ou orçamento apertado), o vídeo sai na "Rota
+toda", também avisado.
+
 ### Mapa em miniatura
 
 No canto de cima à esquerda, **abaixo do título**, o vídeo pode mostrar a rota
@@ -992,7 +1021,7 @@ ou cortados.
 
 ```bash
 npm run typecheck  # tsc --noEmit
-npm test           # Vitest (804 casos)
+npm test           # Vitest (811 casos)
 npm run check:dist # o build saiu autocontido e sem /src/?
 ```
 

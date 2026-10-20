@@ -63,6 +63,10 @@ function fakeCtx() {
   const giros: number[] = [];
   /** cada `stroke()`: a cor, a espessura e quantos pontos o caminho tinha */
   const tracos: { cor: string; largura: number; pontos: number }[] = [];
+  /** os pontos de cada caminho traçado, na ordem dos `stroke()` */
+  const tracosPontos: number[][][] = [];
+  /** o caminho em construção (moveTo/lineTo), em coordenadas do quadro */
+  let caminho: number[][] = [];
   /** cada `fill()`: a cor de preenchimento em vigor (a polaroide branca era um fill) */
   const pinturas: string[] = [];
   /** cada `drawImage`: os argumentos, o alfa e a escala em vigor no momento */
@@ -213,9 +217,15 @@ function fakeCtx() {
           if (prop === "moveTo") {
             pontos++;
             movimentos.push(args as number[]);
+            caminho = [[Number(args[0] ?? 0), Number(args[1] ?? 0)]];
           }
-          if (prop === "lineTo") pontos++;
+          if (prop === "lineTo") {
+            pontos++;
+            caminho.push([Number(args[0] ?? 0), Number(args[1] ?? 0)]);
+          }
+          if (prop === "beginPath") caminho = [];
           if (prop === "stroke") {
+            tracosPontos.push(caminho.map(([x, y]) => [x, y]));
             tracos.push({
               cor: String(props.strokeStyle ?? ""),
               largura: Number(props.lineWidth ?? 0),
@@ -245,6 +255,7 @@ function fakeCtx() {
     arcosPos,
     giros,
     tracos,
+    tracosPontos,
     movimentos,
     imagens,
     pinturas,
@@ -3781,5 +3792,45 @@ describe("avatar do personagem", () => {
     const f = fakeCtx();
     desenhar(f.ctx, { ...estado(0.5, 10, null), photos: cache(true) });
     expect(f.textos).toContain("🚗");
+  });
+});
+
+/*
+ * O rastro do vídeo parando no personagem.
+ *
+ * Numa rota de cidade o exagero era de metros; num traçado de poucos pontos —
+ * uma travessia — cada segmento tem dezenas de km, e o rastro ia até o **fim**
+ * do segmento antes de voltar para o personagem, deixando um esporão sólido
+ * paralelo à linha pontilhada.
+ */
+describe("rastro percorrido", () => {
+  it("para no personagem, e não no ponto seguinte do traçado", () => {
+    // dois pontos, ~5.000 km: o segmento é a rota inteira
+    const longa = buildTrack([
+      { lat: -23.5, lng: -48.4 },
+      { lat: -23.5 + 5000 / 111, lng: -48.4 },
+    ]);
+    const f = fakeCtx();
+    desenhar(
+      f.ctx,
+      { ...estado(0.5, 10, null), camera: { mode: "fit", followZoom: 16 } },
+      longa,
+    );
+    // onde o personagem está na tela: o selo tem raio fixo (0,62 do selo)
+    const selo = f.arcosPos.find((a) => Math.abs(a[2] - 38.44) < 0.01);
+    expect(selo).toBeDefined();
+    const [, yPersonagem] = selo!;
+
+    // o traço do rastro é o da cor do app, mais fino que a sombra dele
+    const rastro = f.tracos
+      .map((t, i) => ({ ...t, pontos: f.tracosPontos[i] }))
+      .filter((t) => t.cor === "#a3e635" && t.largura >= 5 && t.largura <= 7)
+      .pop();
+    expect(rastro).toBeDefined();
+    // todos os pontos ficam entre o começo e o personagem — nada além dele
+    for (const [, y] of rastro!.pontos) expect(y).toBeLessThanOrEqual(yPersonagem + 2);
+    // e o rastro termina nele
+    const ultimo = rastro!.pontos[rastro!.pontos.length - 1];
+    expect(Math.abs(ultimo[1] - yPersonagem)).toBeLessThan(3);
   });
 });

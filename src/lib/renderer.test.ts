@@ -1110,25 +1110,71 @@ describe("a parada perto do fim do vídeo", () => {
   const encostaNoSelo = (e: { x0: number; y0: number; x1: number; y1: number }, s: number[]) =>
     e.x0 < s[0] + s[2] && e.x1 > s[0] - s[2] && e.y0 < s[1] + s[2] && e.y1 > s[1] - s[2];
 
-  it("a etiqueta entra logo depois da passagem — em segundos, não em metros", () => {
+  it("a etiqueta entra antes da passagem — em segundos, não em metros", () => {
     /*
-     * O defeito que o usuário viu ("no ponto de parada perto do final, ele
-     * aparece como toast, como ele ficou em baixo da tela"): a etiqueta era
-     * medida em **metros**, como o pino. Numa rota em que o vídeo anda poucos
-     * metros por segundo os últimos metros duram muito tempo de vídeo, e a
-     * parada perto do fim só se anunciava depois de o vídeo acabar. Em segundos
-     * de vídeo a etiqueta entra igual em qualquer percurso — de 2 km a 60 km.
+     * Dois defeitos, em duas rodadas.
      *
-     * Aqui: 0,4 s de vídeo depois da passagem, a etiqueta está na tela.
+     * O primeiro: a etiqueta era medida em **metros**, como o pino. Numa rota
+     * em que o vídeo anda poucos metros por segundo os últimos metros duram
+     * muito tempo de vídeo, e a parada perto do fim só se anunciava depois de o
+     * vídeo acabar. Passou a ser medida em segundos.
+     *
+     * O segundo, este de agora: mesmo em segundos, o nome só nascia **depois**
+     * da passagem — e aí o pino já está atrás do personagem e sai da tela em
+     * menos de um segundo ("quando aparece, já está sumindo da tela"). Agora o
+     * nome entra 2 s de vídeo antes, enquanto a parada ainda está na frente.
      */
     const tl = buildTimeline(14, { voo: false, cartela: true });
     const noMeio = parada({ t: 0.9 });
-    const antes = fakeCtx();
-    desenhar(antes.ctx, quadroDoFim(0.9 - 0.4 / tl.percurso, [noMeio]).st);
-    expect(etiquetasNaTela(antes, ["Ponte"]).length).toBe(0); // ainda não chegou
+
+    // bem antes (2,5 s de vídeo): ainda não
+    const cedo = fakeCtx();
+    desenhar(cedo.ctx, quadroDoFim(0.9 - 2.5 / tl.percurso, [noMeio]).st);
+    expect(etiquetasNaTela(cedo, ["Ponte"]).length).toBe(0);
+
+    // 1,5 s antes da passagem: já está na tela, com o personagem ainda atrás
+    const chegando = fakeCtx();
+    desenhar(chegando.ctx, quadroDoFim(0.9 - 1.5 / tl.percurso, [noMeio]).st);
+    expect(etiquetasNaTela(chegando, ["Ponte"]).length).toBeGreaterThan(0);
+
+    // e continua depois de passar
     const depois = fakeCtx();
     desenhar(depois.ctx, quadroDoFim(0.9 + 0.4 / tl.percurso, [noMeio]).st);
     expect(etiquetasNaTela(depois, ["Ponte"]).length).toBeGreaterThan(0);
+  });
+
+  it("a parada colada no fim se anuncia antes de o personagem chegar", () => {
+    /*
+     * O caso que o usuário descreveu: a última parada é praticamente a
+     * chegada. Se o nome nasce só na passagem, ele aparece no apagar das
+     * luzes — e o personagem já passou. Aqui: a 10% do percurso do fim (0,85
+     * com a parada em 0,97), a etiqueta já está na tela.
+     */
+    const tl = buildTimeline(14, { voo: false, cartela: true });
+    const noFim = parada({ t: 0.97 });
+    const f = fakeCtx();
+    desenhar(f.ctx, quadroDoFim(0.85, [noFim]).st);
+    expect(0.85).toBeLessThan(0.97); // o personagem ainda não chegou
+    expect(etiquetasNaTela(f, ["Ponte"]).length).toBeGreaterThan(0);
+    expect(tl.percurso).toBeGreaterThan(0);
+  });
+
+  it("a parada que ainda vem ganha um halo, para ser vista no mapa", () => {
+    /*
+     * O pino da parada futura era 0,7 com 55% de opacidade e sumia no meio das
+     * ruas ("não dá para ver direito os pontos"). O halo de 26 px (no quadro de
+     * 1280×720, onde `sf` é 1) marca a próxima parada; ele desaparece depois da
+     * passagem, quando o pino já está inteiro.
+     */
+    const indo = fakeCtx();
+    desenhar(indo.ctx, quadroDoFim(0.5, [parada({ t: 0.9 })]).st);
+    const halo = indo.arcosPos.filter((a) => Math.abs(a[2] - 26) < 0.01);
+    expect(halo.length).toBeGreaterThan(0);
+
+    // depois de passar, o halo sai de cena (o pino inteiro basta)
+    const passou = fakeCtx();
+    desenhar(passou.ctx, quadroDoFim(0.95, [parada({ t: 0.9 })]).st);
+    expect(passou.arcosPos.filter((a) => Math.abs(a[2] - 26) < 0.01).length).toBe(0);
   });
 
   it("num trajeto curto, a parada colada no fim também se anuncia no mapa", () => {

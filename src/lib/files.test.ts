@@ -53,6 +53,25 @@ describe("lerTextoDoArquivo", () => {
     expect(await lerTextoDoArquivo(arquivo)).toBe("<gpx/>");
   });
 
+  it("desiste com recado quando a leitura nunca termina", async () => {
+    /*
+     * O provedor de conteúdo da nuvem entrega o `File` e não devolve os bytes:
+     * o `text()` fica pendurado para sempre. Sem prazo, o app não dizia nada —
+     * e "escolhi o arquivo e não abriu" era exatamente esse silêncio.
+     */
+    const pendurado = {
+      size: 2048,
+      name: "rota.gpx",
+      text: () => new Promise<string>(() => undefined),
+    } as unknown as Blob;
+    await expect(lerTextoDoArquivo(pendurado, "rota.gpx", 20)).rejects.toBeInstanceOf(
+      LeituraIndisponivelError,
+    );
+    await expect(lerTextoDoArquivo(pendurado, "rota.gpx", 20)).rejects.toThrow(
+      /não terminou de ser lido/i,
+    );
+  });
+
   it("arquivo de 0 byte diz o que fazer, em vez de culpar o formato", async () => {
     const vazio = new File([], "rota.gpx", { type: "application/gpx+xml" });
     await expect(lerTextoDoArquivo(vazio)).rejects.toBeInstanceOf(ArquivoVazioError);

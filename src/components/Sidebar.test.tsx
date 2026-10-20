@@ -11,7 +11,7 @@
  */
 import { act, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import Sidebar from "./Sidebar";
 import { DEFAULT_SETTINGS, type Settings } from "../lib/settings";
 import { buildTrack } from "../lib/geo";
@@ -264,33 +264,41 @@ describe("painel: terceira pessoa", () => {
 /*
  * O seletor de arquivo do GPX.
  *
- * Dois defeitos somados deixavam o import impossível em parte dos aparelhos:
+ * Três defeitos somados deixavam o import impossível em parte dos aparelhos:
  *
  * 1. o botão chamava `input.click()` num input com `display: none` — e no Safari
  *    (iPhone/iPad) isso **não abre** o seletor. Nada acontecia: nem arquivo
  *    escolhido, nem mensagem;
- * 2. o `accept` era só `.gpx` + os tipos XML. No Android o seletor filtra por
- *    tipo MIME, e um `.gpx` baixado do Strava chega como
- *    `application/octet-stream` ou `text/plain` — o arquivo aparecia apagado.
+ * 2. o `accept` filtrou o seletor. No Android ele filtra por **tipo MIME**, e um
+ *    `.gpx` baixado do Strava chega como `application/octet-stream`, `text/plain`
+ *    ou com o nome sem extensão — mesmo a lista larga deixava arquivo apagado em
+ *    alguns aparelhos. Apagado é "escolhi e não abre";
+ * 3. limpar o `value` do input no meio do `change` invalida o `File` recém
+ *    escolhido no Safari do iPhone — a leitura falhava sem o usuário ter feito
+ *    nada de errado.
  *
- * O conserto: quem abre o seletor é o **rótulo**, sem JavaScript no meio, e a
- * lista de tipos é larga (quem valida o conteúdo é o `parseGpx`).
+ * O conserto: quem abre o seletor é o **rótulo**, sem JavaScript no meio; o
+ * input **não tem filtro** (quem valida o conteúdo é o `parseGpx`, com recado
+ * claro); e o `value` é limpo no fim da fila, depois que o arquivo já foi lido.
  */
 describe("painel: importar GPX", () => {
   const campo = () =>
     document.body.querySelector('input[type="file"]') as HTMLInputElement | null;
 
-  it("o input existe, com lista larga de tipos e sem `display: none`", () => {
+  it("o input existe, sem filtro de tipo e sem `display: none`", () => {
     montar(<Painel />);
     const input = campo();
     expect(input).not.toBeNull();
     // o que o Safari precisa: nada de `hidden`
     expect(input!.className).toContain("sr-only");
     expect(input!.className).not.toContain("hidden");
-    // o que o Android precisa: os tipos com que o arquivo realmente chega
-    for (const tipo of [".gpx", "application/gpx+xml", "text/plain", "application/octet-stream"]) {
-      expect(input!.accept).toContain(tipo);
-    }
+    /*
+     * E o que o Android precisa: **nenhum filtro**. Qualquer lista de tipos
+     * deixa de fora algum aparelho (MIME trocado, nome sem extensão, arquivo
+     * vindo da nuvem) — e arquivo filtrado aparece apagado no seletor, que o
+     * usuário lê como "não deixa abrir".
+     */
+    expect(input!.accept).toBe("");
   });
 
   it("clicar no rótulo ativa o input (quem abre o seletor é o navegador)", () => {
@@ -309,7 +317,7 @@ describe("painel: importar GPX", () => {
     expect(ativado).toBe(1);
   });
 
-  it("escolher um arquivo entrega o `File` para o app", () => {
+  it("escolher um arquivo entrega o `File` para o app", async () => {
     const recebidos: File[] = [];
     montar(<Painel onImportGpx={(f) => recebidos.push(f)} />);
     const input = campo()!;
@@ -318,8 +326,21 @@ describe("painel: importar GPX", () => {
     act(() => input.dispatchEvent(new Event("change", { bubbles: true })));
     expect(recebidos).toHaveLength(1);
     expect(recebidos[0].name).toBe("rota.gpx");
-    // e o campo é limpo, para dar para escolher o mesmo arquivo de novo
-    expect(input.value).toBe("");
+    // e o campo é limpo, para dar para escolher o mesmo arquivo de novo —
+    // no fim da fila, para não invalidar o `File` que acabou de ser lido
+    await vi.waitFor(() => expect(input.value).toBe(""));
+  });
+
+  it("entrega arquivo sem extensão e sem tipo (o `StravaGPX` cru)", () => {
+    const recebidos: File[] = [];
+    montar(<Painel onImportGpx={(f) => recebidos.push(f)} />);
+    const input = campo()!;
+    // é como muitos aparelhos entregam o GPX: nome sem extensão, tipo vazio
+    const arquivo = new File(["<gpx/>"], "StravaGPX", { type: "" });
+    Object.defineProperty(input, "files", { value: [arquivo], configurable: true });
+    act(() => input.dispatchEvent(new Event("change", { bubbles: true })));
+    expect(recebidos).toHaveLength(1);
+    expect(recebidos[0].name).toBe("StravaGPX");
   });
 });
 

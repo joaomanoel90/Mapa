@@ -248,21 +248,37 @@ function Sidebar(props: Props) {
                 <input
                   type="file"
                   /*
-                   * Lista larga de propósito: no Android o seletor filtra por
-                   * **tipo MIME**, e um `.gpx` baixado do Strava chega como
-                   * `application/octet-stream` ou `text/plain` em muitos
-                   * aparelhos — com a lista curta, o arquivo aparecia apagado (e
-                   * às vezes nem aparecia). Quem valida o conteúdo é o
-                   * `parseGpx`.
+                   * **Sem `accept`.**
+                   *
+                   * A lista de tipos era larga (`.gpx`, `.xml`, `.txt` e os MIME
+                   * de sempre) justamente para o `.gpx` não aparecer apagado no
+                   * Android — e continuou aparecendo em aparelhos que entregam o
+                   * arquivo com um MIME fora da lista, ou com o nome sem
+                   * extensão (`StravaGPX`), ou ainda com provedor de conteúdo da
+                   * nuvem. Arquivo apagado no seletor é "escolhi e não abre".
+                   *
+                   * Sem filtro, todo arquivo pode ser escolhido — e quem valida o
+                   * conteúdo é o `parseGpx`, que já recusa o que não é GPX com um
+                   * recado claro.
                    */
-                  accept=".gpx,.xml,.txt,application/gpx+xml,application/xml,text/xml,text/plain,application/octet-stream"
                   className="sr-only"
                   aria-label="Escolher arquivo GPX"
                   onChange={(e) => {
-                    const arquivo = e.target.files?.[0];
+                    const campo = e.target;
+                    const arquivo = campo.files?.[0];
                     if (arquivo) onImportGpx(arquivo);
-                    // permite reimportar o mesmo arquivo em seguida
-                    e.target.value = "";
+                    /*
+                     * Limpar o campo **depois** do evento, não durante.
+                     *
+                     * É o que deixa escolher o mesmo arquivo duas vezes — mas no
+                     * Safari do iPhone/iPad zerar o `value` no meio do `change`
+                     * invalida o `File` recém-escolhido: a leitura falha com
+                     * "o arquivo não devolveu conteúdo", sem o usuário ter feito
+                     * nada de errado. No fim da fila, o `File` já foi lido.
+                     */
+                    window.setTimeout(() => {
+                      campo.value = "";
+                    }, 0);
                   }}
                 />
               </label>

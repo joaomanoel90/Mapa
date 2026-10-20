@@ -33,8 +33,18 @@ import {
 } from "./renderer";
 import type { CinematicConfig, FocusPoint } from "./camera";
 
-/** Menor zoom que o painel oferece — abaixo disso a rota viraria um pontinho. */
-export const MIN_FOLLOW_ZOOM = 11;
+/**
+ * Menor zoom de acompanhamento que o app aceita — abaixo disso a rota viraria
+ * um pontinho.
+ *
+ * Era 11, e isso é zoom de **cidade**: num percurso intercontinental (milhares
+ * de km) nem o 11 cabe no teto, e a exportação era recusada de vez — o usuário
+ * só podia usar a câmera "Rota toda". Num mapa, 3 é escala de continente (um
+ * bloco cobre ~5.000 km), e é o que faz o "Seguir" valer também para uma
+ * travessia: o personagem continua sendo o centro do quadro, com o continente
+ * inteiro passando por trás.
+ */
+export const MIN_FOLLOW_ZOOM = 3;
 
 export type BudgetInput = {
   track: Track;
@@ -121,6 +131,38 @@ export function maxFollowZoom(
     }
   }
   return melhor;
+}
+
+/**
+ * A câmera com que o vídeo **vai realmente sair**, cabendo no teto de blocos.
+ *
+ * Antes, quando a conta estourava, a exportação era recusada com um texto — e
+ * numa rota intercontinental o texto mandava trocar para "Rota toda" mesmo com
+ * a câmera "Seguir" perfeitamente possível num zoom de continente. Aqui a
+ * escolha é resolvida antes de gravar:
+ *
+ * 1. cabe como está? devolve a câmera do painel, sem mexer em nada;
+ * 2. não cabe no "Seguir"? desce o zoom até o maior que cabe (`maxFollowZoom`,
+ *    agora com piso em escala de continente);
+ * 3. nem assim? cai para a câmera "Rota toda", que é um enquadramento só.
+ *
+ * `reduzido` diz se houve mudança, para a janela de gravação poder explicar —
+ * mexer na câmera do usuário sem avisar seria pior que recusar.
+ */
+export function planejarCamera(
+  input: BudgetInput & { camera: CameraConfig; budget?: number },
+): { camera: CameraConfig; blocos: number; reduzido: boolean; zoom: number | null } {
+  const budget = input.budget ?? TILE_BUDGET;
+  const blocos = tilesNeeded(input);
+  if (blocos <= budget) return { camera: input.camera, blocos, reduzido: false, zoom: null };
+  if (input.camera.mode !== "follow") return { camera: input.camera, blocos, reduzido: false, zoom: null };
+
+  const zoom = maxFollowZoom({ ...input, budget });
+  if (zoom !== null) {
+    return { camera: { ...input.camera, followZoom: zoom }, blocos, reduzido: true, zoom };
+  }
+  // último recurso: um enquadramento só, do traçado inteiro
+  return { camera: { ...input.camera, mode: "fit" }, blocos, reduzido: true, zoom: null };
 }
 
 /** Teto de blocos, reexportado para a tela não precisar saber do renderizador. */

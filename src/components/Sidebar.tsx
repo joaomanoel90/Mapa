@@ -171,7 +171,14 @@ function Sidebar(props: Props) {
               onChange={(v) => update("profile", v)}
             />
           </div>
-          {s.profile !== "straight" && (
+          {s.profile === "straight" ? (
+            <p className="text-[11px] leading-snug text-zinc-500">
+              Reta entre os pontos — é o modo para travessias longas (entre cidades de
+              continentes diferentes, por cima do mar). O vídeo mostra o percurso inteiro no
+              mapa, e numa rota de milhares de km o app desce o zoom até caber nos mapas
+              gratuitos.
+            </p>
+          ) : (
             <div className="space-y-1.5">
               <Toggle
                 icon="🛣️"
@@ -602,6 +609,10 @@ function Sidebar(props: Props) {
                       Nem no zoom mínimo cabe: use a câmera “Rota toda”.
                     </p>
                   )}
+                  <p className="mt-1 text-[10.5px] leading-snug text-zinc-500">
+                    Se você gravar assim mesmo, o app ajusta a câmera ao orçamento e avisa na
+                    janela de gravação.
+                  </p>
                 </div>
               )}
             </div>

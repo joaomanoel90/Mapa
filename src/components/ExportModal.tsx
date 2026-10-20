@@ -21,6 +21,7 @@ export default function ExportModal({
   cadencia,
   avisoMotor,
   rapidoDesligado,
+  avisoRota,
   onLigarRapido,
   fpsLimitadoPeloTeto,
   width,
@@ -82,6 +83,14 @@ export default function ExportModal({
    * porque o navegador recusou). Muda a conclusão: existe solução a um clique.
    */
   rapidoDesligado?: boolean;
+  /**
+   * O que o app ajustou na câmera para a rota caber no orçamento de blocos.
+   *
+   * Numa rota intercontinental o zoom do painel não cabe nos servidores
+   * gratuitos: o vídeo sai num zoom menor, ou na câmera "Rota toda". Sem este
+   * aviso, o vídeo sairia com outro enquadramento e ninguém saberia por quê.
+   */
+  avisoRota?: string | null;
   /** liga o ⚡ e começa outra gravação — o botão do painel do fim */
   onLigarRapido?: () => void;
   /**
@@ -205,6 +214,11 @@ export default function ExportModal({
                   depender da tela.
                 </p>
               )}
+            {avisoRota && phase !== "error" && (
+              <p className="mt-1 text-[11.5px] leading-snug text-amber-300/80">
+                🗺️ {avisoRota}
+              </p>
+            )}
             {(avisoMotor || rapidoDesligado) && phase !== "error" && (
               <p className="mt-1 text-[11.5px] leading-snug text-amber-300/80">
                 {rapidoDesligado ? (

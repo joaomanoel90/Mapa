@@ -99,3 +99,22 @@ describe("painel do fim: ⚡ desligado no painel", () => {
     expect(container.textContent ?? "").not.toContain("⚡");
   });
 });
+
+describe("painel do fim: rota longa", () => {
+  it("diz em que zoom o vídeo saiu quando o app ajustou a câmera", () => {
+    montar({
+      avisoRota:
+        "Rota longa: esta rota precisaria de 27441 blocos no zoom escolhido. " +
+        "O vídeo saiu no zoom 9, que é o que cabe nos servidores gratuitos.",
+    });
+    const texto = container.textContent ?? "";
+    expect(texto).toContain("🗺️ Rota longa");
+    expect(texto).toContain("no zoom 9");
+    expect(texto).toContain("blocos");
+  });
+
+  it("sem ajuste de câmera, não inventa aviso", () => {
+    montar({ avisoRota: null });
+    expect(container.textContent ?? "").not.toContain("Rota longa");
+  });
+});

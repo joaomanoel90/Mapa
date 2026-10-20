@@ -17,6 +17,7 @@ import {
   nearestTOnTrack,
   nudge,
   pontoValido,
+  posicaoNoSegmento,
   project,
   sampleTrack,
   totalDoDesenho,
@@ -125,7 +126,13 @@ describe("sampleTrack", () => {
 
   it("interpola no meio", () => {
     const mid = sampleTrack(track, 0.5).pos;
-    expect(mid.lat).toBeCloseTo(0.5, 6);
+    /*
+     * Não é exatamente 0,5: o ponto anda na **projeção** do mapa, e em Mercator
+     * a metade do trecho fica um fio acima da metade da latitude (0,50002 aqui).
+     * O que importa é ficar sobre a linha desenhada — o teste seguinte mede isso.
+     */
+    expect(mid.lat).toBeGreaterThan(0.49);
+    expect(mid.lat).toBeLessThan(0.51);
     expect(mid.lng).toBeCloseTo(0, 6);
   });
 
@@ -857,5 +864,52 @@ describe("a trilha percorrida", () => {
     completarTrilha(pontos, rota, NaN, { lat: -23.4, lng: -48.4 }, criar);
     expect(pontos.length).toBe(2);
     expect(buracos(pontos)).toBe(0);
+  });
+});
+
+describe("o personagem anda em cima da linha desenhada", () => {
+  /** distância perpendicular, em pixels do mundo no zoom, do ponto até a reta a-b */
+  const desvioDaReta = (a: { lat: number; lng: number }, b: { lat: number; lng: number }, p: { lat: number; lng: number }, z = 7) => {
+    const pa = project(a.lat, a.lng, z);
+    const pb = project(b.lat, b.lng, z);
+    const pp = project(p.lat, p.lng, z);
+    const dx = pb.x - pa.x;
+    const dy = pb.y - pa.y;
+    return Math.abs(dx * (pa.y - pp.y) - (pa.x - pp.x) * dy) / Math.hypot(dx, dy);
+  };
+
+  it("numa travessia de 12.600 km, o ponto fica sobre a reta do mapa", () => {
+    /*
+     * O defeito do vídeo "Linha paralela": interpolar lat/lng direto punha o
+     * personagem até **58 px** ao lado da rota desenhada no zoom 7, e o rastro
+     * — que termina nele — saía como uma segunda linha, paralela à primeira.
+     */
+    const a = { lat: -23.5, lng: -46.6 };
+    const b = { lat: 31.5, lng: 35.2 };
+    const track = buildTrack([a, b]);
+    for (const t of [0.1, 0.25, 0.5, 0.75, 0.9]) {
+      const p = sampleTrack(track, t).pos;
+      expect(desvioDaReta(a, b, p)).toBeLessThan(0.5);
+    }
+  });
+
+  it("mantém a interpolação de sempre nos trechos curtos", () => {
+    // 2 km: a diferença entre lat/lng e Mercator é de centímetros
+    const a = { lat: -23.5, lng: -48.4 };
+    const b = { lat: -23.518, lng: -48.4 };
+    expect(posicaoNoSegmento(a, b, 0.5).lat).toBeCloseTo(-23.509, 5);
+  });
+
+  it("atravessa o antimeridiano pelo lado curto", () => {
+    // 170°E -> 170°W são 20° de caminho, e não 340°
+    const meio = posicaoNoSegmento({ lat: 0, lng: 170 }, { lat: 0, lng: -170 }, 0.5);
+    expect(Math.abs(meio.lng)).toBeCloseTo(180, 6);
+  });
+
+  it("as pontas são exatamente as pontas", () => {
+    const a = { lat: -23.5, lng: -46.6 };
+    const b = { lat: 31.5, lng: 35.2 };
+    expect(posicaoNoSegmento(a, b, 0)).toEqual(a);
+    expect(posicaoNoSegmento(a, b, 1)).toEqual(b);
   });
 });

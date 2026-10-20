@@ -1689,7 +1689,16 @@ export class SceneRenderer {
 
     // --- trecho percorrido ---
     if (style.showTraveled && track.pts.length > 1) {
-      const upto = Math.min(sample.index + 1, track.pts.length - 1);
+      /*
+       * O rastro vai até o **começo do segmento atual** e fecha no personagem
+       * (`cur`, abaixo).
+       *
+       * Com `index + 1` ele ia até o fim do segmento: em trecho de cidade são
+       * metros e ninguém vê, mas num traçado de poucos pontos — travessia — o
+       * segmento tem milhares de km e o rastro pintava a rota inteira, inclusive
+       * o que ainda falta, com a cor do percorrido.
+       */
+      const upto = Math.min(sample.index, track.pts.length - 1);
       // o trecho percorrido também cresce com a animação, então leva o mesmo corte
       const percorridos = visibleRuns(track.pts, janela, upto);
       const cur = toXY(sample.pos);
@@ -1703,7 +1712,8 @@ export class SceneRenderer {
       ctx.stroke();
       if (colored && projetado) {
         // a cor do último trecho continua até o personagem
-        const ultimo = Math.min(Math.max(upto - 1, 0), track.pts.length - 2);
+        // a cor do trecho que o personagem está percorrendo agora
+        const ultimo = Math.min(Math.max(sample.index, 0), track.pts.length - 2);
         strokeColored(ctx, projetado, percorridos, colored, 6 * sf, 1, {
           x: cur.x,
           y: cur.y,

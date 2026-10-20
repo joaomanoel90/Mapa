@@ -909,20 +909,6 @@ O traçado planejado, a área de clique e a trilha ainda ganham `smoothFactor: 3
 usuário o traçado desenhado cai de 262 pontos para **93** no zoom 15 e de 751
 para **325** no 17.
 
-### O rastro e o interruptor
-
-O interruptor **✨ Mostrar rastro percorrido** vale para os dois lugares: o vídeo
-e a prévia. Até esta rodada ele só era lido no desenho do vídeo — a prévia criava
-a polyline da trilha sempre, e quem desligava continuava vendo uma linha sólida
-da cor do trajeto correndo junto do personagem. Numa rota longa, quase reta e
-vista de muito longe, ela se confunde com a linha pontilhada e parece uma linha
-fixa atravessando o mapa.
-
-No vídeo, o rastro também passou a terminar **no personagem**: ele ia até o fim
-do segmento atual (`index + 1`) e voltava, deixando um esporão sólido à frente.
-Numa rota de cidade o exagero é de metros; num traçado de poucos pontos — uma
-travessia — cada segmento tem dezenas de km.
-
 ### Quando o mapa trava
 
 Na rodada em que o usuário viu *"Algo travou no app — Cannot read properties of
@@ -1035,7 +1021,7 @@ ou cortados.
 
 ```bash
 npm run typecheck  # tsc --noEmit
-npm test           # Vitest (815 casos)
+npm test           # Vitest (811 casos)
 npm run check:dist # o build saiu autocontido e sem /src/?
 ```
 

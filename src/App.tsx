@@ -1668,7 +1668,6 @@ function App() {
               followZoom={settings.followZoom}
               thirdPerson={settings.thirdPerson}
               showRoute={settings.showRoute}
-              showTraveled={settings.showTraveled}
               onAddPoint={addPoint}
               onMovePoint={movePoint}
               onRemovePoint={removePoint}

@@ -1758,9 +1758,16 @@ export class SceneRenderer {
         w: 2 * RAIO_DO_SELO * sf,
         h: 2 * RAIO_DO_SELO * sf,
       }));
+      const ondeEstaOpersonagem = toXY(sample.pos);
       drawStops(ctx, input, toXY, sf, {
         quadro: { width, height },
         proibidos: [...(cartao ? [retanguloDaCartela(cartao)] : []), ...selos],
+        // o selo do personagem cobre o pino na passagem (ver `drawStops`)
+        personagem: {
+          x: ondeEstaOpersonagem.x,
+          y: ondeEstaOpersonagem.y,
+          r: raioDoPersonagem(input.character, sf) * 1.05,
+        },
       });
     }
 
@@ -2056,6 +2063,18 @@ export function inclinacaoDaCurva(track: Track, i: number): number {
   return Math.max(-8, Math.min(8, giroEntre(pts[a], pts[i], pts[b]) * 0.22));
 }
 
+/**
+ * O raio do selo do personagem, em pixels da tela.
+ *
+ * Fica numa função porque **duas** partes precisam do mesmo número: quem
+ * desenha o personagem e quem posiciona os blocos das paradas, que têm de sair
+ * de cima dele (o selo é desenhado depois e cobria o nome da parada justamente
+ * no instante da passagem — o pior momento para escondê-lo).
+ */
+export function raioDoPersonagem(character: Character, sf: number): number {
+  return Math.round(Math.max(38, Math.min(86, 62 * sf)) * (character.size ?? 1));
+}
+
 function drawCharacter(
   ctx: CanvasRenderingContext2D,
   at: { x: number; y: number },
@@ -2075,7 +2094,7 @@ function drawCharacter(
   inclina: number,
 ) {
   const { character, style, rotate, elapsed } = input;
-  const badge = Math.round(Math.max(38, Math.min(86, 62 * sf)) * (character.size ?? 1));
+  const badge = raioDoPersonagem(character, sf);
   const respira = 1 + 0.05 * Math.sin(elapsed * 4);
   const { sobe, lado, estica } = andar(input, character);
 
@@ -2751,6 +2770,27 @@ function easeOutBack(x: number): number {
  */
 const ROTULO_ENTRA_S = 0.35;
 
+/**
+ * Quanto **antes** da passagem o nome da parada começa a entrar, em segundos de
+ * vídeo.
+ *
+ * O nome entrava só depois de o personagem passar pela parada — e aí é tarde:
+ * na terceira pessoa o pino de uma parada recém-passada já ficou atrás do
+ * personagem e sai da tela em menos de um segundo. Foi o que o usuário viu: "o
+ * ponto que está perto do fim demora aparecer e, quando aparece, já está
+ * saindo da tela".
+ *
+ * Antes da passagem é o único momento em que a parada está **na frente** do
+ * personagem, no alto do quadro, com tempo de leitura. O pino continua
+ * "pipocando" na passagem (a onda de impacto e o crescimento), que é o instante
+ * de chegada — o nome só chega mais cedo.
+ *
+ * O limite de 22% do percurso existe para o vídeo curto: numa gravação de 6 s,
+ * 2 s de antecedência acenderia todas as paradas quase juntas.
+ */
+const ROTULO_ANTES_S = 2;
+const ROTULO_ANTES_FRACAO = 0.22;
+
 function drawStops(
   ctx: CanvasRenderingContext2D,
   input: FrameState,
@@ -2761,12 +2801,27 @@ function drawStops(
     quadro: { width: number; height: number };
     /** o que está desenhado por cima (a cartela final): o bloco foge disso */
     proibidos?: RetanguloNaTela[];
+    /**
+     * Onde o personagem está, em pixels — e o raio do selo.
+     *
+     * O selo é desenhado **depois** das paradas, e no instante da passagem ele
+     * fica exatamente em cima do pino: o nome da parada aparecia cortado, só
+     * com a borda de fora ("Po…"). O bloco desvia dele como desvia da cartela.
+     */
+    personagem?: { x: number; y: number; r: number };
   },
 ) {
   const { track, t, stops, style } = input;
   // a janela da foto da parada é medida em segundos de **percurso**
   const tl = timelineOr(input.timeline, input.duration);
   const popMeters = Math.max(28, Math.min(190, track.total * 0.014));
+
+  /** o que o bloco do nome não pode cobrir: a cartela, os selos A/B e o personagem */
+  const proibidos: RetanguloNaTela[] = [...(opcoes.proibidos ?? [])];
+  if (opcoes.personagem) {
+    const { x, y, r } = opcoes.personagem;
+    proibidos.push({ x: x - r, y: y - r, w: r * 2, h: r * 2 });
+  }
 
   for (const stop of stops) {
     /*
@@ -2823,7 +2878,7 @@ function drawStops(
 
     // marca no chão (na rota)
     ctx.beginPath();
-    ctx.arc(at.x, at.y, (upcoming ? 3.2 : 4.4) * sf, 0, Math.PI * 2);
+    ctx.arc(at.x, at.y, (upcoming ? 4.2 : 4.4) * sf, 0, Math.PI * 2);
     ctx.fillStyle = upcoming ? hexA(stop.color, 0.55) : stop.color;
     ctx.fill();
 
@@ -2849,8 +2904,28 @@ function drawStops(
     // onda de impacto no instante em que é alcançada
     if (!upcoming && p < 1) drawImpacto(ctx, { x: px, y: py }, stop.color, p, sf);
 
-    const escala = upcoming ? 0.7 : Math.max(0.15, easeOutBack(p));
-    const alfaPino = upcoming ? 0.55 : Math.min(1, 0.3 + p * 1.2);
+    /*
+     * O halo da parada que ainda vem.
+     *
+     * É o que faz o ponto ser **visto** no mapa: sem ele, o pino de 0,7 com 55%
+     * de opacidade sumia no meio das ruas — o usuário reclamou de não enxergar
+     * os pontos. O halo só existe antes da passagem (depois o pino já está
+     * inteiro, com a cor da parada); assim ele também indica qual é a próxima.
+     */
+    if (upcoming) {
+      ctx.beginPath();
+      ctx.arc(px, py, 26 * sf, 0, Math.PI * 2);
+      ctx.fillStyle = hexA(stop.color, 0.16);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(px, py, 26 * sf, 0, Math.PI * 2);
+      ctx.strokeStyle = hexA(stop.color, 0.62);
+      ctx.lineWidth = 2.2 * sf;
+      ctx.stroke();
+    }
+
+    const escala = upcoming ? 0.85 : Math.max(0.15, easeOutBack(p));
+    const alfaPino = upcoming ? 0.8 : Math.min(1, 0.3 + p * 1.2);
 
     /*
      * O pino, no "pipoco" da passagem (o pino das paradas fica em 0,7 até o
@@ -2910,10 +2985,17 @@ function drawStops(
     // de novo, mesmo que já tenha aparecido na ida
     const desde = ultima === null ? -1 : (t - ultima) * tl.percurso;
     const fotoAlpha = foto ? photoWindowAlpha(desde) : 0;
-    const rotuloAlpha =
-      ultima === null || !style.showStopLabels
-        ? 0
-        : Math.min(1, Math.max(0, (t - primeira) * tl.percurso) / ROTULO_ENTRA_S);
+    /*
+     * O nome entra **antes** da passagem (ver `ROTULO_ANTES_S`): é quando a
+     * parada ainda está na frente do personagem, no alto do quadro. Depois de
+     * passar, o pino vai para trás e sai da tela — o nome que nascia só ali
+     * aparecia para ninguém.
+     */
+    const antecedencia = Math.min(ROTULO_ANTES_S, tl.percurso * ROTULO_ANTES_FRACAO);
+    const entrouEm = primeira - antecedencia / Math.max(1e-6, tl.percurso);
+    const rotuloAlpha = !style.showStopLabels
+      ? 0
+      : Math.min(1, Math.max(0, (t - entrouEm) * tl.percurso) / ROTULO_ENTRA_S);
 
     /*
      * Com o pino fora da tela o bloco nem é desenhado: ele já não apareceria, e
@@ -2937,7 +3019,7 @@ function drawStops(
         alfaPino,
         rotuloAlpha,
         quadro: opcoes.quadro,
-        proibidos: opcoes.proibidos ?? [],
+        proibidos,
       });
     }
     ctx.restore();

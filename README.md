@@ -699,6 +699,27 @@ O que passa a acontecer **uma vez por passagem**:
 Na lista lateral, a parada passada mais de uma vez ganha um selo **×2** — é ali
 que você confere se o app entendeu a sua rota.
 
+### O nome da parada entra antes da chegada
+
+O nome da parada nascia **na passagem** — e ali já era tarde: na terceira pessoa
+o pino de uma parada recém-passada fica atrás do personagem e sai da tela em
+menos de um segundo. Era o relato do usuário: *"o ponto que está perto do fim
+demora aparecer e, quando aparece, já está sumindo da tela"*.
+
+Agora o nome entra **2 segundos de vídeo antes** (no máximo 22% do percurso, para
+o vídeo curto não acender tudo junto), que é o único momento em que a parada
+está na frente do personagem, no alto do quadro. O "pipoco" — a onda de impacto
+e o crescimento do pino — continua acontecendo **na passagem**, que é o instante
+de chegada: só o nome chega mais cedo.
+
+Junto vieram duas coisas que fazem os pontos serem vistos:
+
+- a parada que ainda vem ganha um **halo** na cor dela (e o pino subiu de 0,7
+  para 0,85 de escala, com 80% de opacidade);
+- o bloco do nome **desvia do personagem**, como já desviava da cartela final —
+  antes, no instante da passagem, o selo do personagem era desenhado por cima e
+  o nome aparecia cortado, só com a borda de fora.
+
 A conta é feita **por trecho**, e não por ponto: uma rota com um ponto a cada
 100 m passa exatamente por cima da parada sem ter nenhum ponto ali, e medindo por
 ponto a parada "não existiria".

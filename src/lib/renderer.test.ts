@@ -925,10 +925,27 @@ describe("foto da parada no vídeo", () => {
     expect([sx, sy, size]).toEqual([200, 0, 400]);
   });
 
-  it("não aparece antes de passar pela parada", () => {
+  it("aparece antes de passar pela parada", () => {
+    /*
+     * A foto só nascia depois da passagem. Numa parada perto do fim isso é
+     * tarde: o personagem já andou, e o bloco (foto, nome e pino) quase sai
+     * pela borda. Agora ela entra 1,2 s de vídeo antes, enquanto a parada ainda
+     * está na frente do personagem.
+     */
     const { ctx, imagens } = fakeCtx();
     desenhar(ctx, {
-      ...estado(0.45, 14, null),
+      ...estado(0.5 - 0.6 / 14, 14, null),
+      stops: [parada({ photo: SRC })],
+      photos: cacheComFoto,
+    });
+    expect(fotosGrandes({ imagens } as never).length).toBe(1);
+  });
+
+  it("não aparece muito antes de passar pela parada", () => {
+    const { ctx, imagens } = fakeCtx();
+    // 2,5 s de vídeo antes da passagem: cedo demais
+    desenhar(ctx, {
+      ...estado(0.5 - 2.5 / 14, 14, null),
       stops: [parada({ photo: SRC })],
       photos: cacheComFoto,
     });
@@ -948,28 +965,50 @@ describe("foto da parada no vídeo", () => {
     expect(fotosGrandes(tarde).length).toBe(0);
   });
 
-  it("num vídeo longo, a foto dura o mesmo tempo de vídeo (não some por ser rota longa)", () => {
-    // o motivo de a janela ser em segundos: em metros, uma foto numa rota de
-    // 435 km duraria 0,04 s
+  it("continua na tela depois da passagem pelo mesmo tempo de antes", () => {
+    /*
+     * Antecipar a entrada não pode encurtar a saída: se a janela só deslizasse,
+     * a foto sairia 1,2 s mais cedo do que saía. Aqui, 2,3 s depois da parada
+     * (dentro dos 2,6 s de sempre), ela ainda está.
+     */
     const { ctx, imagens } = fakeCtx();
     desenhar(ctx, {
-      ...estado(0.5 + 1.5 / 60, 60, null),
+      ...estado(0.5 + 2.3 / 14, 14, null),
       stops: [parada({ photo: SRC })],
       photos: cacheComFoto,
     });
     expect(fotosGrandes({ imagens } as never).length).toBe(1);
   });
 
-  it("a foto entra com alfa crescente e fica opaca", () => {
+  it("num vídeo longo, a foto dura o mesmo tempo de vídeo (não some por ser rota longa)", () => {
+    // o motivo de a janela ser em segundos: em metros, uma foto numa rota de
+    // 435 km duraria 0,04 s
+    const { ctx, imagens } = fakeCtx();
+    desenhar(ctx, {
+      ...estado(0.5 + 0.5 / 60, 60, null),
+      stops: [parada({ photo: SRC })],
+      photos: cacheComFoto,
+    });
+    expect(fotosGrandes({ imagens } as never).length).toBe(1);
+  });
+
+  it("a foto entra com alfa crescente e chega cheia na passagem", () => {
     // o alfa do desenho é calculado (não lido do contexto), então dá para
-    // conferir: no instante da parada é baixo, meio segundo depois é 1
+    // conferir a rampa: começa a entrar 1,2 s antes e está inteira na parada
+    const entrando = fakeCtx();
     const naHora = fakeCtx();
-    const depois = fakeCtx();
     const comum = { stops: [parada({ photo: SRC })], photos: cacheComFoto };
-    desenhar(naHora.ctx, { ...estado(0.5, 14, null), ...comum });
-    desenhar(depois.ctx, { ...estado(0.5 + 0.6 / 14, 14, null), ...comum });
-    expect(fotosGrandes(naHora).length).toBe(0); // ainda em fade de entrada
-    expect(fotosGrandes(depois)[0].alpha).toBeCloseTo(1, 2);
+    desenhar(entrando.ctx, { ...estado(0.5 - 1.15 / 14, 14, null), ...comum });
+    /*
+     * Medido 0,2 s **depois** da passagem: no quadro exato da passagem o bloco
+     * acompanha o "pipoco" do pino, que começa pequeno e cresce em ~0,1 s.
+     */
+    desenhar(naHora.ctx, { ...estado(0.5 + 0.2 / 14, 14, null), ...comum });
+    const naEntrada = fotosGrandes(entrando)[0];
+    expect(naEntrada).toBeDefined();
+    expect(naEntrada.alpha).toBeGreaterThan(0);
+    expect(naEntrada.alpha).toBeLessThan(1);
+    expect(fotosGrandes(naHora)[0].alpha).toBeCloseTo(1, 2);
   });
 
   it("sem a foto pronta, a etiqueta continua saindo — sem buraco no lugar dela", () => {
@@ -1406,12 +1445,21 @@ describe("parada passada duas vezes", () => {
     const ida = fakeCtx();
     const meio = fakeCtx();
     const volta = fakeCtx();
-    const comum = { ...comVolta({ photo: SRC }), photos: cacheComFoto };
-    desenhar(ida.ctx, { ...estado(0.5 + 1.4 / 14, 14, null), ...comum });
-    // entre as duas passagens a janela de 2,6 s já fechou: a foto não está na tela
-    // (a janela fecha em 0,5 + 2,6/14 = 0,686)
+    /*
+     * As duas passagens ficam mais afastadas do que no `DUAS_VEZES` (0,5 e 0,8):
+     * a foto agora abre 1,2 s **antes** de cada passagem, então com 3 s entre as
+     * duas ela ficaria na tela o tempo todo — e o que este teste guarda é que
+     * ela aparece de novo na volta, não que fica ligada.
+     */
+    const comum = {
+      ...comVolta({ photo: SRC }),
+      passages: { p1: [0.5, 0.9] },
+      photos: cacheComFoto,
+    };
+    // 1 s de vídeo depois de cada passagem: dentro da janela da foto
+    desenhar(ida.ctx, { ...estado(0.5 + 1 / 14, 14, null), ...comum });
     desenhar(meio.ctx, { ...estado(0.7, 14, null), ...comum });
-    desenhar(volta.ctx, { ...estado(0.8 + 1.4 / 14, 14, null), ...comum });
+    desenhar(volta.ctx, { ...estado(0.9 + 1 / 14, 14, null), ...comum });
     expect(fotosGrandes(ida).length).toBe(1);
     expect(fotosGrandes(meio).length).toBe(0);
     expect(fotosGrandes(volta).length).toBe(1);

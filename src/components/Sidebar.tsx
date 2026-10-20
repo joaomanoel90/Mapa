@@ -652,9 +652,9 @@ function Sidebar(props: Props) {
             />
             {s.minimap && (
               <p className="text-[11px] leading-snug text-zinc-500">
-                No canto, abaixo do título: a rota inteira com o pedaço já percorrido em
-                destaque e o personagem marcado — o mapa se desenha sozinho conforme o
-                percurso anda.
+                No canto, abaixo do título: só o contorno da rota, com o pedaço já
+                percorrido em destaque e o personagem marcado. Sem mapa no fundo — ele se
+                desenha sozinho conforme o percurso anda.
               </p>
             )}
             <Toggle

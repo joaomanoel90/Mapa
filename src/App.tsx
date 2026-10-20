@@ -1238,7 +1238,6 @@ function App() {
         settings.basemap,
         camera.cinematic,
         focoDoVideo,
-        settings.minimap,
       ).length;
       if (needed > TILE_BUDGET) {
         throw new Error(budgetAdvice(needed, sugestaoZoom, camera.mode));

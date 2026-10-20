@@ -3674,6 +3674,7 @@ describe("terceira pessoa", () => {
  */
 describe("mapa em miniatura", () => {
   const comMini = (ligado: boolean) => ({ ...style, showMinimap: ligado });
+  const comMini1 = () => comMini(true);
 
   it("fica no canto de cima à esquerda, abaixo do título", () => {
     const semTitulo = minimapLayout(1280, 720);
@@ -3705,7 +3706,7 @@ describe("mapa em miniatura", () => {
     const marcador = f.arcos.find(([x, y, r]) => r >= 5 && r <= 8 && dentro(x, y));
     expect(marcador).toBeDefined();
     // a rota inteira (apagada) e o percorrido (na cor do app, mais grosso)
-    expect(f.tracos.some((t) => t.cor === "rgba(163,230,53,0.34)" && t.largura > 2)).toBe(true);
+    expect(f.tracos.some((t) => t.cor === "rgba(163,230,53,0.4)" && t.largura > 2)).toBe(true);
     expect(f.tracos.some((t) => t.cor === "rgba(163,230,53,1)" && t.largura > 3)).toBe(true);
   });
 
@@ -3718,13 +3719,21 @@ describe("mapa em miniatura", () => {
     expect(f.arcos.some(([x, y, r]) => r >= 5 && r <= 8 && dentro(x, y))).toBe(false);
   });
 
-  it("o aquecimento baixa os blocos da rota inteira", () => {
-    const camera: FrameState["camera"] = { mode: "fit", followZoom: 15 };
-    const sem = tilesForAnimation(track, camera, 1280, 720, "dark", null, null, false);
-    const com = tilesForAnimation(track, camera, 1280, 720, "dark", null, null, true);
-    expect(com.length).toBeGreaterThan(sem.length);
-    // nenhum bloco repetido: o mesmo mapa serve para o quadro e para a caixa
-    const chaves = new Set(com.map((t) => `${t.z}/${t.x}/${t.y}`));
-    expect(chaves.size).toBe(com.length);
+  /*
+   * O canto é só contorno: o usuário pediu para tirar o mapa do fundo ("coloca
+   * só o contorno, não precisa do mapa no fundo"). Isso também tira o custo:
+   * nenhum bloco a mais no aquecimento, nenhuma requisição por quadro.
+   */
+  it("o canto não pede bloco de mapa nenhum", () => {
+    const camera: FrameState["camera"] = { mode: "follow", followZoom: 15 };
+    const comMini = tilesForAnimation(track, camera, 1280, 720, "dark", null, null);
+    expect(comMini.length).toBeGreaterThan(0);
+    // e o desenho não faz `drawImage` no canto (nada de fundo de mapa ali)
+    const f = fakeCtx();
+    desenhar(f.ctx, { ...estado(0.5, 10, null), style: comMini1() });
+    const L = minimapLayout(1280, 720);
+    const dentro = (x: number, y: number, w: number, h: number) =>
+      x >= L.x - 1 && x + w <= L.x + L.w + 1 && y >= L.y - 1 && y + h <= L.y + L.h + 1;
+    expect(f.imagens.some((i) => dentro(i.args[0], i.args[1], i.args[2], i.args[3]))).toBe(false);
   });
 });

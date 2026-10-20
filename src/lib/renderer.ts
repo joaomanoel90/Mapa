@@ -634,12 +634,6 @@ export function tilesForAnimation(
    * parada com o mapa borrado, esperando os blocos do lugar.
    */
   foco?: FocusPoint | null,
-  /**
-   * O vídeo vai mostrar o mapa em miniatura? Então o zoom em que a **rota
-   * inteira** cabe também entra no aquecimento — sem isso o canto começaria o
-   * vídeo vazio e os blocos chegariam no meio da gravação.
-   */
-  minimap?: boolean,
 ): TileRef[] {
   const bm = BASEMAPS[basemap];
   const maxZoom = bm.maxZoom;
@@ -694,24 +688,6 @@ export function tilesForAnimation(
 
   const b = boundsOf(track.pts);
   const centro = { lat: (b.north + b.south) / 2, lng: (b.east + b.west) / 2 };
-
-  /*
-   * O minimapa pede o zoom da rota inteira **na caixa dele**, que tem proporção
-   * diferente da do quadro: a vista do "Rota toda" não serve, e o canto sairia
-   * faltando pedaço nos cantos do quadradinho.
-   */
-  if (minimap) {
-    const caixa = minimapLayout(width, height, 0);
-    despejar(
-      vistaDe({
-        centro,
-        zoom: Math.min(fitZoom(b, caixa.w, caixa.h, 0.1), maxZoom),
-        width: caixa.w,
-        height: caixa.h,
-        maxZoom,
-      }),
-    );
-  }
 
   if (camera.mode === "fit") {
     push(centro, fitZoom(b, width, height, 0.16), 0, false);
@@ -1226,59 +1202,34 @@ export class SceneRenderer {
     const b = boundsOf(pts);
     const centro = { lat: (b.north + b.south) / 2, lng: (b.east + b.west) / 2 };
 
+    /*
+     * Só o **contorno**: nada de blocos de mapa no fundo.
+     *
+     * A primeira versão baixava o mapa inteiro em miniatura e desenhava aqui
+     * também — no vídeo do usuário o canto ficou pesado e poluído, e ele pediu o
+     * oposto ("coloca só o contorno, não precisa do mapa no fundo"). O desenho
+     * esquemático é mais legível justamente por não ter ruas atrás: o que
+     * interessa é a forma do percurso e onde o personagem está nele.
+     *
+     * De quebra, o aquecimento não precisa mais pedir os blocos deste zoom.
+     */
     ctx.save();
-    // a moldura é o fundo: com o mapa ainda chegando, o canto não fura o quadro
     roundRect(ctx, L.x, L.y, L.w, L.h, L.raio);
-    ctx.fillStyle = onDark ? "rgba(9,12,20,0.9)" : "rgba(255,255,255,0.92)";
+    ctx.fillStyle = onDark ? "rgba(9,12,20,0.62)" : "rgba(255,255,255,0.78)";
+    ctx.shadowColor = "rgba(0,0,0,0.35)";
+    ctx.shadowBlur = 14 * sf;
     ctx.fill();
+    ctx.shadowColor = "transparent";
     ctx.save();
     roundRect(ctx, L.x, L.y, L.w, L.h, L.raio);
     ctx.clip();
 
     /*
-     * A vista do minimapa é montada com o tamanho **dele** (e não do quadro):
-     * assim a rota inteira cabe na caixa, e a matriz já sai com a origem no
-     * canto dela.
+     * A vista é montada com o tamanho **da caixa** (e não do quadro): assim a
+     * rota inteira cabe no canto, e a matriz já sai com a origem nele.
      */
     const zoom = Math.min(fitZoom(b, L.w, L.h, 0.1), bm.maxZoom);
     const vista = vistaDe({ centro, zoom, width: L.w, height: L.h, maxZoom: bm.maxZoom });
-
-    const origemX = Math.floor(vista.x0 / TILE_SIZE) * TILE_SIZE;
-    const origemY = Math.floor(vista.y0 / TILE_SIZE) * TILE_SIZE;
-    ctx.setTransform(
-      vista.a,
-      vista.b,
-      vista.c,
-      vista.d,
-      L.x + vista.e + vista.a * origemX + vista.c * origemY,
-      L.y + vista.f + vista.b * origemX + vista.d * origemY,
-    );
-    ctx.imageSmoothingEnabled = true;
-    ctx.imageSmoothingQuality = "high";
-    for (const [tz, tx, ty] of tilesDaVista(vista, 0)) {
-      this.store.request(tz, tx, ty);
-      const r = retanguloDoBloco(vista, tx * TILE_SIZE, ty * TILE_SIZE, TILE_SIZE);
-      // sem congelamento: aqui o bloco é sempre o mesmo, e o que chega depois
-      // só melhora a imagem (não há "troca de nível" no meio do vídeo)
-      const escolha = blocoDoQuadro(this.store, tz, tx, ty, null);
-      if (escolha && "img" in escolha) {
-        ctx.drawImage(escolha.img as CanvasImageSource, r.x - origemX, r.y - origemY, r.w, r.h);
-      } else if (escolha) {
-        const pai = escolha.reserva;
-        ctx.drawImage(
-          pai.img as CanvasImageSource,
-          pai.sx,
-          pai.sy,
-          pai.sw,
-          pai.sh,
-          r.x - origemX,
-          r.y - origemY,
-          r.w,
-          r.h,
-        );
-      }
-    }
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
 
     /** pixel do quadro para um ponto da rota, já deslocado para dentro da caixa */
     const tela = (p: LatLng) => {
@@ -1289,7 +1240,7 @@ export class SceneRenderer {
       };
     };
 
-    // a rota inteira, apagada: é o "onde eu estou" que o mini mapa responde
+    // a rota inteira, apagada: é o "onde eu estou" que o minimapa responde
     const passo = Math.max(1, Math.ceil(pts.length / 320));
     ctx.lineJoin = "round";
     ctx.lineCap = "round";
@@ -1304,7 +1255,7 @@ export class SceneRenderer {
     }
     const fim = tela(pts[pts.length - 1]);
     ctx.lineTo(fim.x, fim.y);
-    ctx.strokeStyle = hexA(style.accent, onDark ? 0.34 : 0.28);
+    ctx.strokeStyle = hexA(style.accent, onDark ? 0.4 : 0.32);
     ctx.lineWidth = Math.max(1.6, 2.4 * sf);
     ctx.stroke();
 
@@ -1336,7 +1287,7 @@ export class SceneRenderer {
     // o personagem
     ctx.beginPath();
     ctx.arc(atual.x, atual.y, Math.max(5, 6.4 * sf), 0, Math.PI * 2);
-    ctx.fillStyle = "rgba(255,255,255,0.95)";
+    ctx.fillStyle = onDark ? "rgba(9,12,20,0.85)" : "rgba(255,255,255,0.95)";
     ctx.fill();
     ctx.beginPath();
     ctx.arc(atual.x, atual.y, Math.max(5, 6.4 * sf), 0, Math.PI * 2);
@@ -1345,7 +1296,7 @@ export class SceneRenderer {
     ctx.stroke();
 
     ctx.restore();
-    // moldura por cima do mapa
+    // moldura
     roundRect(ctx, L.x, L.y, L.w, L.h, L.raio);
     ctx.strokeStyle = hexA(style.accent, 0.6);
     ctx.lineWidth = 1.5 * sf;

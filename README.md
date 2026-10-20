@@ -149,18 +149,28 @@ seguinte sai 8, 16 ou 25 ms depois. A 30 sobram 33 ms. Então:
    fim ("233 blocos saíram do nível anterior"). Agora são três tentativas com espera crescente, e o que
    sobrar aparece no aviso antes do primeiro quadro.
 
-### Importar GPX: os dois motivos de não funcionar no celular
+### Importar GPX: os motivos de não funcionar no celular
 
 1. **O seletor de arquivo era aberto por `input.click()` num input `display: none`.** No Safari
    (iPhone/iPad) isso simplesmente **não abre nada**: o usuário toca em "Importar" e não acontece
    nada — nem arquivo escolhido, nem mensagem. Agora quem abre o seletor é o **rótulo** (`<label>`)
    envolvendo o input, que fica escondido com `sr-only` (recortado, não `display: none`). É o
    navegador quem abre, sem JavaScript no meio.
-2. **O `accept` era curto demais.** No Android o seletor filtra por **tipo MIME**, e um `.gpx`
-   baixado do Strava chega como `application/octet-stream` ou `text/plain` em muitos aparelhos — o
-   arquivo aparecia apagado ou nem aparecia. A lista agora inclui esses tipos, mais `.xml` e `.txt`;
-   quem valida o conteúdo é o `parseGpx`.
-3. **A leitura não depende de `file.text()`.** Onde ele falta (WebView antigo de Android, iOS até 13,
+2. **O `accept` filtrava o seletor — e filtro é "escolhi e não abre".** No Android o seletor filtra
+   por **tipo MIME**, e um `.gpx` baixado do Strava chega como `application/octet-stream`,
+   `text/plain` ou até com o nome **sem extensão** (`StravaGPX`). Mesmo a lista larga deixava arquivo
+   apagado em alguns aparelhos, e arquivo apagado não abre por mais que se toque nele. O input agora
+   **não tem filtro nenhum**; quem valida o conteúdo é o `parseGpx`, que recusa o que não é GPX com
+   um recado claro.
+3. **Limpar o `value` do input no meio do `change` invalida o `File` no Safari do iPhone.** Escolher
+   o arquivo "não abria" por causa disso; o campo agora é limpo no fim da fila (`setTimeout`), depois
+   que o `File` já foi lido.
+4. **Leitura que nunca termina não ficava em silêncio.** Quando o provedor de conteúdo da nuvem
+   entrega o `File` e não devolve os bytes, o `FileReader` fica parado sem `load` nem `error`. Agora
+   há um prazo (`PRAZO_LEITURA_MS`, 30 s) que desiste **com recado**, e o painel mostra
+   *Lendo "arquivo.gpx" (456 KB)…* no instante em que o arquivo é escolhido — se algo falhar, o erro
+   toma o lugar dessa linha.
+5. **A leitura não depende de `file.text()`.** Onde ele falta (WebView antigo de Android, iOS até 13,
    navegador embutido de aplicativo), `lerTextoDoArquivo` usa o `FileReader` como reserva. Antes, esse
    caso caía no aviso genérico *"Não foi possível ler o arquivo. Verifique se é um GPX válido."* —
    culpando um arquivo que estava perfeito. Agora cada falha tem o seu recado: arquivo de 0 byte
@@ -1051,7 +1061,7 @@ ou cortados.
 
 ```bash
 npm run typecheck  # tsc --noEmit
-npm test           # Vitest (817 casos)
+npm test           # Vitest (819 casos)
 npm run check:dist # o build saiu autocontido e sem /src/?
 ```
 

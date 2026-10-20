@@ -1013,7 +1013,16 @@ function App() {
 
   /** Lê um arquivo GPX e monta a rota a partir dele. */
   const importarGpx = useCallback(async (file: File) => {
-    setGpxMsg(null);
+    /*
+     * Um recado **antes** de ler.
+     *
+     * Se a leitura falhar, o aviso de erro toma o lugar; se demorar, o usuário
+     * vê que o app recebeu o arquivo e está trabalhando — em vez de "escolhi e
+     * não abriu".
+     */
+    const nomeDoArquivo = file.name || "arquivo";
+    const tamanho = file.size > 0 ? ` (${Math.max(1, Math.round(file.size / 1024))} KB)` : "";
+    setGpxMsg({ tipo: "info", texto: `Lendo "${nomeDoArquivo}"${tamanho}…` });
     try {
       /*
        * `file.text()` não existe em todo navegador (WebView antigo de Android,

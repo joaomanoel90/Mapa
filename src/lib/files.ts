@@ -39,18 +39,60 @@ export class LeituraIndisponivelError extends Error {
 }
 
 /**
+ * Quanto esperar por um arquivo antes de desistir, em milissegundos.
+ *
+ * Um GPX grande (alguns MB) é lido em décimos de segundo; 30 s é folga de
+ * sobra. O prazo existe para o caso em que a leitura **nunca termina**: o
+ * provedor de conteúdo da nuvem entrega o `File` e não devolve os bytes, e o
+ * `FileReader` fica parado em `EMPTY`, sem `load` nem `error`. Sem prazo, o app
+ * não dizia nada — o usuário escolhia o arquivo e "não abria".
+ */
+export const PRAZO_LEITURA_MS = 30_000;
+
+/** A promessa, ou o erro do prazo — o que chegar primeiro. */
+async function comPrazo<T>(
+  promessa: Promise<T>,
+  prazoMs: number,
+  aoEstourar: () => Error,
+): Promise<T> {
+  let relogio: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promessa,
+      new Promise<never>((_, rejeitar) => {
+        relogio = setTimeout(() => rejeitar(aoEstourar()), prazoMs);
+      }),
+    ]);
+  } finally {
+    if (relogio !== undefined) clearTimeout(relogio);
+  }
+}
+
+/**
  * O texto do arquivo.
  *
  * - usa `file.text()` quando existe;
  * - cai para o `FileReader` quando não existe (ou quando o `text()` falha, o
  *   que acontece com alguns arquivos entregues por provedores de conteúdo do
  *   Android);
- * - recusa arquivo vazio com uma mensagem que diz o que fazer.
+ * - recusa arquivo vazio com uma mensagem que diz o que fazer;
+ * - desiste com recado depois de `prazoMs` (ver `PRAZO_LEITURA_MS`).
  */
-export async function lerTextoDoArquivo(file: Blob, nome?: string): Promise<string> {
+export async function lerTextoDoArquivo(
+  file: Blob,
+  nome?: string,
+  prazoMs: number = PRAZO_LEITURA_MS,
+): Promise<string> {
   const rotulo = nome ?? (file as Blob & { name?: string }).name ?? "arquivo";
   if (file.size === 0) throw new ArquivoVazioError(rotulo);
 
+  return comPrazo(lerDeFato(file, rotulo), prazoMs, () =>
+    new LeituraIndisponivelError(rotulo, "o arquivo não terminou de ser lido"),
+  );
+}
+
+/** As duas tentativas de leitura, sem prazo. */
+async function lerDeFato(file: Blob, rotulo: string): Promise<string> {
   const moderno = file as Blob & { text?: () => Promise<string> };
   if (typeof moderno.text === "function") {
     try {

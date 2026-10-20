@@ -45,6 +45,7 @@ import {
   type Bounds,
   type IndexRange,
   type LatLng,
+  type Sample,
   type Track,
 } from "./geo";
 
@@ -77,6 +78,16 @@ export type SceneStyle = {
   showSummary: boolean;
   /** painel de números no canto (velocidade, distância, relógio) */
   showHud: boolean;
+  /**
+   * Mapa em miniatura no canto, abaixo do título.
+   *
+   * Mostra a rota **inteira** pequena, com o pedaço já percorrido em destaque e
+   * o personagem marcado: é a resposta ao "tem como ir desenhando no canto da
+   * tela em baixo do título o mapa que está sendo percorrido". Sem ele, quem
+   * está na terceira pessoa vê só alguns metros à frente e não sabe onde está
+   * no percurso.
+   */
+  showMinimap?: boolean;
   /**
    * No HUD, mostra o **ritmo** (min/km) no lugar da velocidade.
    *
@@ -351,6 +362,30 @@ export function vistaDe(input: {
 }
 
 /**
+ * Onde fica o mapa em miniatura e qual é o tamanho dele.
+ *
+ * Fica no canto superior esquerdo, **abaixo do título** (`abaixoDe` = a altura
+ * em que o título terminou). O quadrado é proporcional ao menor lado do quadro,
+ * então no 9:16 e no 16:9 ele ocupa a mesma fração da tela.
+ *
+ * É uma função pura porque o tamanho dele também decide **quais blocos baixar**
+ * antes de gravar (`tilesForAnimation`): o aquecimento e o desenho têm de usar
+ * exatamente a mesma caixa.
+ */
+export function minimapLayout(
+  width: number,
+  height: number,
+  abaixoDe = 0,
+): { x: number; y: number; w: number; h: number; raio: number } {
+  const sf = Math.max(0.55, Math.min(1.6, Math.min(width, height) / 720));
+  const pad = 26 * sf;
+  const w = Math.round(Math.min(width - pad * 2, Math.min(width, height) * 0.36));
+  const h = Math.round(w * 0.82);
+  const y = Math.round(abaixoDe > 0 ? abaixoDe + 14 * sf : pad);
+  return { x: Math.round(pad), y, w, h, raio: 14 * sf };
+}
+
+/**
  * A folga (em fração do menor lado) entre o personagem e a borda do quadro.
  *
  * O selo dele tem ~34 px de raio em 720 de largura: 6% do menor lado deixam o
@@ -599,6 +634,12 @@ export function tilesForAnimation(
    * parada com o mapa borrado, esperando os blocos do lugar.
    */
   foco?: FocusPoint | null,
+  /**
+   * O vídeo vai mostrar o mapa em miniatura? Então o zoom em que a **rota
+   * inteira** cabe também entra no aquecimento — sem isso o canto começaria o
+   * vídeo vazio e os blocos chegariam no meio da gravação.
+   */
+  minimap?: boolean,
 ): TileRef[] {
   const bm = BASEMAPS[basemap];
   const maxZoom = bm.maxZoom;
@@ -653,6 +694,24 @@ export function tilesForAnimation(
 
   const b = boundsOf(track.pts);
   const centro = { lat: (b.north + b.south) / 2, lng: (b.east + b.west) / 2 };
+
+  /*
+   * O minimapa pede o zoom da rota inteira **na caixa dele**, que tem proporção
+   * diferente da do quadro: a vista do "Rota toda" não serve, e o canto sairia
+   * faltando pedaço nos cantos do quadradinho.
+   */
+  if (minimap) {
+    const caixa = minimapLayout(width, height, 0);
+    despejar(
+      vistaDe({
+        centro,
+        zoom: Math.min(fitZoom(b, caixa.w, caixa.h, 0.1), maxZoom),
+        width: caixa.w,
+        height: caixa.h,
+        maxZoom,
+      }),
+    );
+  }
 
   if (camera.mode === "fit") {
     push(centro, fitZoom(b, width, height, 0.16), 0, false);
@@ -1136,6 +1195,162 @@ export class SceneRenderer {
     onProgress(1);
     const faltando = faltamAgora().length;
     return { total: unique.length, faltando };
+  }
+
+  /**
+   * O mapa em miniatura: a rota inteira pequena no canto, com o que já foi
+   * percorrido em destaque.
+   *
+   * Ele usa **os mesmos blocos do mapa** (no zoom em que a rota inteira cabe),
+   * e não um desenho esquemático: o formato das ruas é o que faz o mini mapa ser
+   * reconhecível como "o mapa do percurso". Esses blocos são baixados no
+   * aquecimento (`tilesForAnimation`) e não mudam durante o vídeo — o único
+   * movimento é a linha percorrida e o ponto do personagem.
+   */
+  private drawMinimap(
+    ctx: CanvasRenderingContext2D,
+    width: number,
+    height: number,
+    input: FrameState,
+    sample: Sample,
+    onDark: boolean,
+    abaixoDe: number,
+  ) {
+    const { style, track } = input;
+    const pts = track.pts;
+    if (pts.length < 2) return;
+
+    const bm = BASEMAPS[style.basemap];
+    const sf = Math.max(0.55, Math.min(1.6, Math.min(width, height) / 720));
+    const L = minimapLayout(width, height, abaixoDe);
+    const b = boundsOf(pts);
+    const centro = { lat: (b.north + b.south) / 2, lng: (b.east + b.west) / 2 };
+
+    ctx.save();
+    // a moldura é o fundo: com o mapa ainda chegando, o canto não fura o quadro
+    roundRect(ctx, L.x, L.y, L.w, L.h, L.raio);
+    ctx.fillStyle = onDark ? "rgba(9,12,20,0.9)" : "rgba(255,255,255,0.92)";
+    ctx.fill();
+    ctx.save();
+    roundRect(ctx, L.x, L.y, L.w, L.h, L.raio);
+    ctx.clip();
+
+    /*
+     * A vista do minimapa é montada com o tamanho **dele** (e não do quadro):
+     * assim a rota inteira cabe na caixa, e a matriz já sai com a origem no
+     * canto dela.
+     */
+    const zoom = Math.min(fitZoom(b, L.w, L.h, 0.1), bm.maxZoom);
+    const vista = vistaDe({ centro, zoom, width: L.w, height: L.h, maxZoom: bm.maxZoom });
+
+    const origemX = Math.floor(vista.x0 / TILE_SIZE) * TILE_SIZE;
+    const origemY = Math.floor(vista.y0 / TILE_SIZE) * TILE_SIZE;
+    ctx.setTransform(
+      vista.a,
+      vista.b,
+      vista.c,
+      vista.d,
+      L.x + vista.e + vista.a * origemX + vista.c * origemY,
+      L.y + vista.f + vista.b * origemX + vista.d * origemY,
+    );
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = "high";
+    for (const [tz, tx, ty] of tilesDaVista(vista, 0)) {
+      this.store.request(tz, tx, ty);
+      const r = retanguloDoBloco(vista, tx * TILE_SIZE, ty * TILE_SIZE, TILE_SIZE);
+      // sem congelamento: aqui o bloco é sempre o mesmo, e o que chega depois
+      // só melhora a imagem (não há "troca de nível" no meio do vídeo)
+      const escolha = blocoDoQuadro(this.store, tz, tx, ty, null);
+      if (escolha && "img" in escolha) {
+        ctx.drawImage(escolha.img as CanvasImageSource, r.x - origemX, r.y - origemY, r.w, r.h);
+      } else if (escolha) {
+        const pai = escolha.reserva;
+        ctx.drawImage(
+          pai.img as CanvasImageSource,
+          pai.sx,
+          pai.sy,
+          pai.sw,
+          pai.sh,
+          r.x - origemX,
+          r.y - origemY,
+          r.w,
+          r.h,
+        );
+      }
+    }
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+
+    /** pixel do quadro para um ponto da rota, já deslocado para dentro da caixa */
+    const tela = (p: LatLng) => {
+      const w = project(p.lat, p.lng, vista.z);
+      return {
+        x: L.x + vista.a * w.x + vista.c * w.y + vista.e,
+        y: L.y + vista.b * w.x + vista.d * w.y + vista.f,
+      };
+    };
+
+    // a rota inteira, apagada: é o "onde eu estou" que o mini mapa responde
+    const passo = Math.max(1, Math.ceil(pts.length / 320));
+    ctx.lineJoin = "round";
+    ctx.lineCap = "round";
+    ctx.beginPath();
+    let primeiro = true;
+    for (let i = 0; i < pts.length; i += passo) {
+      const p = tela(pts[i]);
+      if (primeiro) {
+        ctx.moveTo(p.x, p.y);
+        primeiro = false;
+      } else ctx.lineTo(p.x, p.y);
+    }
+    const fim = tela(pts[pts.length - 1]);
+    ctx.lineTo(fim.x, fim.y);
+    ctx.strokeStyle = hexA(style.accent, onDark ? 0.34 : 0.28);
+    ctx.lineWidth = Math.max(1.6, 2.4 * sf);
+    ctx.stroke();
+
+    // o percorrido, na cor do app
+    const ate = Math.max(0, Math.min(pts.length - 1, sample.index));
+    ctx.beginPath();
+    ctx.moveTo(tela(pts[0]).x, tela(pts[0]).y);
+    for (let i = 1; i <= ate; i++) {
+      const p = tela(pts[i]);
+      ctx.lineTo(p.x, p.y);
+    }
+    const atual = tela(sample.pos);
+    ctx.lineTo(atual.x, atual.y);
+    ctx.strokeStyle = hexA(style.accent, 1);
+    ctx.lineWidth = Math.max(2.2, 3.2 * sf);
+    ctx.stroke();
+
+    // partida e chegada
+    const ponta = (p: LatLng, cor: string) => {
+      const q = tela(p);
+      ctx.beginPath();
+      ctx.arc(q.x, q.y, Math.max(2.6, 3.4 * sf), 0, Math.PI * 2);
+      ctx.fillStyle = cor;
+      ctx.fill();
+    };
+    ponta(pts[0], "#22c55e");
+    ponta(pts[pts.length - 1], "#f87171");
+
+    // o personagem
+    ctx.beginPath();
+    ctx.arc(atual.x, atual.y, Math.max(5, 6.4 * sf), 0, Math.PI * 2);
+    ctx.fillStyle = "rgba(255,255,255,0.95)";
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(atual.x, atual.y, Math.max(5, 6.4 * sf), 0, Math.PI * 2);
+    ctx.strokeStyle = hexA(style.accent, 1);
+    ctx.lineWidth = Math.max(2, 2.6 * sf);
+    ctx.stroke();
+
+    ctx.restore();
+    // moldura por cima do mapa
+    roundRect(ctx, L.x, L.y, L.w, L.h, L.raio);
+    ctx.strokeStyle = hexA(style.accent, 0.6);
+    ctx.lineWidth = 1.5 * sf;
+    ctx.stroke();
+    ctx.restore();
   }
 
   render(ctx: CanvasRenderingContext2D, width: number, height: number, input: FrameState) {
@@ -1696,6 +1911,14 @@ export class SceneRenderer {
     const headerBottom = style.showTitle
       ? drawTitle(ctx, width, input, sample, onDark, sf)
       : 0;
+
+    /*
+     * O mapa em miniatura, logo abaixo do título: a rota inteira pequena, com o
+     * pedaço percorrido em destaque. Fica antes dos outros enfeites de propósito
+     * — no canto de cima à esquerda ele não disputa espaço com o HUD (direita)
+     * nem com a legenda (embaixo).
+     */
+    if (style.showMinimap) this.drawMinimap(ctx, width, height, input, sample, onDark, headerBottom);
 
     // --- overlays ---
     if (style.showProgress) drawProgress(ctx, width, height, input, sf);

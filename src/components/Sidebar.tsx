@@ -645,6 +645,19 @@ function Sidebar(props: Props) {
               onChange={(v) => update("showHud", v)}
             />
             <Toggle
+              icon="🗺️"
+              label="Mapa em miniatura"
+              checked={s.minimap}
+              onChange={(v) => update("minimap", v)}
+            />
+            {s.minimap && (
+              <p className="text-[11px] leading-snug text-zinc-500">
+                No canto, abaixo do título: a rota inteira com o pedaço já percorrido em
+                destaque e o personagem marcado — o mapa se desenha sozinho conforme o
+                percurso anda.
+              </p>
+            )}
+            <Toggle
               icon="🏁"
               label="Cartela final"
               checked={s.endCard}

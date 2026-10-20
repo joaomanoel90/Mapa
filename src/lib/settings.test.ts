@@ -74,6 +74,10 @@ describe("sanitizeSettings", () => {
   it("liga a exportação rápida por padrão", () => {
     // o app cai sozinho para o MediaRecorder quando o navegador não suporta
     expect(DEFAULT_SETTINGS.fastExport).toBe(true);
+    // o mapa em miniatura nasce ligado: é o que mostra onde o personagem está
+    expect(DEFAULT_SETTINGS.minimap).toBe(true);
+    expect(sanitizeSettings(raw({ minimap: "sim" })).minimap).toBeUndefined();
+    expect(sanitizeSettings(raw({ minimap: false })).minimap).toBe(false);
   });
 
   it("só aceita os três modos de cor da rota", () => {

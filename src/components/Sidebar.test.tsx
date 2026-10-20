@@ -371,3 +371,15 @@ describe("painel: o botão de gravar anuncia o motor", () => {
     expect(botao("Gravar em tempo real")).not.toBeNull();
   });
 });
+
+describe("painel: mapa em miniatura", () => {
+  it("nasce ligado e o clique desliga", () => {
+    montar(<Painel />);
+    expect(botao("Mapa em miniatura").getAttribute("aria-checked")).toBe("true");
+    // o texto diz onde ele aparece no vídeo
+    expect(container.textContent ?? "").toContain("abaixo do título");
+    clicar(botao("Mapa em miniatura"));
+    expect(botao("Mapa em miniatura").getAttribute("aria-checked")).toBe("false");
+    expect(container.textContent ?? "").not.toContain("abaixo do título");
+  });
+});

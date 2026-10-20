@@ -1699,8 +1699,18 @@ export class SceneRenderer {
        * o que ainda falta, com a cor do percorrido.
        */
       const upto = Math.min(sample.index, track.pts.length - 1);
-      // o trecho percorrido também cresce com a animação, então leva o mesmo corte
-      const percorridos = visibleRuns(track.pts, janela, upto);
+      /*
+       * O trecho percorrido cresce com a animação, então leva o mesmo corte —
+       * mas precisa de **uma âncora**, senão o traço não existe.
+       *
+       * `pathOf` só liga o personagem ao último ponto traçado; `visibleRuns`
+       * devolve *segmentos*, e num traçado de poucos pontos (travessia) nenhum
+       * segmento inteiro cai na tela. A lista vazia deixava o caminho só com o
+       * `moveTo` no personagem: **o percurso não aparecia preenchido**. Numa rota
+       * de cidade isso dura um quadro; numa travessia é o vídeo inteiro.
+       */
+      const vistos = visibleRuns(track.pts, janela, upto);
+      const percorridos: IndexRange[] = vistos.length > 0 ? vistos : [[upto, upto]];
       const cur = toXY(sample.pos);
       ctx.save();
       ctx.lineJoin = "round";

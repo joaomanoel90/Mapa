@@ -43,6 +43,15 @@ type Props = {
   /** câmera de terceira pessoa: mais perto e o personagem abaixo do centro */
   thirdPerson: boolean;
   showRoute: boolean;
+  /**
+   * Mostra o rastro do que já foi percorrido, na cor do trajeto.
+   *
+   * Vinha do painel só para o **vídeo**: a prévia desenhava a trilha sempre, e
+   * quem desligava o interruptor continuava vendo a linha sólida atravessando o
+   * mapa — numa rota longa, quase reta e vista de muito longe, ela se sobrepõe
+   * à linha pontilhada e parece uma linha fixa e paralela ao personagem.
+   */
+  showTraveled: boolean;
   onAddPoint: (p: LatLng) => void;
   onMovePoint: (index: number, p: LatLng) => void;
   onRemovePoint: (index: number) => void;
@@ -99,6 +108,7 @@ export default function MapView(props: Props) {
     followZoom,
     thirdPerson,
     showRoute,
+    showTraveled,
     onAddPoint,
     onMovePoint,
     onRemovePoint,
@@ -446,6 +456,22 @@ export default function MapView(props: Props) {
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
+    /*
+     * Desligado no painel = sem trilha na prévia, como já era no vídeo. Antes a
+     * polyline era criada e redesenhada sempre, e o interruptor só valia para o
+     * arquivo exportado: na tela ficava uma linha sólida da cor do trajeto
+     * correndo junto do personagem.
+     */
+    if (!showTraveled) {
+      if (traveledRef.current) {
+        traveledRef.current.setLatLngs([]);
+        map.removeLayer(traveledRef.current);
+        traveledRef.current = null;
+      }
+      trilhaRef.current.track = null;
+      trilhaRef.current.pontos = [];
+      return;
+    }
     if (!traveledRef.current) {
       traveledRef.current = L.polyline([], {
         color: accent,
@@ -486,7 +512,7 @@ export default function MapView(props: Props) {
       L.latLng(p.lat, p.lng),
     );
     line.setLatLngs(trilha.pontos);
-  }, [track, progress, accent]);
+  }, [track, progress, accent, showTraveled]);
 
   /* --- marcador do personagem --- */
   useEffect(() => {

@@ -454,6 +454,48 @@ export type Sample = {
   distance: number;
 };
 
+/** Latitude -> y de Mercator (0 no topo, 1 embaixo), a mesma conta do `project`. */
+function mercatorY(lat: number): number {
+  const clamped = Math.max(-85.05112878, Math.min(85.05112878, lat));
+  const s = Math.sin((clamped * Math.PI) / 180);
+  return 0.5 - Math.log((1 + s) / (1 - s)) / (4 * Math.PI);
+}
+
+/** O inverso de `mercatorY`. */
+function latDeMercator(y: number): number {
+  return (Math.atan(Math.sinh(Math.PI * (1 - 2 * y))) * 180) / Math.PI;
+}
+
+/**
+ * O ponto a uma fração `f` do segmento `a`→`b`, **na projeção do mapa**.
+ *
+ * Interpolar a latitude e a longitude direto é o que estraga rotas longas: o
+ * mapa desenha a rota como uma **reta em Mercator**, e entre dois pontos a
+ * latitude não anda em linha reta nessa projeção. Num trecho de 12.600 km
+ * (São Paulo → Jerusalém) o personagem saía até **58 px** ao lado da linha
+ * desenhada no zoom 7 — e o rastro, que termina nele, aparecia como uma segunda
+ * linha paralela à rota. Em trecho de cidade a diferença é de frações de pixel,
+ * e é por isso que o defeito só apareceu nas travessias.
+ *
+ * A longitude anda pelo caminho mais curto (cruzando o antimeridiano pelo lado
+ * certo) e é normalizada de volta para -180..180.
+ */
+export function posicaoNoSegmento(a: LatLng, b: LatLng, f: number): LatLng {
+  const k = Math.max(0, Math.min(1, Number.isFinite(f) ? f : 0));
+  // as pontas são exatamente as pontas (nada de ruído de projeção em t=0 e t=1)
+  if (k === 0) return { lat: a.lat, lng: a.lng };
+  if (k === 1) return { lat: b.lat, lng: b.lng };
+  const ya = mercatorY(a.lat);
+  const yb = mercatorY(b.lat);
+  let dLng = b.lng - a.lng;
+  if (dLng > 180) dLng -= 360;
+  else if (dLng < -180) dLng += 360;
+  let lng = a.lng + dLng * k;
+  if (lng > 180) lng -= 360;
+  else if (lng < -180) lng += 360;
+  return { lat: latDeMercator(ya + (yb - ya) * k), lng };
+}
+
 /** Amostra a rota em t (0..1) da distância total. */
 export function sampleTrack(track: Track, t: number): Sample {
   const pts = track.pts;
@@ -484,10 +526,11 @@ export function sampleTrack(track: Track, t: number): Sample {
   const f = segLen > 0 ? (target - segStart) / segLen : 0;
   const a = pts[idx - 1];
   const b = pts[idx];
-  const pos = {
-    lat: a.lat + (b.lat - a.lat) * f,
-    lng: a.lng + (b.lng - a.lng) * f,
-  };
+  /*
+   * O ponto anda **na projeção do mapa** (ver `posicaoNoSegmento`): é o que
+   * mantém o personagem sobre a linha que está desenhada, e não ao lado dela.
+   */
+  const pos = posicaoNoSegmento(a, b, f);
   let head = bearing(a, b);
   if (!isFinite(head) || (Math.abs(b.lat - a.lat) < 1e-9 && Math.abs(b.lng - a.lng) < 1e-9)) {
     head = 0;

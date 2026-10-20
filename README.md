@@ -380,6 +380,29 @@ câmera do painel **não** é alterada: o ajuste vale para aquela gravação. Se
 zoom mínimo couber (rota absurda ou orçamento apertado), o vídeo sai na "Rota
 toda", também avisado.
 
+### A linha paralela das travessias
+
+Numa travessia apareciam **duas linhas** quase verticais, uma ao lado da outra, e o
+personagem andava pela da direita — a que não era a rota.
+
+Eram dois erros que só se somem em trecho de cidade:
+
+1. **O personagem saía da rota.** A posição entre dois pontos era interpolada em
+   latitude/longitude, mas o mapa desenha a rota como **reta na projeção de
+   Mercator**. Em 2 km a diferença é submilimétrica; em 12.000 km ela chega a
+   **58 px** no meio do percurso. Agora a interpolação é feita na mesma projeção
+   do desenho (`posicaoNoSegmento`), com as pontas exatas e a longitude pelo
+   caminho mais curto — o que também resolve rotas que cruzam o antimeridiano.
+2. **O rastro ia até o fim do segmento.** Ele terminava no personagem, mas a cor do
+   percorrido cobria *todo* o segmento atual antes de voltar — pintando o caminho
+   que ainda faltava. Numa rota de cidade são metros; num traçado de poucos pontos
+   é o oceano inteiro. Agora o rastro para no começo do segmento e fecha no
+   personagem.
+
+O teste que guarda isso mede o desvio do personagem até a reta desenhada (abaixo
+de **0,5 px** numa travessia de 12.000 km) e confere que nenhum ponto do rastro
+passa da posição do personagem.
+
 ### Mapa em miniatura
 
 No canto de cima à esquerda, **abaixo do título**, o vídeo pode mostrar a rota
@@ -1021,7 +1044,7 @@ ou cortados.
 
 ```bash
 npm run typecheck  # tsc --noEmit
-npm test           # Vitest (811 casos)
+npm test           # Vitest (816 casos)
 npm run check:dist # o build saiu autocontido e sem /src/?
 ```
 

@@ -350,9 +350,13 @@ inteira em miniatura:
 
 Ele responde a uma pergunta que a câmera de terceira pessoa não responde: lá só
 se vê alguns metros à frente, e não se sabe **onde no percurso** o personagem
-está. O minimapa usa os mesmos blocos de mapa do vídeo, no zoom em que a rota
-inteira cabe na caixa — e esses blocos entram no aquecimento, então ele já
-começa o vídeo desenhado, sem bloco chegando no meio.
+está.
+
+**É só o contorno, sem mapa no fundo** — e sem bloco nenhum para baixar. A
+primeira versão desenhava o mapa em miniatura ali dentro; ficou pesado e
+poluído, e o pedido foi o oposto: o que interessa é a forma do percurso e onde
+o personagem está nele. De quebra, o aquecimento não pede nada a mais nem há
+requisição por quadro: são poucas linhas e três círculos.
 
 O tamanho é proporcional ao menor lado do quadro, então ocupa a mesma fração da
 tela no 16:9 e no 9:16. **Desligado** no interruptor "Mapa em miniatura", nada

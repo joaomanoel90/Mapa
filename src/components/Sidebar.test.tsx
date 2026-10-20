@@ -385,3 +385,16 @@ describe("painel: mapa em miniatura", () => {
     expect(container.textContent ?? "").not.toContain("abaixo do título");
   });
 });
+
+describe("painel: avatar do personagem", () => {
+  it("oferece a foto do avatar e explica que ela substitui o emoji", () => {
+    montar(<Painel />);
+    const texto = container.textContent ?? "";
+    expect(texto).toContain("Avatar (no lugar do emoji)");
+    expect(texto).toContain("vale o emoji do personagem escolhido");
+    // o campo de foto é um input de arquivo dentro de um rótulo (o Safari
+    // precisa disso) e aceita imagem
+    const arquivo = container.querySelector<HTMLInputElement>('input[type="file"][accept*="image"]');
+    expect(arquivo).not.toBeNull();
+  });
+});

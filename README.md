@@ -334,6 +334,23 @@ referência só anda quando a variação passa do limiar, o que mantém o erro d
 total abaixo do próprio limiar — em vez de acumular o erro das pontas, como
 faria um suavizado.
 
+### Avatar no personagem
+
+O selo que anda pelo mapa pode mostrar uma **foto** no lugar do emoji:
+
+| | |
+|---|---|
+| **Sem foto** | o emoji do personagem escolhido (carro, bike, cachorro…) |
+| **Com foto** | a foto, recortada em círculo dentro do mesmo selo |
+| **Seta e pulso** | continuam iguais: a seta diz o rumo, o anel bate no passo |
+
+A foto é reduzida e guardada como as outras (640 px, JPEG) e passa pela mesma
+peneira do `localStorage`; um endereço de imagem na internet é descartado — o
+avatar tem de ser um arquivo escolhido aqui. O emoji gira com o rumo (o barco
+aponta para onde vai); a foto **não** gira, para a cara não sair de cabeça para
+baixo. Enquanto a foto não chega, o emoji continua no lugar: o personagem nunca
+some do vídeo.
+
 ### Mapa em miniatura
 
 No canto de cima à esquerda, **abaixo do título**, o vídeo pode mostrar a rota
@@ -975,7 +992,7 @@ ou cortados.
 
 ```bash
 npm run typecheck  # tsc --noEmit
-npm test           # Vitest (800 casos)
+npm test           # Vitest (804 casos)
 npm run check:dist # o build saiu autocontido e sem /src/?
 ```
 

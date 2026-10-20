@@ -3737,3 +3737,49 @@ describe("mapa em miniatura", () => {
     expect(f.imagens.some((i) => dentro(i.args[0], i.args[1], i.args[2], i.args[3]))).toBe(false);
   });
 });
+
+/*
+ * O avatar do personagem — o pedido: "teria como colocar tipo um avatar no
+ * personagem".
+ *
+ * O que se prova: com a foto pronta no cache, ela entra **dentro do selo** (um
+ * `drawImage` no lugar do emoji); sem foto, ou com a foto ainda chegando, o
+ * emoji continua ali — o personagem nunca some do vídeo.
+ */
+describe("avatar do personagem", () => {
+  const FOTO = "data:image/jpeg;base64,AAAA";
+  const imagem = { width: 400, height: 400 } as unknown as PhotoImage;
+  const cache = (pronta: boolean): PhotoLookup => ({
+    get: (src) => (pronta && src === FOTO ? imagem : null),
+    has: () => pronta,
+  });
+
+  it("com a foto pronta, o selo mostra a foto e não o emoji", () => {
+    const f = fakeCtx();
+    desenhar(f.ctx, {
+      ...estado(0.5, 10, null),
+      style: { ...style, avatar: FOTO },
+      photos: cache(true),
+    });
+    // o emoji do "carro" não foi escrito na tela
+    expect(f.textos).not.toContain("🚗");
+    // e uma imagem foi desenhada (a foto dentro do selo)
+    expect(f.imagens.length).toBeGreaterThan(0);
+  });
+
+  it("sem foto (ou enquanto ela não chega), cai no emoji", () => {
+    const f = fakeCtx();
+    desenhar(f.ctx, {
+      ...estado(0.5, 10, null),
+      style: { ...style, avatar: FOTO },
+      photos: cache(false),
+    });
+    expect(f.textos).toContain("🚗");
+  });
+
+  it("sem avatar escolhido, nada muda", () => {
+    const f = fakeCtx();
+    desenhar(f.ctx, { ...estado(0.5, 10, null), photos: cache(true) });
+    expect(f.textos).toContain("🚗");
+  });
+});

@@ -120,6 +120,15 @@ export type Settings = {
    * passa por mensageiro nenhum.
    */
   cardPhoto: string;
+  /**
+   * Avatar do personagem: uma foto (data URL) que entra **no lugar do emoji**
+   * dentro do selo que anda pelo mapa.
+   *
+   * É a resposta ao "teria como colocar tipo um avatar no personagem": em vez do
+   * carro/bike genérico, a cara de quem fez o percurso (ou o escudo do time).
+   * Vazio = o emoji do personagem escolhido, como sempre foi.
+   */
+  avatar: string;
   title: string;
   subtitle: string;
   aspect: AspectId;
@@ -170,6 +179,7 @@ export const DEFAULT_SETTINGS: Settings = {
   cardTime: "",
   cardNote: "",
   cardPhoto: "",
+  avatar: "",
   title: "Minha rota",
   subtitle: "",
   aspect: "16:9",
@@ -224,6 +234,12 @@ export function sanitizeSettings(raw: Partial<Settings>): Partial<Settings> {
   if (out.cardPhoto !== undefined && !isPhotoDataUrl(out.cardPhoto)) delete out.cardPhoto;
   if (typeof out.cardPhoto === "string" && out.cardPhoto.length > PHOTO_MAX_CHARS) {
     delete out.cardPhoto;
+  }
+  // o avatar passa pelas mesmas regras da foto da cartela: só data URL de
+  // imagem, e dentro do teto que protege o `localStorage`
+  if (out.avatar !== undefined && !isPhotoDataUrl(out.avatar)) delete out.avatar;
+  if (typeof out.avatar === "string" && out.avatar.length > PHOTO_MAX_CHARS) {
+    delete out.avatar;
   }
   if (typeof out.fastExport !== "boolean") delete out.fastExport;
   const profiles = ["car", "bike", "foot", "straight"];

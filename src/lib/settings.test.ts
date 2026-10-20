@@ -78,6 +78,12 @@ describe("sanitizeSettings", () => {
     expect(DEFAULT_SETTINGS.minimap).toBe(true);
     expect(sanitizeSettings(raw({ minimap: "sim" })).minimap).toBeUndefined();
     expect(sanitizeSettings(raw({ minimap: false })).minimap).toBe(false);
+    // o avatar é opcional e passa pela mesma peneira da foto da cartela
+    expect(DEFAULT_SETTINGS.avatar).toBe("");
+    const foto = "data:image/jpeg;base64,AAAA";
+    expect(sanitizeSettings(raw({ avatar: foto })).avatar).toBe(foto);
+    expect(sanitizeSettings(raw({ avatar: "https://exemplo.com/eu.jpg" })).avatar).toBeUndefined();
+    expect(sanitizeSettings(raw({ avatar: "x".repeat(400_001) })).avatar).toBeUndefined();
   });
 
   it("só aceita os três modos de cor da rota", () => {

@@ -2,6 +2,7 @@ import { memo } from "react";
 import CitySearch from "./CitySearch";
 import EndCardPanel from "./EndCardPanel";
 import EndpointEditor from "./EndpointEditor";
+import PhotoField from "./PhotoField";
 import StopEditor from "./StopEditor";
 import type { Endpoints } from "../lib/endpoints";
 import { CharacterPicker, AccentPicker } from "./CharacterPicker";
@@ -424,6 +425,25 @@ function Sidebar(props: Props) {
             value={s.characterId}
             onChange={(c) => update("characterId", c.id)}
           />
+          {/*
+            O avatar entra **no lugar do emoji** dentro do selo, na mesma
+            moldura. É opcional de propósito: quem quer o carro ou a bike
+            continua com eles, e quem quer a própria cara (ou o escudo do time)
+            escolhe a foto aqui.
+          */}
+          <div className="rounded-xl border border-white/10 bg-black/30 p-3">
+            <PhotoField
+              valor={s.avatar}
+              onValor={(v) => update("avatar", v)}
+              rotulo="Avatar (no lugar do emoji)"
+              ariaLabel="Avatar do personagem"
+            />
+            <p className="mt-1.5 text-[10.5px] leading-snug text-zinc-500">
+              {s.avatar
+                ? "A foto aparece dentro do selo do personagem, no vídeo e na prévia. A seta continua mostrando o rumo."
+                : "Opcional. Sem foto, vale o emoji do personagem escolhido acima."}
+            </p>
+          </div>
           <div>
             <Label>Cor do rastro</Label>
             <AccentPicker value={s.accent} onChange={(v) => update("accent", v)} />

@@ -472,12 +472,12 @@ function App() {
   useEffect(() => {
     void fotos.ready(
       photoSources(
-        [settings.cardPhoto],
+        [settings.cardPhoto, settings.avatar],
         pois.map((p) => p.photo),
         [endpoints.a?.photo, endpoints.b?.photo],
       ),
     );
-  }, [fotos, settings.cardPhoto, pois, endpoints]);
+  }, [fotos, settings.cardPhoto, settings.avatar, pois, endpoints]);
 
   /**
    * A câmera do vídeo, do painel e da conta de blocos — **uma fonte só**.
@@ -1154,6 +1154,7 @@ function App() {
       showSummary: settings.endCard,
       showHud: settings.showHud,
       showMinimap: settings.minimap,
+      avatar: settings.avatar,
       // a pé o HUD mostra ritmo (min/km) em vez de velocidade
       pace: usaRitmo(settings.activity),
       title: settings.title,
@@ -1253,7 +1254,7 @@ function App() {
        */
       await fotos.ready(
         photoSources(
-          [settings.cardPhoto],
+          [settings.cardPhoto, settings.avatar],
           stops.map((p) => p.photo),
           [endpoints.a?.photo, endpoints.b?.photo],
         ),

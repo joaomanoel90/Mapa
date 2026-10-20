@@ -89,6 +89,14 @@ export type SceneStyle = {
    */
   showMinimap?: boolean;
   /**
+   * Avatar do personagem (data URL da foto), no lugar do emoji.
+   *
+   * Vem separado do `character` porque a foto não é um desenho: o emoji gira
+   * com o rumo (o barco aponta para onde vai) e a cara de quem corre, não — ela
+   * fica sempre de pé dentro do selo, e quem diz a direção é a seta.
+   */
+  avatar?: string;
+  /**
    * No HUD, mostra o **ritmo** (min/km) no lugar da velocidade.
    *
    * Vale para corrida e caminhada: `min/km` é a unidade de quem vai a pé, e o
@@ -2107,15 +2115,52 @@ function drawCharacter(
   ctx.stroke();
 
   /*
-   * O emoji ocupa o selo de verdade: era desenhado com 0,6 do selo, e a figura
-   * ficava pequena dentro de um aro grande — o conjunto parecia ícone de painel,
-   * não personagem.
+   * O avatar, quando existe, toma o lugar do emoji **dentro do selo**: é a
+   * mesma moldura, a mesma seta e o mesmo pulso — o que muda é quem aparece
+   * ali. Recortado em círculo e com o quadrado central da foto (o mesmo
+   * `coverSquare` dos pinos), para uma foto 3:4 não sair achatada.
    */
-  ctx.rotate(rotate ? ((rumo + (character.baseAngle ?? 0)) * Math.PI) / 180 : 0);
-  ctx.font = `${Math.round(badge * 0.78)}px ${EMOJI_FONT}`;
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-  ctx.fillText(character.emoji, 0, badge * 0.03);
+  const avatar = style.avatar ? (input.photos?.get(style.avatar) ?? null) : null;
+  if (avatar) {
+    const r = badge * 0.56;
+    const c = coverSquare(
+      Number(avatar.width) || r,
+      Number(avatar.height) || r,
+    );
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(0, 0, r, 0, Math.PI * 2);
+    ctx.clip();
+    ctx.drawImage(
+      avatar as CanvasImageSource,
+      c.sx,
+      c.sy,
+      c.size,
+      c.size,
+      -r,
+      -r,
+      r * 2,
+      r * 2,
+    );
+    ctx.restore();
+    // um aro fino por dentro separa a foto do aro do acento
+    ctx.beginPath();
+    ctx.arc(0, 0, r, 0, Math.PI * 2);
+    ctx.strokeStyle = "rgba(255,255,255,0.75)";
+    ctx.lineWidth = Math.max(1, 1.6 * sf);
+    ctx.stroke();
+  } else {
+    /*
+     * O emoji ocupa o selo de verdade: era desenhado com 0,6 do selo, e a figura
+     * ficava pequena dentro de um aro grande — o conjunto parecia ícone de
+     * painel, não personagem.
+     */
+    ctx.rotate(rotate ? ((rumo + (character.baseAngle ?? 0)) * Math.PI) / 180 : 0);
+    ctx.font = `${Math.round(badge * 0.78)}px ${EMOJI_FONT}`;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(character.emoji, 0, badge * 0.03);
+  }
 
   ctx.restore();
 }

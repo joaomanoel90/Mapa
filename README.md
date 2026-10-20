@@ -403,6 +403,13 @@ O teste que guarda isso mede o desvio do personagem até a reta desenhada (abaix
 de **0,5 px** numa travessia de 12.000 km) e confere que nenhum ponto do rastro
 passa da posição do personagem.
 
+E há o lado oposto: o rastro precisa **existir**. Ele é desenhado pelo caminho até
+o personagem, e o corte de tela devolve *segmentos* — num traçado de dois pontos
+não há nenhum segmento completo na tela, a lista saía vazia e o traço não era
+desenhado. Numa rota de cidade isso dura um quadro, então ninguém notava; numa
+travessia o vídeo inteiro saía sem o percurso preenchido. Agora o caminho sempre
+tem uma âncora (o começo do trecho atual) para ligar ao personagem.
+
 ### Mapa em miniatura
 
 No canto de cima à esquerda, **abaixo do título**, o vídeo pode mostrar a rota
@@ -1044,7 +1051,7 @@ ou cortados.
 
 ```bash
 npm run typecheck  # tsc --noEmit
-npm test           # Vitest (816 casos)
+npm test           # Vitest (817 casos)
 npm run check:dist # o build saiu autocontido e sem /src/?
 ```
 

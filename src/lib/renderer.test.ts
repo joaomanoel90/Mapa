@@ -225,6 +225,8 @@ function fakeCtx() {
           }
           if (prop === "beginPath") caminho = [];
           if (prop === "stroke") {
+            // o mesmo caminho pode ser traçado várias vezes (sombra, cor, brilho):
+            // os pontos valem até o próximo `beginPath`
             tracosPontos.push(caminho.map(([x, y]) => [x, y]));
             tracos.push({
               cor: String(props.strokeStyle ?? ""),
@@ -3821,10 +3823,32 @@ describe("rastro percorrido", () => {
       .map((t, i) => ({ ...t, pontos: f.tracosPontos[i] }))
       .filter((t) => t.cor === "#a3e635" && t.largura >= 5 && t.largura <= 7)
       .pop();
+    // a rota anda para o norte, então na tela o já percorrido fica **abaixo**
     expect(rastro).toBeDefined();
-    // nada do rastro passa do personagem (na rota, o norte é "para cima")
-    for (const [, y] of rastro!.pontos) expect(y).toBeLessThanOrEqual(yPersonagem + 2);
+    expect(rastro!.pontos.length).toBeGreaterThan(1);
+    for (const [, y] of rastro!.pontos) expect(y).toBeGreaterThanOrEqual(yPersonagem - 2);
     const ultimo = rastro!.pontos[rastro!.pontos.length - 1];
     expect(Math.abs(ultimo[1] - yPersonagem)).toBeLessThan(3);
+  });
+
+  /*
+   * O outro lado da mesma conta: numa travessia (dois pontos) o percurso tem de
+   * **aparecer** preenchido. Com `visibleRuns` devolvendo lista vazia — não há
+   * segmento completo na tela — o `pathOf` ficava só com o `moveTo` no
+   * personagem e o rastro sumia do vídeo inteiro.
+   */
+  it("aparece numa travessia de dois pontos", () => {
+    const longa = buildTrack([
+      { lat: -23.5, lng: -48.4 },
+      { lat: 21.5, lng: -48.4 },
+    ]);
+    const f = fakeCtx();
+    desenhar(f.ctx, { ...estado(0.4, 10, null), camera: { mode: "follow", followZoom: 7 } }, longa);
+    const rastro = f.tracos
+      .map((t, i) => ({ ...t, pontos: f.tracosPontos[i] }))
+      .filter((t) => t.cor === "#a3e635" && t.largura >= 5 && t.largura <= 7)
+      .pop();
+    expect(rastro).toBeDefined();
+    expect(rastro!.pontos.length).toBeGreaterThan(1);
   });
 });

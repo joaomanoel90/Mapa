@@ -1,0 +1,427 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Vídeos de trajeto no mapa — tabela de preços 2026</title>
+    <!--
+      Página de preços para mandar ao cliente (ou imprimir em PDF com Ctrl+P).
+
+      Ela é **autocontida**: sem fonte externa, sem imagem, sem CDN. Pode ser
+      anexada no WhatsApp, aberta do disco ou publicada em qualquer lugar.
+      Os campos entre [ ] são os que você troca antes de enviar.
+    -->
+    <style>
+      :root {
+        --tinta: #14121a;
+        --tinta-fraca: #5b5566;
+        --linha: #e6e2ee;
+        --papel: #ffffff;
+        --fundo: #f6f3fb;
+        --roxo: #6d28d9;
+        --roxo-claro: #f3ecff;
+        --ambar: #b45309;
+        --ambar-claro: #fff7ed;
+        --verde: #15803d;
+      }
+      * { box-sizing: border-box; }
+      html { -webkit-text-size-adjust: 100%; }
+      body {
+        margin: 0;
+        background: var(--fundo);
+        color: var(--tinta);
+        font: 16px/1.55 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      }
+      .folha {
+        max-width: 1000px;
+        margin: 0 auto;
+        padding: 32px 20px 56px;
+      }
+      header.topo { padding: 8px 0 24px; }
+      .selo {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--roxo);
+        background: var(--roxo-claro);
+        border: 1px solid #ddd0ff;
+        border-radius: 999px;
+        padding: 6px 12px;
+      }
+      h1 {
+        font-size: clamp(28px, 5vw, 44px);
+        line-height: 1.1;
+        letter-spacing: -0.02em;
+        margin: 16px 0 10px;
+      }
+      .sub {
+        font-size: 17px;
+        color: var(--tinta-fraca);
+        max-width: 62ch;
+        margin: 0;
+      }
+      .aviso {
+        margin-top: 18px;
+        display: flex;
+        gap: 10px;
+        align-items: flex-start;
+        background: var(--ambar-claro);
+        border: 1px solid #fed7aa;
+        border-radius: 12px;
+        padding: 12px 14px;
+        font-size: 13.5px;
+        color: #7c2d12;
+      }
+
+      h2 {
+        font-size: 13px;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        color: var(--tinta-fraca);
+        margin: 40px 0 14px;
+      }
+
+      .planos {
+        display: grid;
+        gap: 16px;
+        grid-template-columns: repeat(auto-fit, minmax(270px, 1fr));
+      }
+      .plano {
+        background: var(--papel);
+        border: 1px solid var(--linha);
+        border-radius: 18px;
+        padding: 22px 20px;
+        display: flex;
+        flex-direction: column;
+        box-shadow: 0 1px 0 rgba(20, 18, 26, 0.03);
+      }
+      .plano.destaque { border-color: #c9b6ff; box-shadow: 0 10px 30px -18px rgba(109, 40, 217, 0.55); }
+      .plano h3 {
+        margin: 0;
+        font-size: 18px;
+        letter-spacing: -0.01em;
+      }
+      .plano .para {
+        margin: 4px 0 16px;
+        font-size: 13px;
+        color: var(--tinta-fraca);
+      }
+      .preco {
+        display: flex;
+        align-items: baseline;
+        gap: 6px;
+        margin-bottom: 2px;
+      }
+      .preco .valor { font-size: 34px; font-weight: 800; letter-spacing: -0.03em; }
+      .preco .por { font-size: 14px; color: var(--tinta-fraca); }
+      .condicao {
+        display: inline-block;
+        font-size: 12.5px;
+        font-weight: 600;
+        color: var(--roxo);
+        background: var(--roxo-claro);
+        border-radius: 999px;
+        padding: 3px 10px;
+        margin-bottom: 14px;
+      }
+      .plano ul {
+        margin: 16px 0 0;
+        padding: 0;
+        list-style: none;
+        display: grid;
+        gap: 8px;
+        font-size: 14.5px;
+      }
+      .plano li { display: flex; gap: 8px; }
+      .plano li::before {
+        content: "";
+        flex: 0 0 16px;
+        height: 16px;
+        margin-top: 3px;
+        border-radius: 50%;
+        background: var(--roxo-claro);
+        box-shadow: inset 0 0 0 1px #ddd0ff;
+      }
+      .plano .nota {
+        margin-top: auto;
+        padding-top: 16px;
+        font-size: 12.5px;
+        color: var(--tinta-fraca);
+      }
+
+      .etapas {
+        display: grid;
+        gap: 12px;
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        counter-reset: etapa;
+      }
+      .etapa {
+        background: var(--papel);
+        border: 1px solid var(--linha);
+        border-radius: 14px;
+        padding: 16px 18px;
+        font-size: 14px;
+      }
+      .etapa b { display: block; margin-bottom: 4px; }
+      .etapa b::before {
+        counter-increment: etapa;
+        content: counter(etapa) ". ";
+        color: var(--roxo);
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        background: var(--papel);
+        border: 1px solid var(--linha);
+        border-radius: 14px;
+        overflow: hidden;
+        font-size: 14.5px;
+      }
+      th, td { text-align: left; padding: 12px 14px; border-bottom: 1px solid var(--linha); vertical-align: top; }
+      th { font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--tinta-fraca); background: #faf8ff; }
+      tr:last-child td { border-bottom: 0; }
+      td.valor { white-space: nowrap; font-weight: 700; }
+
+      .regras {
+        display: grid;
+        gap: 12px;
+        grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+      }
+      .regra {
+        background: var(--papel);
+        border: 1px solid var(--linha);
+        border-left: 3px solid var(--roxo);
+        border-radius: 12px;
+        padding: 14px 16px;
+        font-size: 14px;
+      }
+      .regra b { display: block; margin-bottom: 4px; }
+
+      details {
+        background: var(--papel);
+        border: 1px solid var(--linha);
+        border-radius: 12px;
+        padding: 14px 16px;
+        margin-bottom: 10px;
+      }
+      details summary {
+        cursor: pointer;
+        font-weight: 650;
+        font-size: 15px;
+        list-style: none;
+      }
+      details summary::-webkit-details-marker { display: none; }
+      details summary::after { content: " +"; color: var(--roxo); font-weight: 800; }
+      details[open] summary::after { content: " –"; }
+      details p { margin: 10px 0 0; font-size: 14.5px; color: var(--tinta-fraca); }
+
+      footer.rodape {
+        margin-top: 44px;
+        padding-top: 20px;
+        border-top: 1px solid var(--linha);
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px 24px;
+        align-items: baseline;
+        justify-content: space-between;
+        font-size: 13.5px;
+        color: var(--tinta-fraca);
+      }
+      footer.rodape b { color: var(--tinta); }
+      .creditos { font-size: 12px; color: #8b8496; margin-top: 10px; }
+
+      .imprimir {
+        position: fixed;
+        right: 18px;
+        bottom: 18px;
+        background: var(--roxo);
+        color: #fff;
+        border: 0;
+        border-radius: 999px;
+        padding: 12px 18px;
+        font: inherit;
+        font-weight: 700;
+        cursor: pointer;
+        box-shadow: 0 10px 24px -10px rgba(109, 40, 217, 0.8);
+      }
+      .imprimir:hover { filter: brightness(1.08); }
+
+      @media print {
+        body { background: #fff; }
+        .folha { max-width: none; padding: 0; }
+        .imprimir { display: none; }
+        .plano, table, details, .etapa, .regra { break-inside: avoid; }
+        h2 { break-after: avoid; }
+        a { color: inherit; text-decoration: none; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="folha">
+      <header class="topo">
+        <span class="selo">Tabela 2026</span>
+        <h1>O vídeo da sua prova, no mapa.</h1>
+        <p class="sub">
+          O trajeto percorrido virando vídeo vertical: o mapa se enche atrás do
+          personagem, com a rota, as paradas, o ritmo e os números do dia. Serve
+          para feed, story, divulgação de prova e lembrança de quem correu.
+        </p>
+        <div class="aviso">
+          <span aria-hidden="true">📌</span>
+          <span
+            >Tabela válida até <b>31/12/2026</b>. Preço fechado em reais, sem
+            surpresa no meio do caminho. Emissão de nota fiscal.</span
+          >
+        </div>
+      </header>
+
+      <h2>Pacotes</h2>
+      <div class="planos">
+        <article class="plano">
+          <h3>Individual</h3>
+          <p class="para">Para atleta que quer o próprio treino ou prova no feed.</p>
+          <div class="preco"><span class="valor">R$ 49</span><span class="por">/ vídeo</span></div>
+          <div class="condicao">Primeiros 10 clientes: R$ 29</div>
+          <ul>
+            <li>Vídeo de até 30 s, vertical (9:16), pronto para Reels e TikTok</li>
+            <li>Mapa animado com a rota, o personagem e a cartela final</li>
+            <li>Nome, cidade, data e números (distância, tempo, ritmo)</li>
+            <li>1 rodada de ajuste inclusa</li>
+            <li>Entrega em até 48 h úteis</li>
+          </ul>
+          <p class="nota">Pacote de 5 vídeos no mês: <b>R$ 179</b> (em vez de R$ 245).</p>
+        </article>
+
+        <article class="plano destaque">
+          <h3>Assessoria</h3>
+          <p class="para">Para treinador, clube ou assessoria que posta o aluno toda semana.</p>
+          <div class="preco"><span class="valor">R$ 490</span><span class="por">/ mês</span></div>
+          <div class="condicao">Até 10 alunos por mês</div>
+          <ul>
+            <li>Até 10 vídeos por mês (30 s, 9:16)</li>
+            <li>Uma identidade só: cores e logo da assessoria em todos</li>
+            <li>Fila combinada — quem fez a prova mais recente entra primeiro</li>
+            <li>2 ajustes por vídeo no mês</li>
+            <li>Entrega em até 48 h úteis por vídeo</li>
+          </ul>
+          <p class="nota">Até 20 alunos: <b>R$ 790/mês</b>. Acima disso, orçamento.</p>
+        </article>
+
+        <article class="plano">
+          <h3>Prova</h3>
+          <p class="para">Para organizador, patrocinador e evento com data marcada.</p>
+          <div class="preco"><span class="valor">R$ 690</span><span class="por">/ vídeo de percurso</span></div>
+          <ul>
+            <li>Trailer do percurso (30–45 s) para divulgar inscrições</li>
+            <li>Cartela com nome da prova, data e distância</li>
+            <li>Versão 9:16 e 16:9 no mesmo pedido</li>
+            <li>Marca do evento no lugar da minha (white-label)</li>
+            <li>50% na reserva da data, 50% na entrega</li>
+          </ul>
+          <p class="nota">Recap pós-prova: <b>R$ 1.290</b>. Lote por atleta: <b>R$ 12</b> (mínimo R$ 1.500).</p>
+        </article>
+      </div>
+
+      <h2>Como funciona</h2>
+      <div class="etapas">
+        <div class="etapa"><b>Você manda o link</b>Strava, Garmin, Komoot ou o arquivo GPX. Se for prova, o percurso oficial.</div>
+        <div class="etapa"><b>Eu monto</b>Trajeto, personagem, cartela, ritmo e o tempo do vídeo.</div>
+        <div class="etapa"><b>Você aprova</b>Prévia marcada em 48 h. Um ajuste incluso; só o arquivo limpo sai depois do pagamento.</div>
+      </div>
+
+      <h2>Adicionais</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Item</th>
+            <th>Quando faz sentido</th>
+            <th style="text-align: right">Valor</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Entrega em 24 h</td>
+            <td>Prova no domingo e post no mesmo dia</td>
+            <td class="valor" style="text-align: right">+ R$ 20</td>
+          </tr>
+          <tr>
+            <td>Segunda versão (16:9 para YouTube)</td>
+            <td>Mesmo vídeo em horizontal</td>
+            <td class="valor" style="text-align: right">+ R$ 20</td>
+          </tr>
+          <tr>
+            <td>White-label em pacote Individual ou Assessoria</td>
+            <td>Quem não quer meu crédito no vídeo (na Prova já está incluso)</td>
+            <td class="valor" style="text-align: right">+ 40%</td>
+          </tr>
+          <tr>
+            <td>Uso em anúncio pago</td>
+            <td>Impulsionar, patrocinador, campanha</td>
+            <td class="valor" style="text-align: right">+ 80%</td>
+          </tr>
+          <tr>
+            <td>Ajuste extra</td>
+            <td>Depois da rodada inclusa</td>
+            <td class="valor" style="text-align: right">R$ 25</td>
+          </tr>
+          <tr>
+            <td>Lote de prova (por atleta)</td>
+            <td>Organizador vendendo o vídeo de cada inscrito</td>
+            <td class="valor" style="text-align: right">R$ 12</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h2>Regras que protegem os dois lados</h2>
+      <div class="regras">
+        <div class="regra"><b>Pagamento</b>Individual e assessoria: 100% antes da entrega do arquivo limpo. Prova: 50% na reserva da data, 50% na entrega. Pix, cartão em até 12x ou nota fiscal.</div>
+        <div class="regra"><b>Ajustes</b>Uma rodada inclusa (duas na assessoria). Ajuste é trocar texto, cor, tempo ou enquadramento — refazer o vídeo com outra rota é pedido novo.</div>
+        <div class="regra"><b>Prazo</b>48 h úteis a partir do envio do trajeto e das informações. Prazo de 24 h só com o adicional e confirmação minha.</div>
+        <div class="regra"><b>O que eu preciso</b>Link do Strava/GPX, nome como deve aparecer, cidade, data, e se quer a cartela com números ou só o mapa.</div>
+        <div class="regra"><b>Direitos</b>O vídeo é seu para postar. Uso em anúncio pago é licença separada (+80%). Música sempre de biblioteca com licença comercial.</div>
+        <div class="regra"><b>Créditos</b>O mapa usa OpenStreetMap e o crédito aparece no canto, como a licença exige. Ele fica em qualquer versão, inclusive white-label.</div>
+      </div>
+
+      <h2>Perguntas</h2>
+      <details>
+        <summary>Preciso saber editar ou ter o Strava premium?</summary>
+        <p>Não. O trajeto sai do link público da atividade ou do arquivo GPX que o app do relógio exporta. Strava gratuito serve.</p>
+      </details>
+      <details>
+        <summary>Quanto tempo leva?</summary>
+        <p>Até 48 h úteis depois que você manda trajeto e informações. Em época de prova grande (maratona de cidade), a fila é por ordem de chegada — reserve a data.</p>
+      </details>
+      <details>
+        <summary>Dá para fazer de uma viagem ou de uma entrega, não só de corrida?</summary>
+        <p>Dá. Qualquer trajeto com GPS: pedal, trilha, viagem de carro, rota de ônibus, caminhada. Muda a cartela e o personagem.</p>
+      </details>
+      <details>
+        <summary>E se eu não gostar?</summary>
+        <p>A prévia vem antes do pagamento do arquivo limpo e com uma rodada de ajuste inclusa. Se ainda não for o que você queria, não há cobrança da parte final.</p>
+      </details>
+      <details>
+        <summary>Atende fora do Brasil?</summary>
+        <p>Sim, com pagamento em dólar ou euro (Wise/PayPal) e o mesmo prazo. Valor a combinar pelo tamanho do pedido.</p>
+      </details>
+
+      <footer class="rodape">
+        <div>
+          <b>[SEU NOME]</b> · vídeos de trajeto<br />
+          WhatsApp <b>[+55 15 9XXXX-XXXX]</b> · Instagram <b>[@seuperfil]</b>
+        </div>
+        <div>Pedido: mande o link do trajeto e eu confirmo prazo e valor.</div>
+      </footer>
+      <p class="creditos">
+        Valores em reais, válidos até 31/12/2026. Mapas © OpenStreetMap (ODbL).
+        Página de exemplo: troque os campos entre colchetes antes de enviar.
+      </p>
+    </div>
+
+    <button class="imprimir" type="button" onclick="window.print()">Salvar em PDF</button>
+  </body>
+</html>

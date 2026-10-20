@@ -1951,6 +1951,21 @@ function drawAttribution(
 
 /** Quanto tempo (em segundos de vídeo) a foto da parada fica na tela. */
 const PHOTO_HOLD_S = 2.6;
+
+/**
+ * Quanto **antes** da passagem a foto da parada começa a entrar, em segundos de
+ * vídeo.
+ *
+ * A foto só aparecia depois da passagem. Numa parada perto do fim isso é tarde
+ * demais: o personagem já andou e o bloco — foto, nome e o pino — quase sai
+ * pela borda do quadro. Antes da passagem a parada está **na frente** do
+ * personagem, no alto da tela, que é onde o olho está olhando.
+ *
+ * O limite de 20% do percurso é o mesmo cuidado do nome: num vídeo de 6 s não
+ * dá para a foto nascer muito antes.
+ */
+const FOTO_ANTES_S = 1.2;
+const FOTO_ANTES_FRACAO = 0.2;
 const PHOTO_FADE_IN_S = 0.4;
 const PHOTO_FADE_OUT_S = 0.7;
 
@@ -1963,14 +1978,17 @@ const PHOTO_FADE_OUT_S = 0.7;
  * mesmo jeito em qualquer rota, e a pré-visualização e a gravação continuam
  * idênticas, porque as duas usam o mesmo instante `t`.
  */
-function photoWindowAlpha(desde: number): number {
+function photoWindowAlpha(desde: number, esperaExtra = 0): number {
   if (!(desde >= 0)) return 0;
   const entra = Math.min(1, desde / PHOTO_FADE_IN_S);
   const sai =
     1 -
     Math.min(
       1,
-      Math.max(0, (desde - (PHOTO_HOLD_S - PHOTO_FADE_OUT_S)) / PHOTO_FADE_OUT_S),
+      Math.max(
+        0,
+        (desde - (PHOTO_HOLD_S + esperaExtra - PHOTO_FADE_OUT_S)) / PHOTO_FADE_OUT_S,
+      ),
     );
   return Math.min(entra, sai);
 }
@@ -2981,10 +2999,33 @@ function drawStops(
      * o vídeo acabar.
      */
     const foto = stop.photo ? (input.photos?.get(stop.photo) ?? null) : null;
-    // a janela da foto começa na passagem mais recente: na volta, ela aparece
-    // de novo, mesmo que já tenha aparecido na ida
-    const desde = ultima === null ? -1 : (t - ultima) * tl.percurso;
-    const fotoAlpha = foto ? photoWindowAlpha(desde) : 0;
+    /*
+     * A janela da foto abre **antes** da passagem (ver `FOTO_ANTES_S`).
+     *
+     * O deslocamento é aplicado à âncora — a passagem mais recente, ou a
+     * próxima quando ela ainda não chegou —, então a foto entra, fica cheia no
+     * instante da passagem e sai `PHOTO_HOLD_S` depois, sem pulo de posição.
+     * Como as duas âncoras são consideradas, a foto acende em **cada**
+     * passagem (ida e volta), e não só na primeira.
+     */
+    const antecedenciaFoto = Math.min(FOTO_ANTES_S, tl.percurso * FOTO_ANTES_FRACAO);
+    /*
+     * O `esperaExtra` devolve à foto o tempo que ela **ganhou** na frente: sem
+     * ele, antecipar a entrada encurtaria a saída, e a foto passaria menos
+     * tempo na tela depois da passagem do que passava antes.
+     */
+    const janelaDaFoto = (ancora: number) =>
+      photoWindowAlpha((t - ancora) * tl.percurso + antecedenciaFoto, antecedenciaFoto);
+    let proxima: number | null = null;
+    for (const ts of passagens) {
+      if (ts > t && (proxima === null || ts < proxima)) proxima = ts;
+    }
+    const fotoAlpha = foto
+      ? Math.max(
+          ultima === null ? 0 : janelaDaFoto(ultima),
+          proxima === null ? 0 : janelaDaFoto(proxima),
+        )
+      : 0;
     /*
      * O nome entra **antes** da passagem (ver `ROTULO_ANTES_S`): é quando a
      * parada ainda está na frente do personagem, no alto do quadro. Depois de

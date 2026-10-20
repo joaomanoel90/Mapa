@@ -720,6 +720,20 @@ Junto vieram duas coisas que fazem os pontos serem vistos:
   antes, no instante da passagem, o selo do personagem era desenhado por cima e
   o nome aparecia cortado, só com a borda de fora.
 
+### A foto também entra antes
+
+A foto da parada só aparecia **depois** da passagem. Numa parada perto do fim,
+quando ela surgia, o personagem já tinha andado e o bloco — foto, nome e pino —
+quase saía pela borda do quadro.
+
+Agora a foto entra **1,2 s de vídeo antes** da passagem (no máximo 20% do
+percurso, pelo mesmo motivo do nome), que é quando a parada está na frente do
+personagem, no alto da tela. A janela é a mesma de sempre em duração: o tempo
+que a foto ganhou na frente é devolvido na espera (`esperaExtra`), então ela
+continua os mesmos 2,6 s depois da passagem. As duas âncoras são consideradas —
+a passagem mais recente e a próxima —, então numa ida e volta a foto acende em
+**cada** passagem, e não só na primeira.
+
 A conta é feita **por trecho**, e não por ponto: uma rota com um ponto a cada
 100 m passa exatamente por cima da parada sem ter nenhum ponto ali, e medindo por
 ponto a parada "não existiria".
@@ -1082,7 +1096,7 @@ ou cortados.
 
 ```bash
 npm run typecheck  # tsc --noEmit
-npm test           # Vitest (820 casos)
+npm test           # Vitest (824 casos)
 npm run check:dist # o build saiu autocontido e sem /src/?
 ```
 

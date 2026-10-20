@@ -1153,6 +1153,7 @@ function App() {
       showProgress: settings.showProgress,
       showSummary: settings.endCard,
       showHud: settings.showHud,
+      showMinimap: settings.minimap,
       // a pé o HUD mostra ritmo (min/km) em vez de velocidade
       pace: usaRitmo(settings.activity),
       title: settings.title,
@@ -1237,6 +1238,7 @@ function App() {
         settings.basemap,
         camera.cinematic,
         focoDoVideo,
+        settings.minimap,
       ).length;
       if (needed > TILE_BUDGET) {
         throw new Error(budgetAdvice(needed, sugestaoZoom, camera.mode));

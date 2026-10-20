@@ -24,6 +24,7 @@ import {
   inclinacaoDaCurva,
   janelaDoRumo,
   liftToClear,
+  minimapLayout,
   lugarDoBloco,
   overlapsCard,
   pesoQueCabe,
@@ -3660,5 +3661,70 @@ describe("terceira pessoa", () => {
     });
     const selo = seloNaTela(f);
     expect(Math.abs(selo![1] - 360)).toBeLessThan(60); // segue centrado
+  });
+});
+
+/*
+ * O mapa em miniatura no canto — o pedido: "tem como ir desenhando no canto da
+ * tela em baixo do título o mapa que está sendo percorrido".
+ *
+ * O que se prova aqui é o que o usuário vê: ele existe naquele canto, a rota
+ * inteira cabe, o personagem aparece marcado dentro da caixa — e, desligado,
+ * não sobra nada.
+ */
+describe("mapa em miniatura", () => {
+  const comMini = (ligado: boolean) => ({ ...style, showMinimap: ligado });
+
+  it("fica no canto de cima à esquerda, abaixo do título", () => {
+    const semTitulo = minimapLayout(1280, 720);
+    const depoisDoTitulo = minimapLayout(1280, 720, 96);
+    expect(semTitulo.x).toBe(26);
+    expect(semTitulo.y).toBe(26);
+    // abaixo do título: começa depois de onde ele terminou
+    expect(depoisDoTitulo.y).toBeGreaterThan(96);
+    expect(depoisDoTitulo.x).toBe(semTitulo.x);
+    // e não escapa do quadro
+    expect(depoisDoTitulo.x + depoisDoTitulo.w).toBeLessThan(1280);
+    expect(depoisDoTitulo.y + depoisDoTitulo.h).toBeLessThan(720);
+  });
+
+  it("ocupa a mesma fração do menor lado no 16:9 e no 9:16", () => {
+    const largura = minimapLayout(1280, 720);
+    const retrato = minimapLayout(720, 1280);
+    expect(largura.w / 720).toBeCloseTo(retrato.w / 720, 1);
+    expect(retrato.x + retrato.w).toBeLessThan(720);
+  });
+
+  it("desenha a rota e o ponto do personagem dentro da caixa", () => {
+    const f = fakeCtx();
+    desenhar(f.ctx, { ...estado(0.5, 10, null), style: comMini(true) });
+    const L = minimapLayout(1280, 720);
+    const dentro = (x: number, y: number) =>
+      x >= L.x && x <= L.x + L.w && y >= L.y && y <= L.y + L.h;
+    // o marcador do personagem: um círculo de ~6 px de raio dentro da caixa
+    const marcador = f.arcos.find(([x, y, r]) => r >= 5 && r <= 8 && dentro(x, y));
+    expect(marcador).toBeDefined();
+    // a rota inteira (apagada) e o percorrido (na cor do app, mais grosso)
+    expect(f.tracos.some((t) => t.cor === "rgba(163,230,53,0.34)" && t.largura > 2)).toBe(true);
+    expect(f.tracos.some((t) => t.cor === "rgba(163,230,53,1)" && t.largura > 3)).toBe(true);
+  });
+
+  it("desligado, não desenha nada no canto", () => {
+    const f = fakeCtx();
+    desenhar(f.ctx, { ...estado(0.5, 10, null), style: comMini(false) });
+    const L = minimapLayout(1280, 720);
+    const dentro = (x: number, y: number) =>
+      x >= L.x && x <= L.x + L.w && y >= L.y && y <= L.y + L.h;
+    expect(f.arcos.some(([x, y, r]) => r >= 5 && r <= 8 && dentro(x, y))).toBe(false);
+  });
+
+  it("o aquecimento baixa os blocos da rota inteira", () => {
+    const camera: FrameState["camera"] = { mode: "fit", followZoom: 15 };
+    const sem = tilesForAnimation(track, camera, 1280, 720, "dark", null, null, false);
+    const com = tilesForAnimation(track, camera, 1280, 720, "dark", null, null, true);
+    expect(com.length).toBeGreaterThan(sem.length);
+    // nenhum bloco repetido: o mesmo mapa serve para o quadro e para a caixa
+    const chaves = new Set(com.map((t) => `${t.z}/${t.x}/${t.y}`));
+    expect(chaves.size).toBe(com.length);
   });
 });

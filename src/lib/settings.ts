@@ -71,6 +71,12 @@ export type Settings = {
   endCard: boolean;
   /** painel de números no vídeo (velocidade, andamento, distância, relógio) */
   showHud: boolean;
+  /**
+   * Mapa em miniatura no canto do vídeo, abaixo do título: a rota inteira com o
+   * percurso já feito em destaque. Serve para quem acompanha o vídeo saber onde
+   * o personagem está — na terceira pessoa só se vê alguns metros à frente.
+   */
+  minimap: boolean;
   /** pedal, corrida ou caminhada — muda a unidade do HUD (km/h ou min/km) */
   activity: ActivityId;
   /**
@@ -149,6 +155,7 @@ export const DEFAULT_SETTINGS: Settings = {
   showProgress: true,
   endCard: true,
   showHud: true,
+  minimap: true,
   activity: "pedal",
   colorBy: "solid",
   showKmMarks: false,
@@ -199,6 +206,7 @@ export function sanitizeSettings(raw: Partial<Settings>): Partial<Settings> {
   if (typeof out.showStopCounter !== "boolean") delete out.showStopCounter;
   if (typeof out.endCard !== "boolean") delete out.endCard;
   if (typeof out.showHud !== "boolean") delete out.showHud;
+  if (typeof out.minimap !== "boolean") delete out.minimap;
   if (!ACTIVITIES.some((a) => a.id === out.activity)) delete out.activity;
   if (out.colorBy !== "solid" && out.colorBy !== "speed" && out.colorBy !== "slope") {
     delete out.colorBy;

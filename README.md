@@ -222,22 +222,22 @@ Nos últimos segundos do vídeo pode aparecer um resumo do percurso:
               13 de outubro de 2026
 ```
 
-**Os números são escritos por você**, no painel — o arquivo importado só
-*serve de dica*. Cada campo mostra ao lado o que o arquivo mediu, e o botão
-**"↓ usar os números do arquivo"** copia tudo de uma vez, para não ter que
-digitar olhando o Strava.
+**Campo em branco usa o número do arquivo**; o que você escrever manda por
+cima. O botão **"↓ usar os números do arquivo"** copia tudo de uma vez, para
+não ter que digitar olhando o Strava.
 
 | | |
 |---|---|
-| **Distância, elevação, tempo** | digitados. Campo vazio = a linha não aparece |
+| **Distância, elevação, tempo** | em branco, o que o arquivo mediu (o tempo só com `<time>`) |
 | **Linha de baixo** | o que você escrever; vazia, mostra a data do percurso |
-| **Sem nada escrito** | não há cartela: o vídeo termina no traçado |
+| **Arquivo sem os dados** | aquela linha não aparece — nada é inventado |
 | **Texto grande** | o corpo da letra encolhe antes de o excesso virar "…" — nunca vaza da tela |
 
-Por que digitável e não automático: uma rota desenhada à mão não tem altitude
+Por que digitável **e** automático: uma rota desenhada à mão não tem altitude
 nem hora para medir, e às vezes o número que interessa é o do relógio de quem
-pedalou, não o do arquivo. Escrevendo, a cartela serve para os dois casos — e
-nada aparece no vídeo sem alguém ter pedido.
+pedalou, não o do arquivo. Com o arquivo preenchendo o que ficou em branco, o
+interruptor ligado basta para a cartela existir — e quem quiser outro número é
+só escrever por cima.
 
 #### A distância medida do arquivo (e o ritmo)
 
@@ -333,6 +333,30 @@ leituras, então o limiar de 4 m fica acima disso e o vaivém não conta. A
 referência só anda quando a variação passa do limiar, o que mantém o erro do
 total abaixo do próprio limiar — em vez de acumular o erro das pontas, como
 faria um suavizado.
+
+### Mapa em miniatura
+
+No canto de cima à esquerda, **abaixo do título**, o vídeo pode mostrar a rota
+inteira em miniatura:
+
+```
+ ┌──────────────────┐
+ │  ●──╮            │   a rota toda, apagada
+ │     ╰──╮  ╭─╮    │   o percorrido, na cor do app
+ │  ◎─────╯  ╰─╯    │   ◎ o personagem agora
+ │            ●     │   ● partida · ● chegada
+ └──────────────────┘
+```
+
+Ele responde a uma pergunta que a câmera de terceira pessoa não responde: lá só
+se vê alguns metros à frente, e não se sabe **onde no percurso** o personagem
+está. O minimapa usa os mesmos blocos de mapa do vídeo, no zoom em que a rota
+inteira cabe na caixa — e esses blocos entram no aquecimento, então ele já
+começa o vídeo desenhado, sem bloco chegando no meio.
+
+O tamanho é proporcional ao menor lado do quadro, então ocupa a mesma fração da
+tela no 16:9 e no 9:16. **Desligado** no interruptor "Mapa em miniatura", nada
+aparece no canto.
 
 ### HUD no vídeo
 
@@ -947,7 +971,7 @@ ou cortados.
 
 ```bash
 npm run typecheck  # tsc --noEmit
-npm test           # Vitest (794 casos)
+npm test           # Vitest (800 casos)
 npm run check:dist # o build saiu autocontido e sem /src/?
 ```
 

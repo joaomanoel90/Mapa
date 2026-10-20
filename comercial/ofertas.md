@@ -3,8 +3,9 @@
 Copie, troque o que está entre `[ ]` e mande. Frases curtas, sem parágrafo
 grande: no WhatsApp o cliente lê no celular, entre uma coisa e outra.
 
-A tabela de preços que acompanha estes textos é o `precos.html` (dá para anexar,
-abrir do celular ou salvar em PDF pelo botão da página).
+A tabela de preços que acompanha estes textos está publicada em
+<https://joaomanoel90.github.io/Mapa/comercial/precos.html> (dá para mandar o
+link, anexar o arquivo ou salvar em PDF pelo botão da página).
 
 ---
 
@@ -72,7 +73,7 @@ próxima prova — e aí vale mandar um vídeo pronto do percurso dela.
 
 > Depende do que você precisa, mas para não te enrolar: vídeo individual R$ 49,
 > pacote de assessoria R$ 490/mês (até 10 alunos) e vídeo de percurso de prova
-> R$ 690. A tabela completa está aqui — [anexa precos.html ou manda o print].
+> R$ 690. A tabela completa está aqui: joaomanoel90.github.io/Mapa/comercial/precos.html
 > O que você quer fazer primeiro?
 
 **Tá caro:**

@@ -2,16 +2,20 @@
 
 Dois arquivos, nenhum deles entra no build do app.
 
-- **`precos.html`** — a tabela de preços para mandar ao cliente (WhatsApp,
-  e-mail) ou imprimir em PDF pelo botão no canto. Autocontida: sem fonte
-  externa, sem imagem, sem internet.
+- **`precos.html`** — a tabela de preços. Fica em **`public/comercial/precos.html`**
+  (o Vite copia `public/` para o build), então ela é publicada junto com o app:
+  **https://joaomanoel90.github.io/Mapa/comercial/precos.html**. É também o
+  destino do link "veja a tabela de preços" no rodapé do painel. Autocontida:
+  sem fonte externa, sem imagem, sem internet — serve para mandar no WhatsApp
+  ou imprimir em PDF pelo botão no canto.
 - **`ofertas.md`** — os textos prontos: abordagem de assessoria, organizador de
   prova e atleta; follow-up; resposta a "tá caro"; modelo de orçamento;
   checklist do pedido; rotina da semana.
 
 ## Antes de mandar
 
-1. Troque os campos entre `[ ]` no `precos.html` (nome, WhatsApp, Instagram).
+1. Troque os campos entre `[ ]` no `public/comercial/precos.html` (nome,
+   WhatsApp, Instagram). Ao salvar na `main`, o Pages republica sozinho.
 2. Confira os preços: eles foram calibrados em outubro de 2026 e a página diz
    "válida até 31/12/2026".
 3. Se for vender fora do Brasil, mantenha a mesma página e combine em dólar ou

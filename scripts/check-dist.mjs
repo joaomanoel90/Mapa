@@ -44,6 +44,16 @@ if (existsSync(DIST)) {
   if (soltos.length > 0) {
     problemas.push(`o build incluiu código-fonte solto: ${soltos.join(", ")}`);
   }
+  /*
+   * A tabela de preços mora em `public/comercial/`, e é o Vite que a copia
+   * para `dist/`. Se um dia ela sumir do build, o link do painel abriria um
+   * 404 no site publicado — e ninguém veria isso até um cliente reclamar.
+   */
+  if (!existsSync(`${DIST}/comercial/precos.html`)) {
+    problemas.push(
+      `não existe ${DIST}/comercial/precos.html — a tabela de preços não foi publicada`,
+    );
+  }
 }
 
 if (problemas.length > 0) {

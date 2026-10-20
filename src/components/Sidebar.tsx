@@ -966,6 +966,25 @@ function Sidebar(props: Props) {
           Dados © colaboradores do OpenStreetMap (ODbL). O crédito do mapa é incluído
           automaticamente no vídeo exportado, como exigem as licenças.
         </p>
+        {/*
+          O app é gratuito e continua gratuito; o vídeo pronto é serviço à parte.
+          O endereço é **relativo** de propósito: o mesmo link funciona na
+          máquina local (`/comercial/precos.html`), na prévia e no Pages, que
+          publica em `/Mapa/` — e a página mora em `public/comercial/`, que o
+          Vite copia para o build.
+        */}
+        <p className="mt-2 border-t border-white/5 pt-2 text-[10.5px] leading-snug text-zinc-500">
+          Grátis para usar. Se preferir o vídeo pronto,{" "}
+          <a
+            href="comercial/precos.html"
+            target="_blank"
+            rel="noopener"
+            className="font-semibold text-emerald-300 underline decoration-emerald-400/40 underline-offset-2 transition-colors hover:text-emerald-200"
+          >
+            veja a tabela de preços
+          </a>
+          .
+        </p>
       </footer>
     </div>
   );

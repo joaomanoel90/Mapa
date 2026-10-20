@@ -419,3 +419,26 @@ describe("painel: avatar do personagem", () => {
     expect(arquivo).not.toBeNull();
   });
 });
+
+/*
+ * O link da tabela de preços.
+ *
+ * O erro que ele evita é silencioso: o endereço é **relativo** e a página mora
+ * em `public/`, que o Vite copia para o build. Se alguém mover o arquivo (ou
+ * trocar o link por um caminho absoluto a partir da raiz do site), o painel no
+ * Pages — que publica em `/Mapa/` — passa a abrir um 404 sem nenhum aviso.
+ */
+describe("painel: link da tabela de preços", () => {
+  it("aponta para a página publicada, em caminho relativo", () => {
+    montar(<Painel />);
+    const link = Array.from(document.body.querySelectorAll("a")).find((a) =>
+      (a.textContent ?? "").includes("tabela de preços"),
+    );
+    expect(link).toBeDefined();
+    // relativo: vale na máquina local, na prévia e em /Mapa/ no Pages
+    expect(link!.getAttribute("href")).toBe("comercial/precos.html");
+    expect(link!.getAttribute("target")).toBe("_blank");
+    // e sem abrir a janela de origem para a página
+    expect(link!.getAttribute("rel")).toContain("noopener");
+  });
+});

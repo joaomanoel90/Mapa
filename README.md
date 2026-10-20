@@ -1061,7 +1061,7 @@ ou cortados.
 
 ```bash
 npm run typecheck  # tsc --noEmit
-npm test           # Vitest (819 casos)
+npm test           # Vitest (820 casos)
 npm run check:dist # o build saiu autocontido e sem /src/?
 ```
 
@@ -1121,4 +1121,16 @@ src/
    ├─ share.ts              permalink da rota (codifica/valida o #r=…)
    ├─ persist.ts            localStorage com plano B (guarda tudo menos a foto, se faltar cota)
    └─ geocode.ts            busca de cidades
+
+public/comercial/
+└─ precos.html             tabela de preços (publicada em /comercial/precos.html)
+
+comercial/
+├─ ofertas.md              textos de venda prontos (DM, orçamento, follow-up)
+└─ README.md               como usar o material e por que esses preços
 ```
+
+A tabela de preços fica em **`public/`** porque é o Vite que copia essa pasta
+para o build: assim o link do rodapé do painel abre
+`…/Mapa/comercial/precos.html` no site publicado, e não um 404. O `check:dist`
+falha se ela sumir do build.

@@ -1,8 +1,16 @@
 import { describe, expect, it } from "vitest";
-import { TILE_SIZE, buildTrack, cumulative, haversine, rumoSuave, sampleTrack } from "./geo";
+import {
+  TILE_SIZE,
+  buildTrack,
+  cumDoDesenho,
+  cumulative,
+  haversine,
+  rumoSuave,
+  sampleTrack,
+} from "./geo";
 import { formatPace } from "./hud";
 import { buildTimeline, routeEnd, routeProgress, type Timeline } from "./timeline";
-import { colorizeRoute, NEUTRAL_COLOR } from "./coloring";
+import { colorizeRoute, NEUTRAL_COLOR, slopeAt, slopeSeries } from "./coloring";
 import { formatClock, timesOf } from "./hud";
 import { type PhotoImage, type PhotoLookup } from "./photos";
 import { poiLatLng, type Poi } from "./pois";
@@ -504,16 +512,25 @@ describe("HUD no vídeo", () => {
     expect(textos).not.toContain("média");
   });
 
-  it("sem arquivo de GPS não inventa velocidade: mostra um traço", () => {
+  it("sem arquivo de GPS não inventa velocidade: mostra a inclinação do trecho", () => {
     const { ctx, textos } = fakeCtx();
     new SceneRenderer("dark").render(ctx, 1280, 720, {
       ...estado(0.5, 14, null, null),
       track: gpsTrack,
     });
-    // a média do vídeo daria milhares de km/h numa rota longa em clipe curto
-    expect(textos).toContain("—");
-    expect(textos).toContain("sem arquivo");
-    expect(textos).toContain("km/h");
+    /*
+     * A média do vídeo daria milhares de km/h numa rota longa em clipe curto —
+     * velocidade o HUD continua não inventando. Mas também não fica no traço:
+     * numa rota que ninguém percorreu (a prévia de percurso) o anel mostra o
+     * que a rota **tem** — aqui, a inclinação do trecho (10 m a cada 100 m).
+     */
+    expect(textos).not.toContain("—");
+    expect(textos).not.toContain("sem arquivo");
+    expect(textos).not.toContain("km/h");
+    expect(textos).toContain("%");
+    // 1 m a cada 100 m: a série da inclinação, não um número de conveniência
+    expect(textos).toContain("1,0");
+    expect(textos).toContain("subindo");
   });
 
   it("a pé mostra o ritmo médio (min/km) no lugar da velocidade", () => {
@@ -543,17 +560,19 @@ describe("HUD no vídeo", () => {
     expect(textos).not.toContain(formatPace(100));
   });
 
-  it("a pé sem relógio (nem arquivo, nem cartela) mostra um traço", () => {
+  it("a pé sem relógio (nem arquivo, nem cartela) também vira prévia de percurso", () => {
     const { ctx, textos } = fakeCtx();
     new SceneRenderer("dark").render(ctx, 1280, 720, {
       ...estado(0.5, 14, null, null),
       track: gpsTrack,
       style: { ...style, pace: true },
     });
-    expect(textos).toContain("—");
-    expect(textos).toContain("min/km");
-    expect(textos).toContain("sem arquivo");
+    // sem tempo não existe ritmo — nem médio, nem do instante
+    expect(textos).not.toContain("min/km");
     expect(textos).not.toContain("média");
+    expect(textos).not.toContain("—");
+    expect(textos).toContain("%");
+    expect(textos).toContain("subindo");
   });
 
   it("a pé, o tempo da cartela também serve de relógio", () => {
@@ -643,7 +662,9 @@ describe("HUD no vídeo", () => {
     desenhar(ctx, estado(0.5, 14, null, null, null), gpsTrack);
     // o tempo do clipe (00:07) não pode tomar o lugar do tempo do percurso
     expect(textos.some((t) => /\d\d:\d\d/.test(t))).toBe(false);
-    expect(textos).toContain("—");
+    // e o anel não fica vazio: vira a prévia de percurso
+    expect(textos).not.toContain("—");
+    expect(textos).toContain("%");
   });
 
   it("sem hora no arquivo, o relógio vem do tempo escrito na cartela", () => {
@@ -683,11 +704,11 @@ describe("HUD no vídeo", () => {
     expect(textos.some((x) => x.includes(esperado))).toBe(true);
 
     // e se alguém mandar o vetor do arquivo inteiro, o HUD não inventa número:
-    // mostra "sem arquivo" em vez de um relógio cinco vezes menor
+    // nenhum relógio (nem o cinco vezes menor), e o anel cai na prévia
     const { ctx: ctx2, textos: textos2 } = fakeCtx();
     desenhar(ctx2, { ...estado(0.5, 14, null, grandes.map((p) => p.t)) }, t);
     expect(textos2.some((x) => /\d:\d\d/.test(x))).toBe(false);
-    expect(textos2).toContain("sem arquivo");
+    expect(textos2).toContain("restantes");
   });
 
   it("a cor também não aceita faixa de outro traçado", () => {
@@ -4120,5 +4141,91 @@ describe("legenda da rota colorida e perfil de elevação", () => {
     expect(credito).toBeDefined();
     const faixa = profileLayout(1280, 720, 1, true);
     expect(credito!.y).toBeLessThan(faixa.y);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* Prévia de percurso                                                  */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Rota que ninguém percorreu: o arquivo tem posições (e altitude), mas não tem
+ * horário. Não existe velocidade nem ritmo para mostrar, e o HUD antigo ficava
+ * com um traço e "sem arquivo" o vídeo inteiro — o vídeo dizendo que falta dado.
+ *
+ * Agora ele mostra o que a rota **tem**: a inclinação do trecho (a mesma que
+ * colore a linha) e, sem elevação, a distância que falta.
+ */
+describe("prévia de percurso (rota sem horário)", () => {
+  /**
+   * Traçado de 12 pontos a 100 m (1,1 km), com a altitude que a função der —
+   * `null` deixa o ponto sem `ele`, como num arquivo só com posições.
+   */
+  const trilha = (ele: (i: number) => number | null): { lat: number; lng: number; ele?: number }[] =>
+    Array.from({ length: 12 }, (_, i) => {
+      const base = { lat: 0, lng: (i * 100) / 111_320 };
+      const h = ele(i);
+      return h === null ? base : { ...base, ele: h };
+    });
+
+  const desenharSemHora = (
+    pts: { lat: number; lng: number; ele?: number }[],
+    t = 0.5,
+  ) => {
+    const track = buildTrack(pts);
+    const { ctx, textos } = fakeCtx();
+    new SceneRenderer("dark").render(ctx, 1280, 720, {
+      ...estado(t, 14, null, null),
+      track,
+    });
+    return { textos, track };
+  };
+
+  it("subida: escreve a inclinação e a palavra do sentido", () => {
+    // 8 m a cada 100 m = 8%
+    const { textos } = desenharSemHora(trilha((i) => 700 + i * 8));
+    expect(textos).toContain("8,0");
+    expect(textos).toContain("%");
+    expect(textos).toContain("subindo");
+  });
+
+  it("descida: o número não leva sinal, quem diz o sentido é a palavra", () => {
+    const { textos } = desenharSemHora(trilha((i) => 900 - i * 5));
+    expect(textos).toContain("5,0");
+    expect(textos).toContain("descendo");
+    expect(textos).not.toContain("-5,0");
+  });
+
+  it("trecho plano diz plano", () => {
+    const { textos } = desenharSemHora(trilha(() => 640));
+    expect(textos).toContain("plano");
+    expect(textos).toContain("0,0");
+  });
+
+  it("a inclinação do anel é a mesma que pinta a linha", () => {
+    // perfil ondulado: cada trecho tem a sua rampa
+    const pts = trilha((i) => 700 + 40 * Math.sin(i / 2));
+    const { textos, track } = desenharSemHora(pts, 0.62);
+    const esperado = slopeAt(slopeSeries(track.pts, cumDoDesenho(track)), cumDoDesenho(track), 0.62);
+    expect(esperado).not.toBeNull();
+    const escrito = Math.abs(esperado!).toFixed(1).replace(".", ",");
+    expect(textos).toContain(escrito);
+    expect(textos).toContain(esperado! > 0 ? "subindo" : "descendo");
+  });
+
+  it("sem elevação no arquivo, mostra quanto falta", () => {
+    const { textos, track } = desenharSemHora(trilha(() => null), 0.5);
+    expect(textos).toContain("restantes");
+    expect(textos).toContain("km");
+    expect(textos).not.toContain("—");
+    // metade do traçado andado: falta a outra metade, em km com uma casa
+    const falta = (track.total / 2 / 1000).toFixed(1).replace(".", ",");
+    expect(textos).toContain(falta);
+  });
+
+  it("numa rota que falta pouco, o número é pequeno — não é relógio disfarçado", () => {
+    const { textos } = desenharSemHora(trilha(() => null), 0.95);
+    expect(textos).toContain("restantes");
+    expect(textos).not.toContain("sem arquivo");
   });
 });

@@ -500,7 +500,7 @@ ponta a ponta, e o anel brigava com ela):
 |---|---|---|
 | arquivo com `<time>` | real, daquele instante | tempo real da pedalada |
 | sem hora, com **tempo na cartela** | `média` (distância ÷ tempo escrito), com o rótulo | conta até o tempo escrito |
-| sem hora e sem tempo | `—` | **nenhum** |
+| sem hora e sem tempo | **prévia**: inclinação do trecho ou quanto falta | **nenhum** |
 
 **A pé (Corrida e Caminhada), o centro do anel mostra o ritmo**, não a
 velocidade — é a unidade de quem vai a pé, e é o número que corredor olha:
@@ -552,8 +552,44 @@ uma redução do arquivo (teto de 12.000 pontos): um GPX de 50.000 pontos vira
 que não estavam na tela — medido antes da correção, o relógio lia **1:23:20** na
 metade de uma pedalada de **13:53:19**, cinco vezes menos do que devia. O app
 manda o vetor do traçado desenhado (mesmos pontos, mesmas horas), e o
-renderizador **confere o tamanho**: se não casar, o HUD mostra "sem arquivo" em
-vez de um número errado. A rota colorida recebeu a mesma guarda.
+renderizador **confere o tamanho**: se não casar, nenhum relógio é mostrado (o
+anel cai na prévia de percurso, sem hora) em vez de um número errado. A rota
+colorida recebeu a mesma guarda.
+
+#### Prévia de percurso (arquivo sem horário)
+
+Um GPX de **prova** ou de rota planejada tem posições — e quase sempre altitude —
+mas não tem `<time>`. Não existe velocidade nem ritmo para mostrar, e o HUD
+antigo ficava com um traço e a palavra `sem arquivo` **do primeiro ao último
+quadro**, ou seja: o vídeo inteiro dizendo que falta dado. Num vídeo de prévia
+("como é essa prova?"), isso é o defeito principal.
+
+Sem relógio nenhum (nem arquivo, nem tempo escrito na cartela), o anel passa a
+mostrar o que a rota **tem**:
+
+```
+              ╭─────────╮
+           ╭──┤   7,5   ├──╮    o arco = andamento do percurso
+           │  │  descendo│  │    o centro = inclinação do trecho
+           ╰──┤    %    ├──╯
+              ╰─────────╯
+            3,1 de 11,1 km · 28%
+```
+
+1. **com elevação:** a inclinação do trecho, lida da **mesma série** que pinta a
+   linha (`slopeSeries`/`slopeAt`) — o número nunca discorda da cor embaixo do
+   personagem. O valor vai sem sinal e o sentido vai escrito (`subindo`,
+   `descendo`, `plano`);
+2. **sem elevação:** **quanto falta** (`restantes`, em km). Existe em qualquer
+   traçado e é a pergunta de quem olha uma prévia.
+
+Nada é inventado: continua não havendo velocidade, ritmo nem relógio. O que muda
+é que o anel para de acusar falta de dado e passa a informar. No painel, o
+interruptor "HUD no vídeo" avisa quando isso vale para o arquivo carregado.
+
+O caminho contrário também vale: basta **escrever o tempo na cartela** (`3 h 19
+min`) para o vídeo voltar a ter relógio e ritmo médio — aí o número é do usuário,
+não do arquivo.
 
 ### Rota colorida (velocidade ou inclinação)
 
@@ -1138,7 +1174,7 @@ ou cortados.
 
 ```bash
 npm run typecheck  # tsc --noEmit
-npm test           # Vitest (845 casos)
+npm test           # Vitest (858 casos)
 npm run check:dist # o build saiu autocontido e sem /src/?
 ```
 

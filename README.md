@@ -819,6 +819,16 @@ ocupa o meio do vídeo e a cartela entra quando o percurso **termina**. O percur
 fica com pelo menos 40% do vídeo: em clipe curto, voo e cartela encolhem juntos.
 (`src/lib/timeline.ts`)
 
+**O vídeo abre andando.** A curva do voo era `easeInOutCubic`: saía do repouso,
+então o **primeiro quadro** — justamente o que o feed mostra parado antes do play
+— era uma foto da região, e o movimento só aparecia depois. Agora a abertura usa
+um Hermite cúbico com **velocidade inicial** igual à média do voo
+(`f'(0)=1`, `f'(1)=0`): no primeiro quadro a câmera já andou 1,3% do voo (o zoom
+muda 0,036 nível por quadro a 30 fps, contra 0,00003 antes), o meio acelera um
+pouco e a chegada continua com velocidade zero — o pouso não virou corte. O
+**tempo do voo não mudou**: só a distribuição dentro dele. (`openingProgress` em
+`src/lib/camera.ts`)
+
 **Nas paradas, a câmera vai até a parada.** No quadro estreito (9:16) a parada
 saía pela borda: a câmera acompanhava o personagem e a parada ficava deslocada
 (um zoom de aproximação só piorava, porque o quadro já é apertado). Agora, na
@@ -1128,7 +1138,7 @@ ou cortados.
 
 ```bash
 npm run typecheck  # tsc --noEmit
-npm test           # Vitest (842 casos)
+npm test           # Vitest (845 casos)
 npm run check:dist # o build saiu autocontido e sem /src/?
 ```
 

@@ -57,6 +57,8 @@ const SHARED_KEYS = [
   "showProgress",
   "endCard",
   "showHud",
+  "minimap",
+  "elevationProfile",
   "activity",
   "colorBy",
   "showKmMarks",

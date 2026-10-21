@@ -83,6 +83,19 @@ describe("encodeShare", () => {
     expect(json.s).toBeUndefined();
   });
 
+  it("leva o perfil de elevação no link", () => {
+    /*
+     * A faixa do relevo é parte da cena que o cliente vê: quem manda o link
+     * espera que o outro abra com o **mesmo** vídeo. Desligar precisa ir junto.
+     */
+    const com = buildShareUrl(base({ settings: { ...DEFAULT_SETTINGS, elevationProfile: true } }));
+    const sem = buildShareUrl(base({ settings: { ...DEFAULT_SETTINGS, elevationProfile: false } }));
+    const ler = (url: string) =>
+      JSON.parse(atob(payloadOf(url).split(".")[1].replace(/-/g, "+").replace(/_/g, "/")));
+    expect(ler(com).s?.elevationProfile).toBeUndefined(); // é o padrão: não gasta bytes
+    expect(ler(sem).s?.elevationProfile).toBe(false);
+  });
+
   it("monta a URL sobre a base informada", () => {
     const url = buildShareUrl(base(), "https://exemplo.org/Mapa/");
     expect(url.startsWith("https://exemplo.org/Mapa/#r=")).toBe(true);

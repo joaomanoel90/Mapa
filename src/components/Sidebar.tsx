@@ -705,6 +705,19 @@ function Sidebar(props: Props) {
               </p>
             )}
             <Toggle
+              icon="📈"
+              label="Perfil de elevação"
+              checked={s.elevationProfile}
+              onChange={(v) => update("elevationProfile", v)}
+            />
+            {s.elevationProfile && (
+              <p className="text-[11px] leading-snug text-zinc-500">
+                No rodapé: a linha do relevo se enchendo junto com o personagem, com a
+                altitude do momento, o D+ e a maior subida marcada. Só aparece quando o
+                arquivo tem altitude.
+              </p>
+            )}
+            <Toggle
               icon="🏁"
               label="Cartela final"
               checked={s.endCard}

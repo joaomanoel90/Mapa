@@ -7,6 +7,7 @@ import { formatClock, timesOf } from "./hud";
 import { type PhotoImage, type PhotoLookup } from "./photos";
 import { poiLatLng, type Poi } from "./pois";
 import { kmMarks } from "./km-marks";
+import { profileLayout } from "./profile";
 import { findCharacter, gaitOf } from "./characters";
 import {
   SceneRenderer,
@@ -3944,5 +3945,107 @@ describe("rastro percorrido", () => {
       .pop();
     expect(rastro).toBeDefined();
     expect(rastro!.pontos.length).toBeGreaterThan(1);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* Perfil de elevação                                                  */
+/* ------------------------------------------------------------------ */
+
+/**
+ * O perfil de elevação no vídeo.
+ *
+ * A faixa existe para contar a **dureza** do percurso — o que nem o Strava nem
+ * o Relive contam, porque mostram o traçado visto de cima e não o relevo. Os
+ * testes fixam o que o usuário percebe: a faixa aparece quando há altitude,
+ * cresce junto com o personagem, não aparece em rota plana nem durante a
+ * cartela, e não encosta na barra de progresso.
+ */
+describe("perfil de elevação no vídeo", () => {
+  const comPerfil = { ...style, showProfile: true } as SceneStyle;
+  /** a cor do preenchimento do trecho percorrido, nas duas pontas do gradiente */
+  const alturaDoTexto = (f: ReturnType<typeof fakeCtx>, nomes: string[]) =>
+    f.textosPos.filter((t) => nomes.some((n) => t.s === n));
+
+  it("aparece no rodapé quando o traçado tem altitude", () => {
+    const f = fakeCtx();
+    desenhar(f.ctx, { ...estado(0.5, 14, null), style: comPerfil });
+    const textos = f.textos.join(" | ");
+    // D+ e altitude máxima são os rótulos da faixa
+    expect(textos).toMatch(/D\+ 1[0-9]{2} m/);
+    expect(textos).toContain("842 m");
+  });
+
+  it("não aparece em traçado sem altitude", () => {
+    const semEle = buildTrack([
+      { lat: -23.5, lng: -48.4 },
+      { lat: -23.51, lng: -48.41 },
+      { lat: -23.52, lng: -48.42 },
+    ]);
+    const f = fakeCtx();
+    desenhar(f.ctx, { ...estado(0.5, 14, null), style: comPerfil }, semEle);
+    expect(f.textos.join(" | ")).not.toMatch(/D\+ /);
+  });
+
+  it("o marcador anda para a direita e sobe com o personagem", () => {
+    /*
+     * O marcador é o ponto de 4,2 px (raio único no quadro). Ele anda pela
+     * **largura** da faixa conforme o personagem avança e sobe conforme a
+     * altitude: no traçado do teste a rota sobe 700 → 842 m, então o ponto
+     * termina mais alto (y menor) e mais à direita.
+     */
+    const marcador = (f: ReturnType<typeof fakeCtx>) =>
+      f.arcosPos.find((a) => Math.abs(a[2] - 4.2) < 0.01) ?? null;
+    const quadro = (t: number) => {
+      const f = fakeCtx();
+      desenhar(f.ctx, { ...estado(t, 14, null), style: comPerfil });
+      return marcador(f);
+    };
+    const inicio = quadro(0.05)!;
+    const meio = quadro(0.5)!;
+    const fim = quadro(0.97)!;
+    expect(inicio).not.toBeNull();
+    expect(meio[0]).toBeGreaterThan(inicio[0]);
+    expect(fim[0]).toBeGreaterThan(meio[0]);
+    // sobe no quadro (a altitude cresce no traçado do teste)
+    expect(fim[1]).toBeLessThan(inicio[1]);
+    // e o marcador vive dentro da faixa do rodapé
+    const L = profileLayout(1280, 720, 1, false);
+    for (const m of [inicio, meio, fim]) {
+      expect(m[1]).toBeGreaterThanOrEqual(L.y);
+      expect(m[1]).toBeLessThanOrEqual(L.y + L.h);
+    }
+  });
+
+  it("sai de cena quando a cartela final entra", () => {
+    const tl = buildTimeline(14, { voo: false, cartela: true });
+    const antes = fakeCtx();
+    const durante = fakeCtx();
+    const st = { ...estado(1, 14, cartela, null, null, tl), style: comPerfil };
+    desenhar(antes.ctx, { ...st, elapsed: 8 });
+    desenhar(durante.ctx, { ...st, elapsed: 13.5 });
+    expect(antes.textos.join(" ")).toMatch(/D\+ /);
+    expect(durante.textos.join(" ")).not.toMatch(/D\+ /);
+  });
+
+  it("desligado no painel, não desenha nada", () => {
+    const f = fakeCtx();
+    desenhar(f.ctx, { ...estado(0.5, 14, null), style: { ...style, showProfile: false } });
+    expect(f.textos.join(" | ")).not.toMatch(/D\+ /);
+  });
+
+  it("fica acima da barra de progresso, sem encostar", () => {
+    const f = fakeCtx();
+    desenhar(f.ctx, {
+      ...estado(0.5, 14, null),
+      style: { ...comPerfil, showProgress: true },
+    });
+    // o rótulo "X de Y km" da barra e o "D+" do perfil
+    const dmais = f.textosPos.find((t) => /^D\+ /.test(t.s));
+    const barra = f.textosPos.find((t) => / de .* km$/.test(t.s));
+    expect(dmais).toBeDefined();
+    expect(barra).toBeDefined();
+    expect(dmais!.y).toBeLessThan(barra!.y);
+    expect(alturaDoTexto(f, ["842 m"]).length).toBeGreaterThan(0);
   });
 });

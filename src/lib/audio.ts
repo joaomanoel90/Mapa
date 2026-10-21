@@ -38,7 +38,7 @@ export const EMENDA_S = 0.12;
 /* ------------------------------------------------------------------ */
 
 /** O que o pop marca. */
-export type SomKind = "largada" | "parada" | "chegada";
+export type SomKind = "largada" | "parada" | "chegada" | "recap";
 
 export type SomEvento = {
   /** instante no vídeo, em segundos */
@@ -67,6 +67,8 @@ export function momentosDoSom(opts: {
   passages?: { t: number }[];
   /** há cartela no fim? (muda o volume do último pop, não a posição) */
   cartela?: boolean;
+  /** quantos melhores momentos o fim do vídeo mostra (0/ausente = sem bloco) */
+  recap?: number;
 }): SomEvento[] {
   const dur = Number.isFinite(opts.duration) ? Math.max(0, opts.duration) : 0;
   const tl = opts.timeline;
@@ -83,6 +85,20 @@ export function momentosDoSom(opts: {
   }
 
   if (fim > 0) brutos.push({ at: fim, kind: "chegada" });
+
+  /*
+   * As viradas dos **melhores momentos**: um pop mais discreto a cada cartão
+   * novo. O primeiro cartão entra junto da chegada (que já tem o seu pop), por
+   * isso a contagem começa no segundo.
+   */
+  const nRecap = Math.max(0, Math.floor(opts.recap ?? 0));
+  if (tl.recap > 0 && nRecap >= 2) {
+    const passo = tl.recap / nRecap;
+    for (let i = 1; i < nRecap; i++) {
+      const at = routeEnd(tl) + i * passo;
+      if (at < dur - MIN_SEPARACAO_S) brutos.push({ at, kind: "recap" });
+    }
+  }
 
   /*
    * Ordena e junta o que caiu em cima: duas paradas no mesmo ponto (ou a
@@ -131,6 +147,7 @@ type Nota = {
 const RECEITAS: Record<SomKind, Nota[]> = {
   largada: [{ freq: 520, atraso: 0, decaimento: 0.045, duracao: 0.18, ganho: 0.2 }],
   parada: [{ freq: 880, atraso: 0, decaimento: 0.04, duracao: 0.2, ganho: 0.3 }],
+  recap: [{ freq: 740, atraso: 0, decaimento: 0.04, duracao: 0.16, ganho: 0.14 }],
   chegada: [
     { freq: 660, atraso: 0, decaimento: 0.06, duracao: 0.26, ganho: 0.26 },
     { freq: 990, atraso: 0.11, decaimento: 0.14, duracao: 0.5, ganho: 0.24 },

@@ -696,6 +696,33 @@ ceder a vez ao seguinte — eles nunca se sobrepõem.
 
 Desligável em "🏅 Destaques do percurso" e viaja no link.
 
+### Melhores momentos no fim (recap)
+
+Uma sequência curta entre a **chegada** e a **cartela**: até quatro momentos —
+largada, melhor parcial, maior subida e chegada —, cada um com **0,9 s** de
+vídeo (3,6 s no total). O mapa fica **parado na chegada** (o percurso acabou) e
+o cartão entra no mesmo lugar e no mesmo desenho do aviso de destaque: a mesma
+pílula escura com o aro na cor do app, uma letra pequena em cima, o número
+grande e uma linha de contexto. A única diferença é o contador (`2/4`), que diz
+onde se está na sequência.
+
+Ele **soma** tempo ao vídeo em vez de sair do percurso: a duração escolhida no
+painel continua sendo o tempo de rota, e os 3,6 s entram por cima (um clipe de
+20 s vira 23,6 s). Encurtar o percurso para caber o recap seria tirar do vídeo
+justamente o que o usuário pediu para ver.
+
+Só entra o que o arquivo sustenta:
+
+- **largada** e **chegada** com a hora do arquivo (sem hora, a chegada fica
+  sozinha — e um cartão só não é uma sequência, então o bloco não aparece);
+- **melhor parcial** e **maior subida** quando existem, e enquanto o
+  interruptor "🏅 Destaques do percurso" estiver ligado — é o mesmo dado, e o
+  recap é a segunda leitura dele, não uma segunda fonte.
+
+Durante o recap o aviso de destaque dá lugar a ele (os dois ocupam o mesmo
+canto, e dizer a mesma coisa duas vezes na mesma tela não ajuda). Desligável em
+**Animação → 🎞️ Melhores momentos no fim**, e viaja no link.
+
 ### Relevo: a luz e a sombra do terreno
 
 Um interruptor **⛰️ Relevo (luz e sombra do terreno)** no painel do mapa põe o

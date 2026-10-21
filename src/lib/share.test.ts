@@ -360,6 +360,12 @@ describe("sharedSettingsOverrides", () => {
     expect(decodeShare(buildShareUrl(base()))?.settings.dias).toBe(true);
   });
 
+  it("os melhores momentos viajam no link", () => {
+    const url = buildShareUrl(base({ settings: { ...DEFAULT_SETTINGS, recap: false } }));
+    expect(decodeShare(url)?.settings.recap).toBe(false);
+    expect(decodeShare(buildShareUrl(base()))?.settings.recap).toBe(true);
+  });
+
   it("o fantasma à frente viaja no link (é parte da cena)", () => {
     const url = buildShareUrl(base({ settings: { ...DEFAULT_SETTINGS, ghost: true } }));
     expect(decodeShare(url)?.settings.ghost).toBe(true);

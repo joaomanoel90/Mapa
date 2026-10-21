@@ -10,7 +10,7 @@ import {
   sampleTrack,
 } from "./geo";
 import { formatPace } from "./hud";
-import { buildTimeline, routeEnd, routeProgress, type Timeline } from "./timeline";
+import { buildTimeline, cardStart, routeEnd, routeProgress, type Timeline } from "./timeline";
 import { colorizeRoute, NEUTRAL_COLOR, slopeAt, slopeSeries } from "./coloring";
 import { destaques } from "./highlights";
 import { formatClock, timesOf } from "./hud";
@@ -2089,6 +2089,68 @@ describe("partida e chegada no vídeo", () => {
  * posição **absoluta**, então dá para ver o corpo subir e trocar de lado de um
  * quadro para o outro — que é exatamente o que o olho chama de "andar".
  */
+describe("os melhores momentos no fim", () => {
+  const tl = buildTimeline(20, { voo: false, cartela: true, recap: true });
+  const momentos = [
+    { titulo: "Largada", valor: "06:00", unidade: "", detalhe: "começo do percurso" },
+    { titulo: "Chegada", valor: "6,4 km", unidade: "", detalhe: "06:59 · 59 min" },
+  ];
+  const desenharEm = (elapsed: number, extra: Partial<FrameState> = {}) => {
+    const f = fakeCtx();
+    new SceneRenderer("dark").render(f.ctx, 1280, 720, {
+      ...estado(1, 20, cartela, null, null, tl),
+      elapsed,
+      recap: momentos,
+      ...extra,
+    });
+    return f;
+  };
+
+  /** a etiqueta do cartão (o título carrega o contador: "LARGADA · 1/2") */
+  const temEtiqueta = (f: { textos: string[] }, titulo: string) =>
+    f.textos.some((t) => t.startsWith(`${titulo} ·`));
+
+  it("entra logo depois da chegada, com o mapa parado no fim do percurso", () => {
+    // 0,2 s depois do fim do percurso: é o primeiro cartão que está em cena
+    const f = desenharEm(routeEnd(tl) + 0.2);
+    expect(temEtiqueta(f, "LARGADA")).toBe(true);
+    expect(f.textos).toContain("06:00");
+    // o contador diz onde se está na sequência
+    expect(f.textos).toContain("LARGADA · 1/2");
+  });
+
+  it("é a mesma pílula dos avisos — mesmo tamanho de letra do destaque", () => {
+    // o desenho do recap passa pelo mesmo pintor do aviso de destaque
+    const f = desenharEm(routeEnd(tl) + 0.2);
+    const aviso = desenharEm(0.55);
+    expect(aviso.textos.length).toBeGreaterThan(0);
+    expect(temEtiqueta(f, "LARGADA")).toBe(true);
+  });
+
+  it("a cartela espera os melhores momentos acabarem", () => {
+    const durante = desenharEm(routeEnd(tl) + tl.recap - 0.2);
+    expect(durante.textos).not.toContain("49 km");
+    // passado o bloco, a cartela assume
+    const depois = desenharEm(cardStart(tl) + 0.6);
+    expect(depois.textos).toContain("49 km");
+    expect(temEtiqueta(depois, "LARGADA")).toBe(false);
+  });
+
+  it("sem melhores momentos, a cartela volta a entrar na chegada", () => {
+    const f = desenharEm(routeEnd(tl), {
+      recap: null,
+      timeline: buildTimeline(20, { voo: false, cartela: true }),
+    });
+    expect(f.textos).toContain("49 km");
+    expect(temEtiqueta(f, "LARGADA")).toBe(false);
+  });
+
+  it("um cartão só não é uma sequência: nada aparece", () => {
+    const f = desenharEm(routeEnd(tl) + 0.2, { recap: [momentos[0]] });
+    expect(temEtiqueta(f, "LARGADA")).toBe(false);
+  });
+});
+
 describe("o aviso de dia novo", () => {
   /** um percurso de dois dias, com a noite no meio */
   const doisDias = buildTrack(

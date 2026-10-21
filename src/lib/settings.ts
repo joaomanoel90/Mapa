@@ -92,6 +92,15 @@ export type Settings = {
    * que não tem dado simplesmente não aparece.
    */
   highlights: boolean;
+  /**
+   * Os **melhores momentos** no fim do vídeo: uma sequência curta (largada,
+   * melhor parcial, maior subida, chegada) entre o fim do percurso e a cartela.
+   *
+   * Soma alguns segundos ao vídeo — o percurso não encurta para caber. Sem
+   * hora nem altitude no arquivo sobram largada/chegada; com menos de dois
+   * momentos não há recap.
+   */
+  recap: boolean;
   /** pedal, corrida ou caminhada — muda a unidade do HUD (km/h ou min/km) */
   activity: ActivityId;
   /**
@@ -234,6 +243,7 @@ export const DEFAULT_SETTINGS: Settings = {
   minimap: true,
   elevationProfile: true,
   highlights: true,
+  recap: true,
   activity: "pedal",
   colorBy: "solid",
   showKmMarks: false,
@@ -295,6 +305,7 @@ export function sanitizeSettings(raw: Partial<Settings>): Partial<Settings> {
   if (typeof out.minimap !== "boolean") delete out.minimap;
   if (typeof out.elevationProfile !== "boolean") delete out.elevationProfile;
   if (typeof out.highlights !== "boolean") delete out.highlights;
+  if (typeof out.recap !== "boolean") delete out.recap;
   if (!ACTIVITIES.some((a) => a.id === out.activity)) delete out.activity;
   if (out.colorBy !== "solid" && out.colorBy !== "speed" && out.colorBy !== "slope") {
     delete out.colorBy;

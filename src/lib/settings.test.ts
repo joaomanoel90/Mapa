@@ -133,6 +133,14 @@ describe("sanitizeSettings", () => {
     expect(DEFAULT_SETTINGS.dias).toBe(true);
   });
 
+  it("exige booleano nos melhores momentos, e eles nascem ligados", () => {
+    expect(sanitizeSettings(raw({ recap: "sim" })).recap).toBeUndefined();
+    expect(sanitizeSettings(raw({ recap: false })).recap).toBe(false);
+    // ligados por padrão: somam segundos ao vídeo, mas é a parte que as pessoas
+    // procuram no fim (largada, melhor parcial, chegada)
+    expect(DEFAULT_SETTINGS.recap).toBe(true);
+  });
+
   it("exige booleano também no fantasma à frente, e ele nasce desligado", () => {
     expect(sanitizeSettings(raw({ ghost: "sim" })).ghost).toBeUndefined();
     expect(sanitizeSettings(raw({ ghost: true })).ghost).toBe(true);

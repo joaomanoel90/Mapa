@@ -144,7 +144,7 @@ export type FocusPoint = (ts: number) => LatLng | null;
 export const RAIO_DO_PAR = 0.42;
 
 /** Metros por pixel no zoom 0, no equador (o mundo tem 256·2^z pixels). */
-const METROS_NO_EQUADOR = 156543.0339;
+export const METROS_NO_EQUADOR = 156543.0339;
 
 /**
  * Quantos níveis de zoom a ênfase pode acrescentar sem perder de vista o

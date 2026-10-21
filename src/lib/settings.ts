@@ -116,6 +116,15 @@ export type Settings = {
    */
   tiltHorizonte: boolean;
   /**
+   * Um **fantasma** do personagem, translúcido, andando à frente dele na mesma
+   * rota — o caminho que vem, sem tirar o olho de quem está andando.
+   *
+   * Não muda a velocidade nem a câmera: é um segundo desenho do mesmo
+   * personagem, uma fração de quadro à frente (ver `pontoFantasma`), que some
+   * perto da chegada para não "atravessar" a linha de chegada antes.
+   */
+  ghost: boolean;
+  /**
    * Os números da cartela são **digitados**, não medidos.
    *
    * O arquivo de GPS é a sugestão (o painel mostra o valor do arquivo como
@@ -227,6 +236,7 @@ export const DEFAULT_SETTINGS: Settings = {
   // a inclinação é o que faz a terceira pessoa parecer uma câmera atrás: vem
   // ligada junto com ela (quem não gostar desliga no painel)
   tiltHorizonte: true,
+  ghost: false,
   cardDistance: "",
   cardElevation: "",
   cardTime: "",
@@ -286,6 +296,7 @@ export function sanitizeSettings(raw: Partial<Settings>): Partial<Settings> {
   if (typeof out.thirdPerson !== "boolean") delete out.thirdPerson;
   if (typeof out.spinMap !== "boolean") delete out.spinMap;
   if (typeof out.tiltHorizonte !== "boolean") delete out.tiltHorizonte;
+  if (typeof out.ghost !== "boolean") delete out.ghost;
   for (const key of ["cardDistance", "cardElevation", "cardTime", "cardNote"] as const) {
     if (typeof out[key] !== "string") delete out[key];
   }

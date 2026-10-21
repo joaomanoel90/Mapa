@@ -20,6 +20,7 @@ import {
   cameraTarget,
   CHASE_ALTURA,
   CHASE_TILT,
+  METROS_NO_EQUADOR,
   fatorDeTilt,
   zoomEfetivo,
   type ChaseConfig,
@@ -85,6 +86,11 @@ export type SceneStyle = {
   showRoute: boolean;
   showTraveled: boolean;
   showEndpoints: boolean;
+  /**
+   * O **fantasma**: um segundo personagem, translúcido, andando à frente na
+   * mesma rota. Ver `pontoFantasma`.
+   */
+  ghost?: boolean;
   /** exibe as paradas (ponte, cachoeira, igreja…) no vídeo */
   showStops: boolean;
   /** mostra o nome da parada em uma etiqueta */
@@ -1973,6 +1979,44 @@ export class SceneRenderer {
       ctx.restore();
     }
 
+    /*
+     * --- o fantasma ---
+     *
+     * Desenhado **antes** do personagem: quem está na frente é sempre o de
+     * verdade. A opacidade vem daqui (e não de dentro do `drawCharacter`)
+     * porque ela cai nos últimos 3% do percurso.
+     */
+    if (style.ghost) {
+      const fantasma = pontoFantasma(track, t, {
+        zoom: this.cam.zoom,
+        height,
+        centro: sample.pos,
+        percurso: tl.percurso,
+      });
+      if (fantasma) {
+        ctx.save();
+        /*
+         * Na abertura (o voo sobre a região) o fantasma entra junto com a
+         * câmera: no enquadramento largo ele estaria a quilômetros do
+         * personagem e leria como um segundo personagem solto no mapa.
+         */
+        ctx.globalAlpha = fantasma.alpha * target.opening;
+        drawCharacter(
+          ctx,
+          toXY(fantasma.pos),
+          fantasma.rumo + anguloMapa,
+          input,
+          sf,
+          // sem inclinação na curva: o estado do filtro é do personagem de
+          // verdade, e um segundo chamador no mesmo quadro o estragaria. O
+          // fantasma é uma cópia de leitura, não um corpo em curva.
+          0,
+          true,
+        );
+        ctx.restore();
+      }
+    }
+
     // --- personagem ---
     drawCharacter(
       ctx,
@@ -2352,6 +2396,58 @@ export function raioDoPersonagem(character: Character, sf: number): number {
   return Math.round(Math.max(38, Math.min(86, 62 * sf)) * (character.size ?? 1));
 }
 
+/** Fração da altura da tela em que o fantasma anda à frente do personagem. */
+export const GHOST_FRACAO = 0.16;
+
+/** Opacidade do fantasma (o personagem de verdade é opaco). */
+export const GHOST_ALPHA = 0.34;
+
+/**
+ * Onde fica o **fantasma** que anda à frente do personagem.
+ *
+ * É o mesmo personagem, translúcido, um pedaço à frente na rota: em vez de uma
+ * seta ou de um ponto de luz, quem mostra "o caminho vem por aqui" é a própria
+ * figura que o vídeo já usa. A distância é medida **na tela** (16% da altura,
+ * `GHOST_FRACAO`), convertida para metros no zoom do quadro — assim ele fica à
+ * mesma distância visual no zoom 12 e no 18, em vez de sumir num caso e sair
+ * pela borda no outro.
+ *
+ * Some nos últimos 3% do percurso: chegando perto da linha de chegada, um
+ * fantasma à frente "chegaria antes" e a leitura vira erro.
+ *
+ * Devolve `null` quando não há para onde ir (perto do fim) ou quando o traçado
+ * não tem comprimento.
+ */
+export function pontoFantasma(
+  track: Track,
+  t: number,
+  /** pixels de altura do quadro, o zoom da vista e o centro (para a escala) */
+  vista: { zoom: number; height: number; centro: LatLng; percurso?: number },
+): { pos: LatLng; t: number; index: number; rumo: number; alpha: number } | null {
+  if (track.pts.length < 2 || !(track.total > 0)) return null;
+  const cos = Math.cos((vista.centro.lat * Math.PI) / 180);
+  const mPorPx = (METROS_NO_EQUADOR * cos) / Math.pow(2, vista.zoom);
+  if (!Number.isFinite(mPorPx) || mPorPx <= 0) return null;
+
+  const metros = GHOST_FRACAO * vista.height * mPorPx;
+  const tg = t + metros / track.total;
+  if (tg >= 1) return null;
+
+  // os últimos 3% do percurso são a rampa de saída do fantasma
+  const saida = tg > 0.97 ? Math.max(0, (1 - tg) / 0.03) : 1;
+  if (saida <= 0) return null;
+
+  const amostra = sampleTrack(track, tg);
+  const janela = janelaDoRumo(track.total, vista.percurso && vista.percurso > 0 ? vista.percurso : 16);
+  return {
+    pos: amostra.pos,
+    t: tg,
+    index: amostra.index,
+    rumo: rumoSuave(track, tg, janela),
+    alpha: GHOST_ALPHA * saida,
+  };
+}
+
 function drawCharacter(
   ctx: CanvasRenderingContext2D,
   at: { x: number; y: number },
@@ -2369,6 +2465,11 @@ function drawCharacter(
    * o traçado muda de ponto, e era isso que ficava brusco nas curvas.
    */
   inclina: number,
+  /**
+   * `fantasma` desenha a cópia translúcida à frente: sem halo, sem anel de
+   * pulso e sem seta — o que sobra é a figura, que é o que precisa ser lida.
+   */
+  fantasma = false,
 ) {
   const { character, style, rotate, elapsed } = input;
   const badge = raioDoPersonagem(character, sf);
@@ -2380,42 +2481,44 @@ function drawCharacter(
   if (inclina !== 0) ctx.rotate((inclina * Math.PI) / 180);
   if (estica !== 0) ctx.scale(1 - estica * 0.6, 1 + estica);
 
-  // halo
-  const halo = ctx.createRadialGradient(0, 0, badge * 0.25, 0, 0, badge * 1.5);
-  halo.addColorStop(0, hexA(style.accent, 0.45));
-  halo.addColorStop(1, hexA(style.accent, 0));
-  ctx.fillStyle = halo;
-  ctx.beginPath();
-  ctx.arc(0, 0, badge * 1.5 * respira, 0, Math.PI * 2);
-  ctx.fill();
+  if (!fantasma) {
+    // halo
+    const halo = ctx.createRadialGradient(0, 0, badge * 0.25, 0, 0, badge * 1.5);
+    halo.addColorStop(0, hexA(style.accent, 0.45));
+    halo.addColorStop(1, hexA(style.accent, 0));
+    ctx.fillStyle = halo;
+    ctx.beginPath();
+    ctx.arc(0, 0, badge * 1.5 * respira, 0, Math.PI * 2);
+    ctx.fill();
 
-  /*
-   * Anel de pulso: batia sozinho no relógio do vídeo (um "pisca-pisca" de
-   * painel); agora abre e fecha **no passo**, então o anel conta a mesma
-   * história que o corpo — um passo, uma batida.
-   */
-  ctx.strokeStyle = hexA(style.accent, 0.55);
-  ctx.lineWidth = 2 * sf;
-  ctx.beginPath();
-  ctx.arc(0, 0, badge * (0.86 + 0.12 * respira + 0.06 * sobe), 0, Math.PI * 2);
-  ctx.stroke();
+    /*
+     * Anel de pulso: batia sozinho no relógio do vídeo (um "pisca-pisca" de
+     * painel); agora abre e fecha **no passo**, então o anel conta a mesma
+     * história que o corpo — um passo, uma batida.
+     */
+    ctx.strokeStyle = hexA(style.accent, 0.55);
+    ctx.lineWidth = 2 * sf;
+    ctx.beginPath();
+    ctx.arc(0, 0, badge * (0.86 + 0.12 * respira + 0.06 * sobe), 0, Math.PI * 2);
+    ctx.stroke();
 
-  // seta de direção
-  const arrowAngle = ((rumo - 90) * Math.PI) / 180;
-  ctx.save();
-  ctx.rotate(arrowAngle);
-  ctx.globalAlpha = 0.9;
-  ctx.beginPath();
-  ctx.moveTo(badge * 0.92, 0);
-  ctx.lineTo(badge * 0.6, -badge * 0.26);
-  ctx.lineTo(badge * 0.6, badge * 0.26);
-  ctx.closePath();
-  ctx.fillStyle = style.accent;
-  ctx.strokeStyle = "rgba(255,255,255,0.9)";
-  ctx.lineWidth = 2 * sf;
-  ctx.fill();
-  ctx.stroke();
-  ctx.restore();
+    // seta de direção
+    const arrowAngle = ((rumo - 90) * Math.PI) / 180;
+    ctx.save();
+    ctx.rotate(arrowAngle);
+    ctx.globalAlpha = 0.9;
+    ctx.beginPath();
+    ctx.moveTo(badge * 0.92, 0);
+    ctx.lineTo(badge * 0.6, -badge * 0.26);
+    ctx.lineTo(badge * 0.6, badge * 0.26);
+    ctx.closePath();
+    ctx.fillStyle = style.accent;
+    ctx.strokeStyle = "rgba(255,255,255,0.9)";
+    ctx.lineWidth = 2 * sf;
+    ctx.fill();
+    ctx.stroke();
+    ctx.restore();
+  }
 
   // badge
   ctx.beginPath();

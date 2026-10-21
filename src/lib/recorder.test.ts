@@ -5,6 +5,7 @@ import {
   fpsQueCasa,
   indiceDoQuadro,
   medirCadencia,
+  mimeComAudio,
   recordVideo,
   tempoDoQuadro,
   type VideoFormat,
@@ -207,6 +208,8 @@ describe("a captura da gravação em tempo real", () => {
     const stream = {
       getTracks: () => [trilha],
       getVideoTracks: () => [trilha],
+      getAudioTracks: () => [],
+      addTrack: () => undefined,
     };
 
     class RecorderFalso {
@@ -448,5 +451,44 @@ describe("a régua da cadência", () => {
     const c = medirCadencia(Array.from({ length: 60 }, (_, i) => (i * 1000) / 60 / 1000));
     expect(c.regular).toBe(1);
     expect(c.atraso).toBe(0);
+  });
+});
+
+/**
+ * O som na gravação em tempo real.
+ *
+ * O `MediaRecorder` recebe o `mimeType` **com o codec de áudio escrito**. O
+ * formato do painel guarda só o codec de vídeo (`video/webm;codecs=vp9`), e uma
+ * stream com áudio gravada com esse texto sai muda — o navegador ignora a faixa
+ * em silêncio.
+ */
+describe("áudio no mimeType da gravação em tempo real", () => {
+  const mp4: VideoFormat = {
+    id: "mp4",
+    label: "MP4",
+    ext: "mp4",
+    mime: "video/mp4",
+    container: "mp4",
+    codec: "avc1.42E01E",
+  };
+  const webm: VideoFormat = {
+    id: "webm-vp9",
+    label: "WebM (VP9)",
+    ext: "webm",
+    mime: "video/webm;codecs=vp9",
+    container: "webm",
+    codec: "vp09.00.10.08",
+  };
+
+  it("MP4 pede AAC e WebM pede Opus", () => {
+    expect(mimeComAudio(mp4)).toContain("mp4a.40.2");
+    expect(mimeComAudio(webm)).toContain("opus");
+    // o codec de vídeo continua declarado: sem ele o navegador recusa o tipo
+    expect(mimeComAudio(webm)).toContain("vp9");
+    expect(mimeComAudio(mp4)).toContain("avc1");
+  });
+
+  it("VP8 continua VP8 (não vira VP9 por causa do áudio)", () => {
+    expect(mimeComAudio({ ...webm, id: "webm-vp8", codec: "vp8" })).toContain("vp8,opus");
   });
 });

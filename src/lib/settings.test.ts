@@ -168,6 +168,22 @@ describe("sanitizeSettings", () => {
     expect(sanitizeSettings(raw({ logoChip: "sim" })).logoChip).toBeUndefined();
   });
 
+  it("o som nasce ligado: os pops são gerados, não licenciados", () => {
+    expect(DEFAULT_SETTINGS.som).toBe(true);
+    expect(sanitizeSettings(raw({ som: false })).som).toBe(false);
+    expect(sanitizeSettings(raw({ som: "sim" })).som).toBeUndefined();
+  });
+
+  it("o volume da música só aceita número entre 0 e 1", () => {
+    expect(DEFAULT_SETTINGS.musicaVolume).toBeCloseTo(0.55, 5);
+    expect(sanitizeSettings(raw({ musicaVolume: 0.3 })).musicaVolume).toBe(0.3);
+    // zero é válido (música muda); fora da faixa, não
+    expect(sanitizeSettings(raw({ musicaVolume: 0 })).musicaVolume).toBe(0);
+    expect(sanitizeSettings(raw({ musicaVolume: 1.5 })).musicaVolume).toBeUndefined();
+    expect(sanitizeSettings(raw({ musicaVolume: -0.1 })).musicaVolume).toBeUndefined();
+    expect(sanitizeSettings(raw({ musicaVolume: "alto" })).musicaVolume).toBeUndefined();
+  });
+
   it("não deixa passar lixo vindo de JSON corrompido", () => {
     const out = sanitizeSettings(
       raw({ basemap: 7, aspect: [], duration: {}, profile: [], followZoom: "x" }),

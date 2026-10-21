@@ -33,6 +33,7 @@ function Painel({
   avisoSalvar = null,
   avisoRapido,
   onImportGpx = () => undefined,
+  musica = null,
 }: {
   inicial?: Partial<Settings>;
   cobertura?: { ele: number; time: number };
@@ -41,6 +42,7 @@ function Painel({
   /** `null` = o navegador suporta o ⚡; texto = motivo de não suportar */
   avisoRapido?: string | null;
   onImportGpx?: (f: File) => void;
+  musica?: { nome: string; duracao: number } | null;
 }) {
   const [settings, setSettings] = useState<Settings>({ ...DEFAULT_SETTINGS, ...inicial });
   const update = <K extends keyof Settings>(key: K, value: Settings[K]) =>
@@ -90,7 +92,9 @@ function Painel({
       avisoSalvar={avisoSalvar}
       avisoRapido={avisoRapido}
       resumo={{ distanceM: TRACK.total, elevation: null, time: null, points: TRACK.pts.length }}
-      cartela={null}
+          cartela={null}
+      musica={musica}
+      onMusica={nada}
     />
   );
 }
@@ -464,5 +468,47 @@ describe("painel: prévia de percurso", () => {
   it("com o HUD desligado o aviso também sai", () => {
     montar(<Painel inicial={{ showHud: false }} cobertura={{ ele: 0, time: 0 }} />);
     expect(container.textContent ?? "").not.toContain("prévia de percurso");
+  });
+});
+
+describe("painel: som do vídeo", () => {
+  /*
+   * O som tem duas camadas com origens diferentes: os pops são gerados pelo
+   * app, a música é arquivo do usuário. O painel precisa dizer as duas coisas —
+   * e o resumo no canto (mudo / pops / música + pops) é a leitura rápida do que
+   * vai sair no arquivo.
+   */
+  it("nasce com os pops ligados", () => {
+    montar(<Painel />);
+    const texto = container.textContent ?? "";
+    expect(texto).toContain("Pops na largada");
+    expect(texto).toContain("pops");
+  });
+
+  it("sem pops e sem música, o vídeo é mudo", () => {
+    montar(<Painel inicial={{ som: false }} />);
+    expect(container.textContent ?? "").toContain("mudo");
+  });
+
+  it("o clique no interruptor desliga os pops", () => {
+    montar(<Painel />);
+    clicar(botao("Pops na largada"));
+    expect(container.textContent ?? "").toContain("mudo");
+  });
+
+  it("com música escolhida, mostra nome, duração e volume", () => {
+    montar(<Painel musica={{ nome: "trilha.mp3", duracao: 95 }} />);
+    const texto = container.textContent ?? "";
+    expect(texto).toContain("trilha.mp3");
+    expect(texto).toContain("1:35");
+    expect(texto).toContain("música + pops");
+    expect(texto).toContain("Volume");
+    // e avisa o que vai acontecer com uma faixa mais longa que o vídeo
+    expect(texto).toContain("corta no fim");
+  });
+
+  it("a música vale só nesta sessão — o painel diz isso", () => {
+    montar(<Painel />);
+    expect(container.textContent ?? "").toContain("não fica salva");
   });
 });

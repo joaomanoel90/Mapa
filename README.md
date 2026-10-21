@@ -112,6 +112,57 @@ No **iPhone/iPad o suporte costuma ser melhor pelo WebCodecs** do que pelo `Medi
 exportação rápida não estiver disponível e o botão aparecer desabilitado, é o limite do navegador.
 A pré-visualização funciona em todos.
 
+### Som no vídeo (pops e música)
+
+Até aqui o arquivo saía **mudo**: `video/*` puro, sem faixa de áudio. O som tem
+duas camadas, e as duas evitam o problema de direitos:
+
+| camada | de onde vem | o que marca |
+|---|---|---|
+| **pops** | sintetizados no app, nota por nota | a largada, **cada parada** passada e a chegada |
+| **música** | o arquivo que o usuário escolher | o fundo, do começo ao fim |
+
+**Os pops não têm sample nenhum.** Cada um é uma senoide que decai, com um
+harmônico (a quinta) e 4 ms de 3,2 kHz no ataque — é o ataque que o ouvido lê
+como "pop" e não como "bipe". Como é só matemática, não há licença para pagar
+nem faixa para creditar. A largada é grave e curta, a parada é aguda e curtinha,
+e a chegada é o único momento que pode celebrar: duas notas, a segunda uma quinta
+acima, mais longa.
+
+**Quando cada pop cai** vem do mesmo relógio do desenho: as passagens são
+guardadas em progresso do percurso (0..1), e o pop usa o par `voo`/`percurso` da
+timeline — então ele soa **junto** com o pino, não antes nem depois. Durante o
+voo de abertura não há pop: nada aconteceu ainda. Dois eventos a menos de 0,12 s
+um do outro viram um só (senão o volume dobra e o ouvido não distingue "dois" de
+"um mais alto").
+
+**A música é o arquivo do usuário.** O app não distribui faixa nenhuma: ele
+decodifica o MP3/M4A/WAV/OGG escolhido (num `AudioContext` já em 48 kHz, então o
+navegador reamostra na leitura), ajusta ao tamanho do vídeo e mistura por baixo
+dos pops. Faixa **curta repete** com uma emenda de 120 ms em que a cauda de uma
+volta se soma à cabeça da seguinte com pesos que dão 1 — sem isso, cada volta
+começaria com um estalo. Faixa **longa é cortada**, com 0,5 s de entrada e 1,2 s
+de saída (o vídeo termina na cartela; a música não pode acabar no meio de um
+compasso). O arquivo de música **não fica salvo**: são megabytes, e o
+`localStorage` tem ~5 MB para o site inteiro. Só o volume (padrão 55%) vai para
+as preferências — e junto no link compartilhado, com o interruptor dos pops.
+
+**Como o som entra no arquivo.** O áudio é codificado **antes** do primeiro
+quadro de vídeo, porque o muxer precisa declarar a faixa no cabeçalho — uma faixa
+anunciada e vazia quebra o arquivo. AAC-LC (`mp4a.40.2`) no MP4, Opus (`A_OPUS`)
+no WebM, os dois a 48 kHz; os blocos são de **1024** amostras no AAC e **960** no
+Opus (20 ms), e o último é completado com silêncio em vez de sair torto. Na hora
+de escrever, os blocos entram **intercalados** com os quadros: 14 s de áudio na
+frente obrigariam o tocador a pular o arquivo inteiro para começar a imagem.
+
+Na **gravação em tempo real** o som entra como faixa da `MediaStream`
+(`MediaStreamAudioDestinationNode`), e o `mimeType` passa a declarar o codec de
+áudio — sem isso o navegador ignora a faixa em silêncio.
+
+**Se o navegador não souber codificar áudio**, o vídeo sai mudo — e o painel do
+fim diz isso com todas as letras. O mesmo vale se o muxer recusar a faixa: perder
+o som é ruim, perder o vídeo é pior.
+
 ### O que faz o mapa fluir (medido nos vídeos do usuário)
 
 O usuário comparou três exportações e disse que uma delas "flui melhor o mapa e o trajeto". Medindo
@@ -1248,7 +1299,7 @@ ou cortados.
 
 ```bash
 npm run typecheck  # tsc --noEmit
-npm test           # Vitest (906 casos)
+npm test           # Vitest (944 casos)
 npm run check:dist # o build saiu autocontido e sem /src/?
 ```
 
@@ -1286,6 +1337,7 @@ src/
 │  ├─ CitySearch.tsx        busca de cidades (Nominatim)
 │  ├─ StopEditor.tsx        catálogo e edição das paradas
 │  ├─ PhotoField.tsx        escolher/trocar a foto (reduz a 640 px antes de entrar)
+│  ├─ SoundPanel.tsx        pops e música de fundo do vídeo
 │  ├─ EndpointEditor.tsx    partida e chegada como locais marcados
 │  ├─ Timeline.tsx          linha do tempo da pré-visualização
 │  └─ ExportModal.tsx       gravação e download do vídeo
@@ -1293,6 +1345,7 @@ src/
    ├─ renderer.ts           desenha cada quadro do vídeo no canvas
    ├─ webcodecs.ts          exportação rápida (VideoEncoder + muxer)
    ├─ recorder.ts           gravação em tempo real (MediaRecorder)
+   ├─ audio.ts              pops sintetizados, música repetida/cortada e a trilha (PCM)
    ├─ routing.ts            rotas OSRM por trecho, com cache
    ├─ tiles.ts              mapas gratuitos e filtros de estilo
    ├─ geo.ts                matemática geográfica, medida com filtro de GPS e projeção

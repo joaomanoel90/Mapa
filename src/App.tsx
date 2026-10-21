@@ -21,6 +21,14 @@ import { kmMarks } from "./lib/km-marks";
 import { parseDuration } from "./lib/duration";
 import { buildTimeline, routeProgress } from "./lib/timeline";
 import {
+  checkAudioFile,
+  duracaoDaFaixa,
+  lerMusica,
+  montarTrilha,
+  momentosDoSom,
+  type Faixa,
+} from "./lib/audio";
+import {
   buildTrack,
   formatDistance,
   nearestTOnTrack,
@@ -182,6 +190,44 @@ function App() {
     }
   }, [endpoints]);
 
+  /**
+   * A música de fundo do vídeo.
+   *
+   * Fica em estado (e não nas preferências) porque é um **arquivo**: megabytes
+   * que o `localStorage` não guarda. Vale para esta sessão; quem recarrega a
+   * página escolhe de novo.
+   */
+  const [musica, setMusica] = useState<{ nome: string; faixa: Faixa } | null>(null);
+  const [musicaAviso, setMusicaAviso] = useState<string | null>(null);
+  const [musicaCarregando, setMusicaCarregando] = useState(false);
+
+  const escolherMusica = useCallback(async (file: File | null) => {
+    if (!file) {
+      setMusica(null);
+      setMusicaAviso(null);
+      return;
+    }
+    const problema = checkAudioFile(file);
+    if (problema) {
+      setMusicaAviso(problema);
+      return;
+    }
+    setMusicaAviso(null);
+    setMusicaCarregando(true);
+    try {
+      const faixa = await lerMusica(file);
+      if (!faixa) {
+        setMusicaAviso(
+          "Este navegador não conseguiu abrir o arquivo de música. Tente um MP3 ou WAV.",
+        );
+        return;
+      }
+      setMusica({ nome: file.name, faixa });
+    } finally {
+      setMusicaCarregando(false);
+    }
+  }, []);
+
   const [phase, setPhase] = useState<ExportPhase | null>(null);
   const [exportProgress, setExportProgress] = useState(0);
   const [exportMsg, setExportMsg] = useState<string | undefined>();
@@ -210,6 +256,12 @@ function App() {
     fpsLimitadoPeloTeto: boolean;
     /** por que o ⚡ não rodou nesta gravação (null = rodou ou o navegador suporta) */
     motivoMotor: string | null;
+    /**
+     * O arquivo saiu com faixa de áudio? `undefined` = não se pediu som (o
+     * painel do fim não tem o que avisar), `false` = pediu e o navegador não
+     * codificou.
+     */
+    comSom?: boolean;
     /** o ⚡ não rodou porque o interruptor do painel estava desligado */
     rapidoDesligado: boolean;
     /**
@@ -1184,6 +1236,38 @@ function App() {
       subtitle: settings.subtitle,
     };
     const stops = sortPois(pois);
+
+    /*
+     * A trilha do vídeo é montada **antes** de gravar, do tamanho exato do
+     * vídeo: os pops caem nos mesmos instantes que a tela destaca (a largada,
+     * cada parada, a chegada) e a música é repetida ou cortada para caber.
+     *
+     * Sem música e sem pops a trilha é `null` — e aí a exportação é a de
+     * sempre, sem faixa de áudio nenhuma.
+     */
+    const eventos = settings.som
+      ? momentosDoSom({
+          duration: settings.duration,
+          timeline: linhaDoTempo,
+          // as passagens são guardadas por parada (`id → instantes`); o som
+          // quer só a lista de instantes
+          passages: Object.values(passagens ?? {})
+            .flat()
+            .map((t) => ({ t })),
+          cartela: cartela !== null,
+        })
+      : [];
+    const trilha =
+      eventos.length > 0 || musica
+        ? montarTrilha({
+            duration: settings.duration,
+            eventos,
+            musica: musica?.faixa ?? null,
+            volume: settings.musicaVolume,
+          })
+        : null;
+    /** o arquivo saiu mesmo com som? (o navegador pode não codificar áudio) */
+    let comSom = false;
     /*
      * A câmera **com que o vídeo vai sair** — resolvida antes de aquecer.
      *
@@ -1440,6 +1524,10 @@ function App() {
           }
         },
         shouldCancel: () => cancelRef.current,
+        audio: trilha ?? undefined,
+        onSom: (ok: boolean) => {
+          comSom = ok;
+        },
         draw: (c: CanvasRenderingContext2D, t: number, elapsed: number) => {
           void c;
           // o gravador fala em tempo de vídeo; o desenho, em progresso do percurso
@@ -1480,6 +1568,7 @@ function App() {
         fpsLimitadoPeloTeto: taxaPedidaLimitada,
         motivoMotor: motivoRapido,
         rapidoDesligado,
+        comSom: trilha ? comSom : undefined,
       });
       setPhase("done");
     } catch (err) {
@@ -1500,6 +1589,8 @@ function App() {
     pois,
     endpoints,
     linhaDoTempo,
+    passagens,
+    musica,
   ]);
 
   /*
@@ -1640,6 +1731,12 @@ function App() {
             onPreset={applyPreset}
             onExport={startExport}
             onReplay={replay}
+            musica={
+              musica ? { nome: musica.nome, duracao: duracaoDaFaixa(musica.faixa) } : null
+            }
+            musicaAviso={musicaAviso}
+            musicaCarregando={musicaCarregando}
+            onMusica={escolherMusica}
             onImportGpx={importarGpx}
             onExportGpx={exportarGpx}
             gpxMsg={gpxMsg}
@@ -1879,6 +1976,7 @@ function App() {
             setRelancarComRapido(true);
           }}
           fpsLimitadoPeloTeto={video?.fpsLimitadoPeloTeto}
+          comSom={video?.comSom}
           width={aspect.w}
           height={aspect.h}
           duration={settings.duration}

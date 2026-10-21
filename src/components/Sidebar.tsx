@@ -3,6 +3,7 @@ import CitySearch from "./CitySearch";
 import EndCardPanel from "./EndCardPanel";
 import EndpointEditor from "./EndpointEditor";
 import PhotoField from "./PhotoField";
+import SoundPanel from "./SoundPanel";
 import StopEditor from "./StopEditor";
 import type { Endpoints } from "../lib/endpoints";
 import { CharacterPicker, AccentPicker } from "./CharacterPicker";
@@ -92,6 +93,12 @@ type Props = {
   resumo: RideSummary;
   /** a cartela montada com o que foi digitado — null quando não há nada */
   cartela: EndCard | null;
+  /** a música de fundo escolhida (o arquivo em si; vale só nesta sessão) */
+  musica: { nome: string; duracao: number } | null;
+  onMusica: (file: File | null) => void;
+  /** recado da música (arquivo recusado, navegador não abriu) */
+  musicaAviso?: string | null;
+  musicaCarregando?: boolean;
 };
 
 function Sidebar(props: Props) {
@@ -141,6 +148,10 @@ function Sidebar(props: Props) {
     gpxMsg,
     avisoSalvar,
     avisoRapido,
+    musica,
+    onMusica,
+    musicaAviso,
+    musicaCarregando,
   } = props;
 
   const avgKmh = hasRoute && s.duration > 0 ? (distance / 1000 / s.duration) * 3600 : 0;
@@ -947,6 +958,14 @@ function Sidebar(props: Props) {
               onChange={(v) => update("showProgress", v)}
             />
           </div>
+          <SoundPanel
+            settings={s}
+            update={update}
+            musica={musica}
+            onMusica={onMusica}
+            aviso={musicaAviso ?? null}
+            carregando={!!musicaCarregando}
+          />
           <Button
             variant="primary"
             onClick={onExport}

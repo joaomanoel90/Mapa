@@ -83,8 +83,48 @@ describe("abertura", () => {
     expect(openingProgress(0, 14)).toBeCloseTo(0, 6);
     expect(openingProgress(openingSeconds(14), 14)).toBeCloseTo(1, 6);
     expect(openingProgress(99, 14)).toBe(1);
-    // e é uma animação suave, sem degrau
-    expect(openingProgress(0.5, 14)).toBeLessThan(0.5);
+  });
+
+  it("já está andando no primeiro quadro", () => {
+    /*
+     * A curva antiga (`easeInOutCubic`) partia do repouso: no primeiro quadro a
+     * câmera estava parada, e no feed é esse quadro que aparece antes do play.
+     * O pedido é que o vídeo abra em movimento.
+     */
+    const total = openingSeconds(14);
+    const quadro = 1 / 30;
+    const andou = openingProgress(quadro, 14) - openingProgress(0, 14);
+    // velocidade do primeiro quadro, comparada com a média do voo (era ~8% dela)
+    const velocidade = andou / quadro;
+    const media = 1 / total;
+    expect(velocidade).toBeGreaterThan(media * 0.95);
+    expect(andou).toBeGreaterThan(0);
+    // e o mesmo vale olhando o alvo da câmera: o zoom já mudou no primeiro quadro
+    const z0 = alvo(0, 0, { cinematic: { opening: true } }).zoom;
+    const z1 = alvo(0, quadro, { cinematic: { opening: true } }).zoom;
+    expect(z1 - z0).toBeGreaterThan(0.02);
+    expect(total).toBeGreaterThan(quadro);
+  });
+
+  it("a curva é monótona e não passa do fim", () => {
+    // sem ida e volta e sem estourar: o voo nunca anda para trás nem passa do
+    // enquadramento de acompanhamento
+    let anterior = -1;
+    for (let i = 0; i <= 200; i++) {
+      const p = openingProgress((i / 200) * openingSeconds(14), 14);
+      expect(p).toBeGreaterThanOrEqual(anterior);
+      expect(p).toBeLessThanOrEqual(1 + 1e-9);
+      anterior = p;
+    }
+  });
+
+  it("chega devagar: o pouso não é um corte", () => {
+    const total = openingSeconds(14);
+    const quadro = 1 / 30;
+    const ultimoPasso = 1 - openingProgress(total - quadro, 14);
+    // no último quadro anda menos de um quinto do que andou no primeiro
+    const primeiroPasso = openingProgress(quadro, 14);
+    expect(ultimoPasso).toBeLessThan(primeiroPasso / 5);
   });
 
   it("no primeiro quadro a câmera está na vista da rota toda", () => {

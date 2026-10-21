@@ -179,20 +179,50 @@ export function openingSeconds(duration: number): number {
   return Math.max(0.4, Math.min(OPEN_CAP_S, d * OPEN_SHARE));
 }
 
-function easeInOutCubic(x: number): number {
-  return x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2;
+/**
+ * Velocidade com que a abertura **parte**, medida em "voos por voo".
+ *
+ * `1` é a velocidade média do voo inteiro: a câmera já está andando no primeiro
+ * quadro, na cadência de quem vem de longe, e desacelera até pousar. Zero é o
+ * que se tinha antes (a curva era `easeInOutCubic`, e sair do repouso é o que
+ * faz o primeiro quadro parecer uma foto que só depois se mexe — no feed, esse
+ * quadro é justamente o que aparece parado antes do play). Três seria pular
+ * direto para a velocidade máxima e passar o resto do voo arrastando.
+ */
+const ABERTURA_V0 = 1;
+
+/**
+ * Curva da abertura: sai andando, chega parando.
+ *
+ * Hermite cúbico com `f(0)=0`, `f(1)=1`, `f'(0)=ABERTURA_V0` e `f'(1)=0`. O
+ * começo tem velocidade de verdade — é o que põe movimento no primeiro quadro —,
+ * e a chegada continua com velocidade zero, que é o que faz parecer um pouso e
+ * não um corte. No meio a curva acelera um pouco (o pico é ~1,3× a média)
+ * porque a câmera vem de longe e o enquadramento ainda abre: não é um degrau,
+ * é um S com partida.
+ *
+ * Com `v=1` ela é monótona em [0,1]: `f'(x) = -3x² + 2x + 1`, que é positivo no
+ * intervalo e zera só em `x=1`.
+ */
+function aberturaSuave(x: number): number {
+  const v = ABERTURA_V0;
+  return v * (x * x * x - 2 * x * x + x) + (-2 * x * x * x + 3 * x * x);
 }
 
 /**
  * Andamento da abertura, de 0 a 1.
  *
- * A entrada e a saída são suaves de propósito: começar devagar dá tempo de ler
- * a região, e terminar devagar é o que faz parecer um pouso, e não um corte.
+ * A saída é suave de propósito — terminar devagar é o que faz parecer um pouso,
+ * e não um corte. A **entrada** deixou de ser: começando do repouso, o primeiro
+ * quadro (o que o feed mostra parado, antes do play) era uma foto da região, e o
+ * pedido é que o vídeo abra **em movimento**.
+ *
+ * O tempo do voo não mudou (`openingSeconds`): só a distribuição dentro dele.
  */
 export function openingProgress(elapsed: number, duration: number): number {
   const total = openingSeconds(duration);
   const x = Math.max(0, Math.min(1, elapsed / total));
-  return easeInOutCubic(x);
+  return aberturaSuave(x);
 }
 
 /**

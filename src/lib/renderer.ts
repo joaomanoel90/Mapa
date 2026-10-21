@@ -2017,7 +2017,7 @@ export class SceneRenderer {
     }
 
     const headerBottom = style.showTitle
-      ? drawTitle(ctx, width, input, sample, onDark, sf)
+      ? drawTitle(ctx, width, input, onDark, sf)
       : 0;
 
     /*
@@ -3624,7 +3624,6 @@ function drawTitle(
   ctx: CanvasRenderingContext2D,
   width: number,
   input: FrameState,
-  sample: { distance: number },
   onDark: boolean,
   sf: number,
 ) {
@@ -3686,60 +3685,52 @@ function drawTitle(
     ctx.fillText(sub, boxX + pad * 0.8, y);
   }
 
-  // selos do canto superior direito: paradas alcançadas (opcional) + distância
   /*
+   * O canto superior direito tem **um** selo: o contador de paradas, quando
+   * ligado.
+   *
+   * A **distância saiu daqui**. Ela já aparece na faixa sob o anel do HUD — com
+   * o relógio junto, quando há relógio —, e o mesmo número nos dois cantos,
+   * ainda por cima com formatos diferentes ("6.00 km" aqui, "6,00 km" ali),
+   * parecia defeito. Um lugar só para cada número.
+   *
    * O contador conta **passagens**, não paradas: numa ida e volta, passar de
    * novo pela mesma parada conta de novo. Quando não há repetição (o caso
    * comum), passa a ser a mesma coisa de antes — e o texto continua "paradas".
    */
   const contagem = countPassed(input.stops, input.passages, t);
   const stopsTotal = style.showStopCounter ? contagem.total : 0;
-  const stopsPassed = contagem.passed;
-  const stopTxt = `${stopsPassed}/${stopsTotal} ${contagem.extras > 0 ? "passagens" : "paradas"}`;
-  const dist = `${(sample.distance / 1000).toFixed(sample.distance < 10000 ? 2 : 1)} km`;
-  const badgeFont = `700 ${Math.round(15 * sf)}px "Inter","Segoe UI",system-ui,sans-serif`;
-  ctx.font = badgeFont;
-  const dh = 28 * sf;
-  const dy = pad;
-  const dw = ctx.measureText(dist).width + 26 * sf;
-  const dx = width - pad - dw;
-  const stopW = stopsTotal > 0 ? ctx.measureText(stopTxt).width + 34 * sf : 0;
-  const sx = dx - stopW - 8 * sf;
+  if (stopsTotal > 0) {
+    const stopsPassed = contagem.passed;
+    const stopTxt = `${stopsPassed}/${stopsTotal} ${contagem.extras > 0 ? "passagens" : "paradas"}`;
+    const badgeFont = `700 ${Math.round(15 * sf)}px "Inter","Segoe UI",system-ui,sans-serif`;
+    ctx.font = badgeFont;
+    const dh = 28 * sf;
+    const dy = pad;
+    const stopW = ctx.measureText(stopTxt).width + 34 * sf;
+    const sx = width - pad - stopW;
 
-  const badge = (x: number, w: number, ring: string) => {
-    roundRect(ctx, x, dy, w, dh, dh / 2);
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+
+    roundRect(ctx, sx, dy, stopW, dh, dh / 2);
     ctx.fillStyle = "rgba(9,12,20,0.72)";
     ctx.fill();
-    ctx.strokeStyle = hexA(ring, 0.5);
+    ctx.strokeStyle = hexA(stopsPassed === stopsTotal ? "#4ade80" : style.accent, 0.5);
     ctx.lineWidth = 1.5 * sf;
     ctx.stroke();
-  };
 
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-  if (stopW > 0) {
-    badge(sx, stopW, stopsPassed === stopsTotal ? "#4ade80" : style.accent);
     ctx.font = `${Math.round(13 * sf)}px ${EMOJI_FONT}`;
     ctx.fillText("📍", sx + 15 * sf, dy + dh / 2 + 1);
     ctx.font = badgeFont;
     ctx.fillStyle = stopsPassed === stopsTotal ? "#4ade80" : "#ffffff";
     ctx.fillText(stopTxt, sx + 22 * sf + (stopW - 26 * sf) / 2, dy + dh / 2 + 1);
   }
-  badge(dx, dw, style.accent);
-  ctx.font = badgeFont;
-  ctx.fillStyle = "#fff";
-  ctx.fillText(dist, dx + dw / 2, dy + dh / 2 + 1);
 
   void track;
   ctx.restore();
   return boxY + boxH;
 }
-
-/**
- * Distância em texto no vídeo usa o mesmo formato do painel (`formatDistance`):
- * vírgula decimal em pt-BR. Antes o título escrevia "3.02 km" com ponto e a
- * cartela "3,02 km" com vírgula — dois formatos no mesmo quadro.
- */
 
 /**
  * Quantos segundos a cartela fica na tela, e em quanto tempo ela entra.

@@ -875,6 +875,43 @@ vídeo sai como sempre, sem aviso e sem a tira. O interruptor "Marcas de dia" s�
 aparece no painel quando o arquivo realmente tem mais de um dia — um interruptor
 que não faz nada é pior que interruptor nenhum.
 
+### Boneco com o rosto (pedalando, correndo, andando)
+
+A foto do avatar pode virar a **cabeça de um boneco de corpo inteiro** — com
+braços, pernas e o quadro da bike que se mexem no ritmo do percurso. É a
+resposta ao "colocar o rosto no boneco que parece pedalando, correndo,
+andando": o avatar antigo punha a foto **dentro do selo redondo**, sem corpo.
+
+Três poses (o emoji ao lado mostra a pose no painel):
+
+- **🚴 Pedalando** — quadro, rodas, guidão e os pés nos pedais (a manivela dá a
+  volta; a bike não pula). Cadência ~1,15 volta por segundo, o ritmo de quem
+  pedala de verdade.
+- **🏃 Correndo** — tronco inclinado, braços dobrados batendo com as pernas e
+  um embalo de 4% do selo. Cadência ~3 passos por segundo.
+- **🚶 Andando** — o mesmo passo, mais curto e mais lento (~1,8 passos por
+  segundo), com o corpo quase reto.
+
+Decisões que valem saber:
+
+- **o rosto nunca é espelhado.** O corpo vira para o lado do rumo (a figura olha
+  para onde vai), mas a foto é desenhada fora do espelho — um rosto espelhado é
+  outra pessoa;
+- **o boneco fica em pé no ponto do percurso** (os pés na linha), e não centrado
+  nele como o selo: é o que faz a figura "andar sobre o traçado";
+- **a cor do corpo acompanha o mapa** (claro no mapa escuro, escuro no claro) e
+  o contorno é o acento do app;
+- **o halo, o anel de pulso e a seta continuam** — só que na altura do corpo, e
+  a seta menor e mais afastada, para não passar por cima do rosto;
+- **o fantasma à frente usa o mesmo desenho**, translúcido;
+- **os blocos das paradas desviam do boneco inteiro**, não só do selo: sem isso
+  o nome da parada aparecia no meio das pernas de quem passava.
+
+Precisa de uma foto no avatar: sem foto não há rosto para pôr, e vale o emoji do
+personagem escolhido. Desligado por padrão (`Boneco → Selo`), em **Personagem →
+Boneco com o rosto**, e viaja no link. Na prévia do mapa, o que muda é a foto
+dentro do selo — o boneco de corpo inteiro é do vídeo.
+
 ### Fantasma à frente
 
 Um segundo desenho do **mesmo personagem**, translúcido (34% de opacidade), um

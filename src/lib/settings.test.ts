@@ -142,6 +142,17 @@ describe("sanitizeSettings", () => {
     expect(DEFAULT_SETTINGS.recap).toBe(false);
   });
 
+  it("o boneco com o rosto só aceita as poses que existem, e nasce desligado", () => {
+    expect(sanitizeSettings(raw({ boneco: "pedala" })).boneco).toBe("pedala");
+    expect(sanitizeSettings(raw({ boneco: "corre" })).boneco).toBe("corre");
+    expect(sanitizeSettings(raw({ boneco: "anda" })).boneco).toBe("anda");
+    // lixo cai fora (e volta ao padrão, que é o selo de sempre)
+    expect(sanitizeSettings(raw({ boneco: "voa" })).boneco).toBeUndefined();
+    expect(sanitizeSettings(raw({ boneco: 1 })).boneco).toBeUndefined();
+    // é um desenho novo no vídeo: só entra se pedido
+    expect(DEFAULT_SETTINGS.boneco).toBe("off");
+  });
+
   it("exige booleano também no fantasma à frente, e ele nasce desligado", () => {
     expect(sanitizeSettings(raw({ ghost: "sim" })).ghost).toBeUndefined();
     expect(sanitizeSettings(raw({ ghost: true })).ghost).toBe(true);

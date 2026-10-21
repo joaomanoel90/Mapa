@@ -542,6 +542,28 @@ describe("painel: marcas de dia", () => {
   });
 });
 
+describe("painel: boneco com o rosto", () => {
+  it("sem foto, avisa que o boneco precisa de um rosto", () => {
+    montar(<Painel />);
+    const texto = container.textContent ?? "";
+    expect(texto).toContain("Boneco com o rosto");
+    expect(texto).toContain("Escolha a foto acima");
+    // o padrão é o selo de sempre
+    expect(botao("Selo").getAttribute("aria-checked") ?? "").not.toBe("true");
+    expect(
+      container.querySelector('button[title*="Boneco pedalando"]'),
+    ).not.toBeNull();
+  });
+
+  it("escolhe a pose e ela fica marcada", () => {
+    montar(<Painel />);
+    const pedalar = container.querySelector('button[title*="Boneco pedalando"]') as HTMLButtonElement;
+    expect(pedalar).not.toBeNull();
+    clicar(pedalar);
+    expect(pedalar.className).toContain("from-violet-500");
+  });
+});
+
 describe("painel: melhores momentos no fim", () => {
   it("vem desligado, e a explicação só aparece quando liga", () => {
     montar(<Painel />);

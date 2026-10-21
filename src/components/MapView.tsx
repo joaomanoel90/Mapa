@@ -17,6 +17,7 @@ import {
 } from "../lib/geo";
 import { HOME_CITY } from "../lib/geocode";
 import { gaitOf, type Character } from "../lib/characters";
+import { bonecoLigado, type Boneco } from "../lib/boneco";
 import { CHASE_ALTURA, CHASE_ZOOM } from "../lib/camera";
 import { poiAnchor, poiLatLng, poiOffset, type Poi } from "../lib/pois";
 import { hasMark, type Endpoints } from "../lib/endpoints";
@@ -41,6 +42,12 @@ type Props = {
   /** incrementa para pedir um reenquadramento da rota (0 = nunca) */
   fitRequest?: number;
   character: Character;
+  /**
+   * O rosto do boneco: quando existe (e o boneco está ligado), a prévia mostra
+   * a **foto** dentro do selo, como o vídeo — e não o emoji do personagem.
+   */
+  avatar?: string;
+  boneco?: Boneco;
   rotate: boolean;
   accent: string;
   basemap: BasemapId;
@@ -100,6 +107,8 @@ export default function MapView(props: Props) {
     flyTo,
     fitRequest,
     character,
+    avatar,
+    boneco,
     rotate,
     accent,
     basemap,
@@ -558,11 +567,19 @@ export default function MapView(props: Props) {
     const comoAnda = gaitOf(character);
     const classeAndar =
       comoAnda.gait === "passo" ? " char-passo" : comoAnda.gait === "flutua" ? " char-flutua" : "";
+    /*
+     * Com o boneco ligado e um rosto escolhido, a prévia mostra a foto (o mesmo
+     * que o vídeo faz). O emoji fica para quem não escolheu foto.
+     */
+    const rostoNoBoneco = !!avatar && bonecoLigado(boneco);
+    const dentro = rostoNoBoneco
+      ? `<img class="char-face" src="${avatar}" alt="" draggable="false" />`
+      : character.emoji;
     const icon = L.divIcon({
       className: "char-icon",
       html: `<div class="char-badge${classeAndar}" style="--accent:${accent};--passo:${(1 / comoAnda.hz).toFixed(2)}s">
               <div class="char-rot"><div class="char-arrow"></div></div>
-              <div class="char-emoji">${character.emoji}</div>
+              <div class="char-emoji${rostoNoBoneco ? " char-emoji-foto" : ""}">${dentro}</div>
             </div>`,
       iconSize: [58, 58],
       iconAnchor: [29, 29],

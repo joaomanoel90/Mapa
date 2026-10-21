@@ -35,6 +35,13 @@ import { countPassed } from "./passages";
 import { diaNaTela, type Dia } from "./days";
 import { momentoNaTela, type RecapMoment } from "./recap";
 import {
+  bonecoLigado,
+  caixaDoBoneco,
+  desenharBoneco,
+  viradoPara,
+  type Boneco,
+} from "./boneco";
+import {
   elevacaoEm,
   inclinacaoDaSubida,
   profileLayout,
@@ -158,6 +165,12 @@ export type SceneStyle = {
    * fica sempre de pé dentro do selo, e quem diz a direção é a seta.
    */
   avatar?: string;
+  /**
+   * O **boneco com o rosto**: em vez da foto dentro do selo, uma figura de
+   * corpo inteiro (pedalando, correndo ou andando) com a foto no lugar da
+   * cabeça. Sem foto, ou desligado, vale o desenho de sempre.
+   */
+  boneco?: Boneco;
   /**
    * No HUD, mostra o **ritmo** (min/km) no lugar da velocidade.
    *
@@ -1973,6 +1986,16 @@ export class SceneRenderer {
           ...(cartao ? [retanguloDaCartela(cartao)] : []),
           ...selos,
           ...(avisoNaTela ? [{ x: avisoNaTela.x, y: avisoNaTela.y, w: avisoNaTela.w, h: avisoNaTela.h }] : []),
+          /*
+           * O boneco é uma figura **em pé**: a caixa dele sobe quase três vezes
+           * a altura do selo redondo. Sem ela, o nome da parada continuava
+           * aparecendo no meio do corpo de quem passa.
+           */
+          ...(style.avatar &&
+          bonecoLigado(style.boneco) &&
+          input.photos?.get(style.avatar)
+            ? [caixaDoBoneco(ondeEstaOpersonagem, raioDoPersonagem(input.character, sf))]
+            : []),
         ],
         // o selo do personagem cobre o pino na passagem (ver `drawStops`)
         personagem: {
@@ -2526,6 +2549,17 @@ function drawCharacter(
   const respira = 1 + 0.05 * Math.sin(elapsed * 4);
   const { sobe, lado, estica } = andar(input, character);
 
+  /*
+   * O boneco fica **em pé** no ponto do percurso (os pés na linha), então o
+   * halo e a seta que o selo redondo desenhava no centro sobem para a altura do
+   * tronco: no chão, o halo viraria uma poça e a seta cortaria os pés.
+   */
+  const avatarDoBoneco =
+    style.avatar && bonecoLigado(style.boneco)
+      ? (input.photos?.get(style.avatar) ?? null)
+      : null;
+  const centroY = avatarDoBoneco ? -0.78 * badge : 0;
+
   ctx.save();
   ctx.translate(at.x + lado * badge, at.y + sobe * badge);
   if (inclina !== 0) ctx.rotate((inclina * Math.PI) / 180);
@@ -2533,12 +2567,19 @@ function drawCharacter(
 
   if (!fantasma) {
     // halo
-    const halo = ctx.createRadialGradient(0, 0, badge * 0.25, 0, 0, badge * 1.5);
+    const halo = ctx.createRadialGradient(
+      0,
+      centroY,
+      badge * 0.25,
+      0,
+      centroY,
+      badge * 1.5,
+    );
     halo.addColorStop(0, hexA(style.accent, 0.45));
     halo.addColorStop(1, hexA(style.accent, 0));
     ctx.fillStyle = halo;
     ctx.beginPath();
-    ctx.arc(0, 0, badge * 1.5 * respira, 0, Math.PI * 2);
+    ctx.arc(0, centroY, badge * 1.5 * respira, 0, Math.PI * 2);
     ctx.fill();
 
     /*
@@ -2549,25 +2590,75 @@ function drawCharacter(
     ctx.strokeStyle = hexA(style.accent, 0.55);
     ctx.lineWidth = 2 * sf;
     ctx.beginPath();
-    ctx.arc(0, 0, badge * (0.86 + 0.12 * respira + 0.06 * sobe), 0, Math.PI * 2);
+    ctx.arc(0, centroY, badge * (0.86 + 0.12 * respira + 0.06 * sobe), 0, Math.PI * 2);
     ctx.stroke();
 
-    // seta de direção
+    /*
+     * Seta de direção.
+     *
+     * No selo redondo ela encosta no aro; no boneco ela sai um pouco mais para
+     * fora e desce: na altura do ombro ela passava por cima do rosto — e o
+     * rosto é justamente o que o boneco veio mostrar.
+     */
     const arrowAngle = ((rumo - 90) * Math.PI) / 180;
     ctx.save();
+    ctx.translate(0, centroY);
     ctx.rotate(arrowAngle);
     ctx.globalAlpha = 0.9;
-    ctx.beginPath();
-    ctx.moveTo(badge * 0.92, 0);
-    ctx.lineTo(badge * 0.6, -badge * 0.26);
-    ctx.lineTo(badge * 0.6, badge * 0.26);
-    ctx.closePath();
+    if (avatarDoBoneco) {
+      /*
+       * A seta do boneco é **menor e mais longe**: ela sai do aro do halo e
+       * aponta o rumo sem passar por cima do corpo nem do rosto. Setenta por
+       * cento do tamanho da seta do selo, e o dobro da distância do centro.
+       */
+      const de = badge * 1.34;
+      const ate = badge * 1.78;
+      ctx.beginPath();
+      ctx.moveTo(ate, 0);
+      ctx.lineTo(de, -badge * 0.16);
+      ctx.lineTo(de, badge * 0.16);
+      ctx.closePath();
+    } else {
+      ctx.beginPath();
+      ctx.moveTo(badge * 0.92, 0);
+      ctx.lineTo(badge * 0.6, -badge * 0.26);
+      ctx.lineTo(badge * 0.6, badge * 0.26);
+      ctx.closePath();
+    }
     ctx.fillStyle = style.accent;
     ctx.strokeStyle = "rgba(255,255,255,0.9)";
     ctx.lineWidth = 2 * sf;
     ctx.fill();
     ctx.stroke();
     ctx.restore();
+  }
+
+  const avatar = style.avatar ? (input.photos?.get(style.avatar) ?? null) : null;
+
+  /*
+   * O **boneco com o rosto** substitui o selo inteiro: em vez da foto dentro de
+   * um aro redondo, uma figura de corpo inteiro com a foto no lugar da cabeça.
+   * O halo e a seta continuam (são eles que dizem "é aqui" e "vai para lá"); o
+   * aro redondo sai, porque ele é a moldura de um emoji — num boneco, viraria
+   * um segundo desenho em volta da figura.
+   *
+   * Sem foto pronto no cache, cai no desenho de sempre: o personagem nunca
+   * desaparece do vídeo enquanto a imagem carrega.
+   */
+  if (avatarDoBoneco && bonecoLigado(style.boneco)) {
+    const tlBoneco = timelineOr(input.timeline, input.duration);
+    desenharBoneco(ctx, {
+      pose: style.boneco,
+      // o andar do boneco é o do percurso: parado no voo e na cartela
+      seg: Math.max(0, Math.min(tlBoneco.percurso, input.elapsed - tlBoneco.voo)),
+      virado: viradoPara(rumo),
+      badge,
+      accent: style.accent,
+      avatar: avatarDoBoneco,
+      onDark: style.basemap === "dark" || style.basemap === "satellite",
+    });
+    ctx.restore();
+    return;
   }
 
   // badge
@@ -2589,7 +2680,6 @@ function drawCharacter(
    * ali. Recortado em círculo e com o quadrado central da foto (o mesmo
    * `coverSquare` dos pinos), para uma foto 3:4 não sair achatada.
    */
-  const avatar = style.avatar ? (input.photos?.get(style.avatar) ?? null) : null;
   if (avatar) {
     const r = badge * 0.56;
     const c = coverSquare(

@@ -78,6 +78,13 @@ describe("sanitizeSettings", () => {
     expect(DEFAULT_SETTINGS.minimap).toBe(true);
     expect(sanitizeSettings(raw({ minimap: "sim" })).minimap).toBeUndefined();
     expect(sanitizeSettings(raw({ minimap: false })).minimap).toBe(false);
+    /*
+     * O perfil de elevação nasce ligado, mas **não** é obrigatório: quem grava
+     * rota sem altitude (ou não quer a faixa) desliga no painel.
+     */
+    expect(DEFAULT_SETTINGS.elevationProfile).toBe(true);
+    expect(sanitizeSettings(raw({ elevationProfile: "sim" })).elevationProfile).toBeUndefined();
+    expect(sanitizeSettings(raw({ elevationProfile: false })).elevationProfile).toBe(false);
     // o avatar é opcional e passa pela mesma peneira da foto da cartela
     expect(DEFAULT_SETTINGS.avatar).toBe("");
     const foto = "data:image/jpeg;base64,AAAA";

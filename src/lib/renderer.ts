@@ -27,6 +27,13 @@ import { routeEnd, timelineOr, type Timeline } from "./timeline";
 import { NEUTRAL_COLOR, type ColoredRoute } from "./coloring";
 import type { KmMark } from "./km-marks";
 import { countPassed } from "./passages";
+import {
+  elevacaoEm,
+  inclinacaoDaSubida,
+  profileLayout,
+  trailProfile,
+  type TrailProfile,
+} from "./profile";
 import { coverSquare, type PhotoImage, type PhotoLookup } from "./photos";
 import {
   TILE_SIZE,
@@ -88,6 +95,15 @@ export type SceneStyle = {
    * no percurso.
    */
   showMinimap?: boolean;
+  /**
+   * Faixa do **perfil de elevação** no rodapé: a linha do relevo, que se enche
+   * junto com o personagem, com a altitude atual e a maior subida marcada.
+   *
+   * É o que conta a dureza do percurso — o que falta nos vídeos automáticos,
+   * que mostram o traçado visto de cima mas não dizem onde sobe. Só aparece
+   * quando o arquivo tem altitude (sem ela, não há o que desenhar).
+   */
+  showProfile?: boolean;
   /**
    * Avatar do personagem (data URL da foto), no lugar do emoji.
    *
@@ -1191,6 +1207,25 @@ export class SceneRenderer {
    * aquecimento (`tilesForAnimation`) e não mudam durante o vídeo — o único
    * movimento é a linha percorrida e o ponto do personagem.
    */
+  /**
+   * O perfil de elevação do traçado, calculado **uma vez** por traçado.
+   *
+   * O desenho roda 60 vezes por segundo: varrer 5.700 pontos a cada quadro
+   * derrubaria a cadência que levou vinte rodadas para acertar. O perfil só
+   * depende do traçado (não do instante), então o cache é por referência.
+   */
+  private perfil: { track: Track | null; dados: TrailProfile | null } = {
+    track: null,
+    dados: null,
+  };
+
+  private perfilDo(track: Track): TrailProfile | null {
+    if (this.perfil.track !== track) {
+      this.perfil = { track, dados: trailProfile(track) };
+    }
+    return this.perfil.dados;
+  }
+
   private drawMinimap(
     ctx: CanvasRenderingContext2D,
     width: number,
@@ -1909,13 +1944,55 @@ export class SceneRenderer {
     // --- overlays ---
     if (style.showProgress) drawProgress(ctx, width, height, input, sf);
     if (style.showHud) drawHud(ctx, width, input, sample, sf, onDark, headerBottom);
+    /*
+     * O perfil de elevação, no rodapé, **antes** da legenda e da cartela: a
+     * cartela é quem manda no fim do vídeo e, quando ela entra, a faixa sai de
+     * cena (ver `drawProfile`).
+     */
+    if (style.showProfile) {
+      const perfil = this.perfilDo(track);
+      if (perfil) {
+        drawProfile(ctx, width, height, {
+          perfil,
+          frac: t,
+          totalM: track.total,
+          accent: style.accent,
+          sf,
+          onDark,
+          progressoAbaixo: !!style.showProgress,
+          apagando: cartao ? cartao.alpha : 0,
+          // durante o voo de abertura o vídeo é paisagem: a faixa ainda não diz nada
+          entrando: tl.voo > 0 ? (input.elapsed - tl.voo) / 0.5 : 1,
+        });
+      }
+    }
     if (colored && style.showRoute) {
       drawLegend(ctx, width, height, colored, sf, style.showProgress);
     }
     if (cartao) drawSummary(ctx, width, height, cartao, onDark, sf);
 
-    // atribuição obrigatória dos mapas gratuitos
-    drawAttribution(ctx, width, height, bm.attribution, style.showProgress, sf);
+    /*
+     * Atribuição obrigatória dos mapas gratuitos.
+     *
+     * Ela sobe quando há algo no rodapé: a barra de progresso e, agora, a faixa
+     * do perfil. Antes ela ficava por cima do canto direito do gráfico — o
+     * crédito ilegível e a linha do relevo cortada.
+     */
+    const faixaDoPerfil = style.showProfile && this.perfilDo(track);
+    drawAttribution(
+      ctx,
+      width,
+      height,
+      bm.attribution,
+      style.showProgress,
+      sf,
+      /*
+       * `+ 30·sf` é a folga do cabeçalho da faixa: o crédito tem de ficar
+       * **acima** do painel inteiro, e não só acima dos últimos 6 px dele (na
+       * primeira conta ele caía dentro do painel, em cima do "D+").
+       */
+      faixaDoPerfil ? profileLayout(width, height, sf, !!style.showProgress).h + 30 * sf : 0,
+    );
   }
 }
 
@@ -1927,6 +2004,8 @@ function drawAttribution(
   text: string,
   liftedByProgress: boolean,
   sf: number,
+  /** quanto subir além da barra de progresso (a faixa do perfil, quando há) */
+  liftExtra = 0,
 ) {
   const pad = 10 * sf;
   const fs = Math.round(Math.max(9, 11 * sf));
@@ -1935,7 +2014,7 @@ function drawAttribution(
   ctx.textAlign = "right";
   ctx.textBaseline = "bottom";
   const w = ctx.measureText(text).width;
-  const y = height - pad - (liftedByProgress ? 34 * sf : 0);
+  const y = height - pad - (liftedByProgress ? 34 * sf : 0) - liftExtra;
   const x = width - pad;
   ctx.fillStyle = "rgba(0,0,0,0.42)";
   roundRect(ctx, x - w - 9 * sf, y - fs - 5 * sf, w + 12 * sf, fs + 9 * sf, 5 * sf);
@@ -3979,6 +4058,207 @@ function drawHud(
   ctx.fill();
   ctx.fillStyle = claro ? "#0f172a" : "#ffffff";
   ctx.fillText(texto, cx, yFaixa + 16 * sf);
+
+  ctx.restore();
+}
+
+/**
+ * A faixa do perfil de elevação.
+ *
+ * Desenho: um painel translúcido no rodapé com a linha do relevo. O trecho
+ * **já percorrido** vem preenchido na cor do app; o que falta fica só na linha.
+ * Em cima dela, o marcador da altitude atual (um ponto com o número), a maior
+ * subida marcada com uma faixa e a inclinação média dela — é a leitura que quem
+ * vai encarar a prova quer ter antes de sair.
+ */
+function drawProfile(
+  ctx: CanvasRenderingContext2D,
+  width: number,
+  height: number,
+  o: {
+    perfil: TrailProfile;
+    /** progresso do percurso, 0..1 */
+    frac: number;
+    /** distância total, em metros (para a inclinação da subida) */
+    totalM: number;
+    accent: string;
+    sf: number;
+    onDark: boolean;
+    /** a barra de progresso ocupa o pé do quadro? */
+    progressoAbaixo: boolean;
+    /** 0..1: o quanto a cartela final está cobrindo o rodapé */
+    apagando: number;
+    /** 0..1: o quanto a faixa já entrou (0 durante o voo de abertura) */
+    entrando: number;
+  },
+) {
+  const { perfil, sf, accent } = o;
+  const alfa = Math.min(1, Math.max(0, o.entrando)) * (1 - Math.min(1, Math.max(0, o.apagando)));
+  if (alfa < 0.02) return;
+  if (perfil.pontos.length < 2) return;
+
+  const L = profileLayout(width, height, sf, o.progressoAbaixo);
+  const claro = !o.onDark;
+  const frac = Math.min(1, Math.max(0, Number.isFinite(o.frac) ? o.frac : 0));
+
+  /*
+   * Duas zonas, para os rótulos nunca brigarem com a linha:
+   *
+   * - uma **linha de cabeçalho** no alto do painel, com a altitude máxima à
+   *   esquerda e o D+ (com a maior subida) à direita;
+   * - o **gráfico** abaixo dela. O marcador do instante atual desenha o seu
+   *   número perto do ponto, e escolhe o lado conforme o espaço — acima quando
+   *   o ponto está baixo, abaixo quando está no alto.
+   *
+   * A primeira versão punha os três rótulos na mesma faixa e, num perfil com
+   * pico à direita, o "568 m" do marcador caía em cima do "D+ 1.279 m".
+   */
+  const dentro = 10 * sf;
+  const x0 = L.x + dentro;
+  const x1 = L.x + L.w - dentro;
+  const largura = Math.max(8, x1 - x0);
+  const linhaDoCabecalho = L.y + 9 * sf;
+  const yTopo = L.y + 20 * sf;
+  const yBase = L.y + L.h - 9 * sf;
+  const altura = Math.max(8, yBase - yTopo);
+
+  const alturaDe = (ele: number) => {
+    const faixa = Math.max(1, perfil.max - perfil.min);
+    const f = (ele - perfil.min) / faixa;
+    return yBase - Math.min(1, Math.max(0, f)) * altura;
+  };
+  const xDe = (f: number) => x0 + Math.min(1, Math.max(0, f)) * largura;
+
+  ctx.save();
+  ctx.globalAlpha = alfa;
+
+  // painel
+  roundRect(ctx, L.x, L.y, L.w, L.h, L.raio);
+  ctx.fillStyle = o.onDark ? "rgba(9,12,20,0.74)" : "rgba(255,255,255,0.86)";
+  ctx.shadowColor = "rgba(0,0,0,0.32)";
+  ctx.shadowBlur = 14 * sf;
+  ctx.fill();
+  ctx.shadowColor = "transparent";
+  ctx.strokeStyle = o.onDark ? "rgba(255,255,255,0.10)" : "rgba(15,23,42,0.10)";
+  ctx.lineWidth = 1 * sf;
+  ctx.stroke();
+
+  ctx.save();
+  roundRect(ctx, L.x, L.y, L.w, L.h, L.raio);
+  ctx.clip();
+
+  // a faixa da maior subida, atrás de tudo
+  const subida = perfil.maiorSubida;
+  const inclinacao = inclinacaoDaSubida(perfil, o.totalM);
+  if (subida) {
+    const a = xDe(subida.ini);
+    const b = xDe(subida.fim);
+    if (b - a > 2) {
+      ctx.fillStyle = hexA(accent, 0.14);
+      ctx.fillRect(a, L.y, b - a, L.h);
+    }
+  }
+
+  /** o caminho da linha do relevo, inteiro ou só até `ate` (0..1) */
+  const caminho = (ate: number) => {
+    ctx.beginPath();
+    let aberto = false;
+    for (const p of perfil.pontos) {
+      if (p.frac > ate) break;
+      const x = xDe(p.frac);
+      const y = alturaDe(p.ele);
+      if (!aberto) {
+        ctx.moveTo(x, y);
+        aberto = true;
+      } else ctx.lineTo(x, y);
+    }
+    return aberto;
+  };
+
+  // a linha inteira, apagada: é o "o que ainda vem"
+  if (caminho(1)) {
+    ctx.strokeStyle = o.onDark ? "rgba(255,255,255,0.38)" : "rgba(15,23,42,0.32)";
+    ctx.lineWidth = 1.6 * sf;
+    ctx.lineJoin = "round";
+    ctx.stroke();
+  }
+
+  // o já percorrido, preenchido na cor do app
+  if (frac > 0.0005 && caminho(frac)) {
+    const atual = elevacaoEm(perfil, frac);
+    ctx.lineTo(xDe(frac), yBase);
+    ctx.lineTo(x0, yBase);
+    ctx.closePath();
+    const grad = ctx.createLinearGradient(0, yTopo, 0, yBase);
+    grad.addColorStop(0, hexA(accent, 0.55));
+    grad.addColorStop(1, hexA(accent, 0.08));
+    ctx.fillStyle = grad;
+    ctx.fill();
+
+    // e a linha de cima, sólida (o preenchimento sozinho some no mapa claro)
+    if (caminho(frac)) {
+      ctx.strokeStyle = accent;
+      ctx.lineWidth = 2.2 * sf;
+      ctx.lineJoin = "round";
+      ctx.stroke();
+    }
+    void atual;
+  }
+
+  // o marcador do instante atual: ponto + altitude
+  const eleAgora = elevacaoEm(perfil, frac);
+  if (eleAgora !== null) {
+    const mx = xDe(frac);
+    const my = alturaDe(eleAgora);
+    ctx.beginPath();
+    ctx.arc(mx, my, 4.2 * sf, 0, Math.PI * 2);
+    ctx.fillStyle = accent;
+    ctx.shadowColor = accent;
+    ctx.shadowBlur = 10 * sf;
+    ctx.fill();
+    ctx.shadowColor = "transparent";
+    ctx.beginPath();
+    ctx.arc(mx, my, 1.8 * sf, 0, Math.PI * 2);
+    ctx.fillStyle = o.onDark ? "rgba(9,12,20,0.9)" : "#ffffff";
+    ctx.fill();
+
+    /*
+     * O número, ao lado do ponto: **acima** quando há espaço, abaixo quando o
+     * ponto está no alto do gráfico (senão o texto sobe para dentro do
+     * cabeçalho). E desliza para dentro quando o ponto está na ponta.
+     */
+    const txt = `${Math.round(eleAgora)} m`;
+    ctx.font = `700 ${Math.round(11 * sf)}px "Inter","Segoe UI",system-ui,sans-serif`;
+    ctx.textAlign = "center";
+    const meia = ctx.measureText(txt).width / 2;
+    const tx = Math.min(x1 - meia, Math.max(x0 + meia, mx));
+    const cabeAcima = my - yTopo > 16 * sf;
+    ctx.textBaseline = cabeAcima ? "bottom" : "top";
+    const ty = cabeAcima ? my - 8 * sf : my + 8 * sf;
+    ctx.fillStyle = claro ? "#0f172a" : "#ffffff";
+    ctx.fillText(txt, tx, ty);
+  }
+  ctx.restore();
+
+  /*
+   * Os rótulos das pontas: a altitude máxima (no alto da linha) e a inclinação
+   * da maior subida. Ficam **fora** do recorte para não serem cortados quando a
+   * linha encosta na borda do painel.
+   */
+  ctx.font = `700 ${Math.round(10 * sf)}px "Inter","Segoe UI",system-ui,sans-serif`;
+  ctx.textBaseline = "middle";
+  ctx.textAlign = "left";
+  ctx.fillStyle = o.onDark ? "rgba(255,255,255,0.62)" : "rgba(15,23,42,0.55)";
+  ctx.fillText(`${Math.round(perfil.max)} m`, L.x + dentro, linhaDoCabecalho);
+
+  ctx.textAlign = "right";
+  const dmais = `D+ ${Math.round(perfil.ganho)} m`;
+  let rotulo = dmais;
+  if (subida && inclinacao !== null && Number.isFinite(inclinacao)) {
+    rotulo = `${dmais}  ·  subida ${inclinacao.toFixed(1).replace(".", ",")}%`;
+  }
+  ctx.fillStyle = o.onDark ? "rgba(255,255,255,0.78)" : "rgba(15,23,42,0.72)";
+  ctx.fillText(rotulo, L.x + L.w - dentro, linhaDoCabecalho);
 
   ctx.restore();
 }

@@ -77,6 +77,13 @@ export type Settings = {
    * o personagem está — na terceira pessoa só se vê alguns metros à frente.
    */
   minimap: boolean;
+  /**
+   * Faixa do **perfil de elevação** no rodapé do vídeo.
+   *
+   * Só desenha quando o traçado tem altitude — num arquivo sem `<ele>` a faixa
+   * simplesmente não aparece, em vez de sair uma linha reta inventada.
+   */
+  elevationProfile: boolean;
   /** pedal, corrida ou caminhada — muda a unidade do HUD (km/h ou min/km) */
   activity: ActivityId;
   /**
@@ -165,6 +172,7 @@ export const DEFAULT_SETTINGS: Settings = {
   endCard: true,
   showHud: true,
   minimap: true,
+  elevationProfile: true,
   activity: "pedal",
   colorBy: "solid",
   showKmMarks: false,
@@ -217,6 +225,7 @@ export function sanitizeSettings(raw: Partial<Settings>): Partial<Settings> {
   if (typeof out.endCard !== "boolean") delete out.endCard;
   if (typeof out.showHud !== "boolean") delete out.showHud;
   if (typeof out.minimap !== "boolean") delete out.minimap;
+  if (typeof out.elevationProfile !== "boolean") delete out.elevationProfile;
   if (!ACTIVITIES.some((a) => a.id === out.activity)) delete out.activity;
   if (out.colorBy !== "solid" && out.colorBy !== "speed" && out.colorBy !== "slope") {
     delete out.colorBy;

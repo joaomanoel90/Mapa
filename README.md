@@ -448,6 +448,32 @@ O tamanho é proporcional ao menor lado do quadro, então ocupa a mesma fração
 tela no 16:9 e no 9:16. **Desligado** no interruptor "Mapa em miniatura", nada
 aparece no canto.
 
+### Perfil de elevação no vídeo
+
+A faixa no rodapé com a linha do relevo — a resposta ao "o que falta no vídeo do
+Strava": eles mostram o traçado visto de cima, não a **dureza** do caminho.
+
+- a linha se **enche junto com o personagem** (o trecho percorrido vem
+  preenchido na cor do app), então em qualquer instante dá para ler "estou a 60%
+  do percurso, a 312 m, e ainda vem a subida";
+- o **marcador** mostra a altitude do momento, ao lado do ponto (acima ou abaixo,
+  conforme o espaço — a primeira versão escrevia por cima do "D+");
+- a **maior subida** vem marcada com uma faixa e a inclinação média dela
+  (`subida 8,1%`), junto do D+ à direita; a altitude máxima fica à esquerda;
+- **só aparece quando o traçado tem altitude** e o relevo passa de **3 m** —
+  rota plana não ganha um retângulo decorativo. Sem `<ele>` no arquivo, a faixa
+  simplesmente não existe (não há linha reta inventada);
+- **sai de cena quando a cartela final entra**, e o crédito do OpenStreetMap
+  sobe para não ficar por cima do gráfico.
+
+O perfil é calculado **uma vez por traçado** e cacheado no renderizador: são 160
+colunas em vez de 5.700 pontos, e o desenho de cada quadro só lê o resultado —
+varrer o arquivo inteiro 60 vezes por segundo derrubaria a cadência.
+
+Os números: `trailProfile` mede a linha pela distância **do desenho** (a mesma
+que o personagem percorre, para gráfico e mapa contarem a mesma história), e o
+D+ usa o mesmo filtro de ruído do resumo (variação abaixo de 4 m não conta).
+
 ### HUD no vídeo
 
 Um **anel** abaixo do título (não no canto de cima: o título pinta uma faixa de
@@ -1096,7 +1122,7 @@ ou cortados.
 
 ```bash
 npm run typecheck  # tsc --noEmit
-npm test           # Vitest (824 casos)
+npm test           # Vitest (839 casos)
 npm run check:dist # o build saiu autocontido e sem /src/?
 ```
 

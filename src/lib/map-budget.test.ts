@@ -2,15 +2,19 @@ import { describe, expect, it } from "vitest";
 import { buildTrack } from "./geo";
 import { BASEMAPS } from "./tiles";
 import { TILE_BUDGET } from "./renderer";
+import { focoDasParadas, type Poi } from "./pois";
 import {
   MIN_FOLLOW_ZOOM,
   budgetAdvice,
+  cabeNoTeto,
+  limiteDoServidor,
   pedidosDaAnimacao,
   pedidosNecessarios,
   maxFollowZoom,
   planejarCamera,
   tilesNeeded,
 } from "./map-budget";
+import type { Track } from "./geo";
 
 /** Traçado reto de `km` quilômetros, no formato de um interesse. */
 function percurso(km: number, n = 4000) {
@@ -19,6 +23,33 @@ function percurso(km: number, n = 4000) {
     lat: -23.5 + (i / (n - 1)) * graus,
     lng: -48.4 + (i / (n - 1)) * graus * 0.35,
   }));
+}
+
+/** Traçado de `km` com o vaivém de uma estrada de verdade (não uma reta). */
+function percursoSinuoso(km: number, n = 1200) {
+  const graus = km / 111.32;
+  return Array.from({ length: n }, (_, i) => {
+    const f = i / (n - 1);
+    return {
+      lat: -23.5 + f * graus + Math.sin(f * Math.PI * 6) * 0.004,
+      lng: -48.4 + f * graus * 0.35 + Math.sin(f * Math.PI * 9) * 0.006,
+    };
+  });
+}
+
+/** Três paradas com lugar próprio, 400 m fora da linha. */
+function paradasForaDaLinha(track: Track): Poi[] {
+  return [0.25, 0.55, 0.8].map((t, i) => {
+    const p = track.pts[Math.min(track.pts.length - 1, Math.floor(t * track.pts.length))];
+    return {
+      id: `s${i}`,
+      t,
+      emoji: "🌉",
+      label: `p${i}`,
+      color: "#38bdf8",
+      pos: { lat: p.lat + 0.0036, lng: p.lng + 0.0036 },
+    };
+  });
 }
 
 const base = { width: 1280, height: 720, basemap: "dark" as const, maxZoom: 19 };
@@ -247,7 +278,7 @@ describe("o vídeo de uma travessia intercontinental", () => {
 });
 
 /* ------------------------------------------------------------------ */
-/* O relevo no teto: imagens, não "blocos × 2"                         */
+/* O relevo no teto: um servidor, um teto                                  */
 /* ------------------------------------------------------------------ */
 
 describe("o relevo na conta de pedidos", () => {
@@ -305,7 +336,7 @@ describe("o relevo na conta de pedidos", () => {
     expect(plano.reduzido).toBe(false);
     expect(plano.camera.followZoom).toBe(17);
     expect(plano.pedidos.relevo).toBeGreaterThan(0);
-    expect(plano.pedidos.total).toBeLessThanOrEqual(TILE_BUDGET);
+    expect(plano.pedidos.mapa).toBeLessThanOrEqual(TILE_BUDGET);
   });
 
   it("5 km no zoom 18 também mantém o zoom (era reduzido no teto pela metade)", () => {
@@ -321,10 +352,72 @@ describe("o relevo na conta de pedidos", () => {
     expect(plano.camera.followZoom).toBe(18);
   });
 
-  it("no zoom 16 a sombra é 1:1 — aí a conta dobra, e a redução é honesta", () => {
-    // Não é o defeito: até o z16 cada bloco do mapa tem a sua própria sombra,
-    // então o relevo custa o dobro de verdade. 20 km no z16 passam de 1.400
-    // imagens com ou sem meia-conta.
+  it("16 km no zoom 17 fica no 17 — mesmo somando mais de 1.400 imagens", () => {
+    // O caso que o usuário relatou: a rota de 16 km saía no zoom **12**.
+    // No 17 ela pede 1.381 blocos de mapa (dentro do teto do servidor de
+    // mapas) + 517 do sombreado (outro servidor). Somar os dois contra 1.400
+    // derrubava o zoom para 12; agora cada servidor responde pelo seu.
+    const track = buildTrack(percursoSinuoso(16));
+    const stops = paradasForaDaLinha(track);
+    const plano = planejarCamera({
+      track,
+      ...base,
+      camera: { ...camera(17), chase: { gira: true, tilt: true } },
+      cinematic: { opening: true, stops: true, stopTs: [0.3, 0.6, 0.85], chegada: true },
+      foco: focoDasParadas(stops, undefined, track),
+      relevo: true,
+    });
+    expect(plano.reduzido).toBe(false);
+    expect(plano.camera.followZoom).toBe(17);
+    expect(plano.pedidos.mapa).toBeLessThanOrEqual(limiteDoServidor());
+    expect(plano.pedidos.relevo).toBeGreaterThan(0);
+    // a soma passa do teto: é justamente o que não pode decidir
+    expect(plano.pedidos.total).toBeGreaterThan(TILE_BUDGET);
+  });
+
+  it("a sugestão não desce mais do que precisa (o “cabe” não é monotônico)", () => {
+    // Pedindo 19 numa rota de 16 km, a busca binária devolvia 16 mesmo com o
+    // 17 cabendo: logo abaixo do 16 a sombra vira 1:1 e a conta sobe, então o
+    // primeiro zoom que cabe não está no meio da lista.
+    const track = buildTrack(percursoSinuoso(16));
+    const stops = paradasForaDaLinha(track);
+    const entrada = {
+      track,
+      ...base,
+      camera: { ...camera(19), chase: { gira: true, tilt: true } },
+      cinematic: { opening: true, stops: true, stopTs: [0.3, 0.6, 0.85], chegada: true },
+      foco: focoDasParadas(stops, undefined, track),
+      relevo: true,
+    };
+    expect(maxFollowZoom(entrada)).toBe(17);
+    expect(planejarCamera(entrada).camera.followZoom).toBe(17);
+  });
+
+  it("a sugestão nunca sobe acima do zoom pedido", () => {
+    const track = buildTrack(percursoSinuoso(16));
+    const z = maxFollowZoom({
+      track,
+      ...base,
+      camera: { mode: "follow", followZoom: 14 },
+      cinematic: { opening: true, stops: true, stopTs: [0.5], chegada: true },
+      relevo: true,
+    });
+    expect(z).toBe(14);
+  });
+
+  it("cada servidor tem o seu teto, com a folga da terceira pessoa", () => {
+    const limite = limiteDoServidor();
+    expect(limite).toBe(1540);
+    expect(cabeNoTeto({ mapa: limite, relevo: limite, total: limite * 2 })).toBe(true);
+    expect(cabeNoTeto({ mapa: limite + 1, relevo: 10, total: limite + 11 })).toBe(false);
+    expect(cabeNoTeto({ mapa: 10, relevo: limite + 1, total: limite + 11 })).toBe(false);
+    // 1.490 no mapa (o caso de 16 km no 17 com giro e inclinação) cabe na folga
+    expect(cabeNoTeto({ mapa: 1490, relevo: 181, total: 1671 })).toBe(true);
+  });
+
+  it("no zoom 16 a sombra é 1:1 — e ainda assim o zoom escolhido fica", () => {
+    // Até o z16 cada bloco do mapa tem a sua própria sombra. Mesmo assim o
+    // relevo não derruba o zoom: 20 km no 16 pedem 874 de mapa (teto 1.400).
     const track = buildTrack(percurso(20));
     const plano = planejarCamera({
       track,
@@ -334,16 +427,8 @@ describe("o relevo na conta de pedidos", () => {
       relevo: true,
     });
     expect(plano.pedidos.relevo).toBeGreaterThan(plano.pedidos.mapa * 0.7);
-    expect(plano.reduzido).toBe(true);
-    // e o zoom sugerido cabe de verdade
-    const depois = pedidosNecessarios({
-      track,
-      ...base,
-      camera: plano.camera,
-      cinematic: { opening: true, stops: true, stopTs: [0.5], chegada: true },
-      relevo: true,
-    });
-    expect(depois.total).toBeLessThanOrEqual(TILE_BUDGET);
+    expect(plano.reduzido).toBe(false);
+    expect(plano.camera.followZoom).toBe(16);
   });
 
   it("quando não cabe, a redução acontece — e o pedido é de verdade", () => {
@@ -363,7 +448,8 @@ describe("o relevo na conta de pedidos", () => {
       cinematic: { opening: true, stops: true, stopTs: [0.3, 0.7], chegada: true },
       relevo: true,
     });
-    expect(depois.total).toBeLessThanOrEqual(TILE_BUDGET);
+    expect(cabeNoTeto(depois)).toBe(true);
+    expect(depois.mapa).toBeLessThanOrEqual(TILE_BUDGET);
   });
 
   it("a sugestão de zoom respeita o teto de imagens", () => {
@@ -383,6 +469,6 @@ describe("o relevo na conta de pedidos", () => {
       cinematic: { opening: true, stops: true, stopTs: [0.3, 0.7], chegada: true },
       relevo: true,
     });
-    expect(p.total).toBeLessThanOrEqual(TILE_BUDGET);
+    expect(p.mapa).toBeLessThanOrEqual(TILE_BUDGET);
   });
 });

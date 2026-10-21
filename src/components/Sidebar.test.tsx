@@ -44,6 +44,7 @@ function Painel({
     fits: boolean;
     sugestao: number | null;
     limite?: number;
+    limiteComFolga?: number;
   };
   avisoSalvar?: string | null;
   /** `null` = o navegador suporta o ⚡; texto = motivo de não suportar */
@@ -198,15 +199,15 @@ describe("painel: marcas de km e câmera cinematográfica", () => {
     expect(botao("Câmera cinematográfica").getAttribute("aria-checked")).toBe("true");
   });
 
-  it("mostra quantas imagens de mapa a rota precisa", () => {
+  it("mostra quantos blocos de mapa a rota precisa", () => {
     montar(<Painel blocos={{ needed: 924, fits: true, sugestao: null }} />);
-    expect(container.textContent ?? "").toContain("≈ 924 imagens de mapa");
+    expect(container.textContent ?? "").toContain("≈ 924 blocos de mapa");
   });
 
   it("avisa e oferece o zoom que cabe quando a rota é longa demais", () => {
     montar(<Painel blocos={{ needed: 7237, fits: false, sugestao: 13.5 }} />);
     const texto = container.textContent ?? "";
-    expect(texto).toContain("7237 imagens");
+    expect(texto).toContain("7237 blocos de mapa");
     expect(texto).toContain("acima do limite");
     clicar(botao("Usar zoom"));
     // o botão aplica o zoom no mesmo estado que alimenta o controle
@@ -522,9 +523,8 @@ describe("painel: som do vídeo", () => {
 
 describe("painel: relevo", () => {
   /*
-   * O sombreado custa duas requisições por bloco, então ligá-lo muda o teto de
-   * blocos — o painel precisa dizer isso antes, e não depois de a exportação
-   * recusar a rota.
+   * O sombreado vem de outro servidor, com o próprio teto — o painel mostra as
+   * duas contas separadas, para o relevo não parecer que "gasta" o zoom.
    */
   it("oferece o interruptor desligado, com o que ele faz", () => {
     montar(<Painel />);
@@ -533,38 +533,69 @@ describe("painel: relevo", () => {
     expect(texto).toContain("Não é 3D");
   });
 
-  it("ligado, avisa que cada bloco pede também a sombra — e que o contador soma as duas", () => {
+  it("ligado, avisa que a sombra vem de outro servidor, com teto próprio", () => {
     montar(<Painel inicial={{ relevo: true }} />);
     const texto = container.textContent ?? "";
     expect(texto).toContain("sombra do mesmo pedaço");
-    expect(texto).toContain("contador abaixo soma as duas");
+    expect(texto).toContain("outro servidor, com o seu próprio teto");
     // e o número não é "o dobro": acima do z16 as sombras se repetem
     expect(texto).toContain("menos do que o dobro");
   });
 
-  it("o contador mostra imagens e separa mapa de relevo", () => {
+  it("o contador separa o mapa do relevo, cada um no seu servidor", () => {
     montar(
       <Painel
         inicial={{ relevo: true }}
-        blocos={{ needed: 1225, mapa: 831, relevo: 394, fits: true, sugestao: null, limite: 1400 }}
+        blocos={{ needed: 1395, mapa: 1395, relevo: 229, fits: true, sugestao: null, limite: 1400 }}
       />,
     );
     const texto = container.textContent ?? "";
-    expect(texto).toContain("1225 imagens");
-    expect(texto).toContain("831 do mapa + 394 do relevo");
+    expect(texto).toContain("1395 blocos de mapa + 229 de relevo");
+    // o total somado não aparece: cada servidor responde pelo seu
+    expect(texto).not.toContain("1624");
   });
 
-  it("acima do teto, diz o limite e oferece o zoom que cabe", () => {
+  it("acima do teto, diz o limite por servidor e oferece o zoom que cabe", () => {
     montar(
       <Painel
         inicial={{ relevo: true }}
-        blocos={{ needed: 1604, mapa: 874, relevo: 730, fits: false, sugestao: 15, limite: 1400 }}
+        blocos={{
+          needed: 1780,
+          mapa: 1780,
+          relevo: 640,
+          fits: false,
+          sugestao: 15,
+          limite: 1400,
+          limiteComFolga: 1540,
+        }}
       />,
     );
     const texto = container.textContent ?? "";
-    expect(texto).toContain("1604 imagens");
-    expect(texto).toContain("(1400)");
+    expect(texto).toContain("1780 blocos de mapa + 640 de relevo");
+    expect(texto).toContain("1400 por servidor, folga até 1540");
     expect(texto).toContain("Usar zoom 15");
+  });
+
+  it("na folga, avisa que passou do teto redondo mas cabe", () => {
+    // 16 km no zoom 17: 1.490 blocos com a terceira pessoa inclinada — 6%
+    // acima do 1.400, dentro da folga. Antes o zoom caía para 12.
+    montar(
+      <Painel
+        inicial={{ relevo: true }}
+        blocos={{
+          needed: 1490,
+          mapa: 1490,
+          relevo: 181,
+          fits: true,
+          sugestao: null,
+          limite: 1400,
+          limiteComFolga: 1540,
+        }}
+      />,
+    );
+    const texto = container.textContent ?? "";
+    expect(texto).toContain("1490 blocos de mapa + 181 de relevo");
+    expect(texto).toContain("dentro da folga do limite (1540 por servidor)");
   });
 
   it("no mapa Topo não há o que sombrear — e o painel explica", () => {

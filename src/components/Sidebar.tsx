@@ -62,9 +62,9 @@ type Props = {
   maxZoom: number;
   /** quanto do traçado tem elevação e hora (0..1) — decide as dicas da cor */
   cobertura: { ele: number; time: number };
-  /** imagens de mapa que a câmera vai pedir (o teto dos servidores gratuitos) */
+  /** blocos que a câmera vai pedir em cada servidor (o teto de cada um) */
   blocos: {
-    /** total de **imagens** (mapa + sombreado) — é o que o teto conta */
+    /** blocos de **mapa** — o número que o teto do servidor de mapas conta */
     needed: number;
     /** quantas delas são do mapa, e quantas do relevo */
     mapa?: number;
@@ -72,6 +72,8 @@ type Props = {
     fits: boolean;
     sugestao: number | null;
     limite?: number;
+    /** teto com a folga da terceira pessoa (giro + inclinação) */
+    limiteComFolga?: number;
   };
   /** aplica o zoom sugerido quando a rota não cabe */
   onUseZoom: (z: number) => void;
@@ -539,9 +541,9 @@ function Sidebar(props: Props) {
                   </>
                 ) : s.relevo ? (
                   <>
-                    A serra aparece pela luz. Cada bloco pede também a sombra do mesmo pedaço — e o
-                    contador abaixo soma as duas. Acima do zoom 16 várias sombras se repetem, então
-                    o relevo custa menos do que o dobro.
+                    A serra aparece pela luz. Cada bloco pede também a sombra do mesmo pedaço — que vem
+                    de outro servidor, com o seu próprio teto. Acima do zoom 16 várias sombras se
+                    repetem, então o relevo custa menos do que o dobro.
                   </>
                 ) : (
                   <>Luz e sombra do terreno, vistas de cima. Não é 3D: o mapa não inclina.</>
@@ -651,13 +653,22 @@ function Sidebar(props: Props) {
                 )}
               >
                 {(() => {
-                  const detalhe =
-                    (blocos.relevo ?? 0) > 0
-                      ? ` (${blocos.mapa ?? blocos.needed - (blocos.relevo ?? 0)} do mapa + ${blocos.relevo} do relevo)`
-                      : "";
-                  return blocos.fits
-                    ? `≈ ${blocos.needed} imagens de mapa${detalhe}`
-                    : `≈ ${blocos.needed} imagens${detalhe} — acima do limite dos mapas gratuitos (${blocos.limite ?? TILE_BUDGET})`;
+                  // mapa e relevo são servidores diferentes: o número aparece
+                  // separado, e cada um responde pelo seu teto
+                  const mapa = blocos.mapa ?? blocos.needed;
+                  const relevo = blocos.relevo ?? 0;
+                  const limite = blocos.limite ?? TILE_BUDGET;
+                  const folga = blocos.limiteComFolga ?? limite;
+                  const conta =
+                    `≈ ${mapa} blocos de mapa` + (relevo > 0 ? ` + ${relevo} de relevo` : "");
+                  if (!blocos.fits) {
+                    return `${conta} — acima do limite dos mapas gratuitos (${limite} por servidor, folga até ${folga})`;
+                  }
+                  // passou do teto redondo mas está na folga: diz isso, em vez
+                  // de fingir que está tudo dentro do 1.400
+                  return mapa > limite || relevo > limite
+                    ? `${conta} — dentro da folga do limite (${folga} por servidor)`
+                    : conta;
                 })()}
               </p>
               {!blocos.fits && (

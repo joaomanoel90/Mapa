@@ -66,7 +66,13 @@ import {
 } from "./lib/endpoints";
 import { findCharacter } from "./lib/characters";
 import { SceneRenderer, TILE_BUDGET } from "./lib/renderer";
-import { maxFollowZoom, pedidosNecessarios, planejarCamera } from "./lib/map-budget";
+import {
+  cabeNoTeto,
+  limiteDoServidor,
+  maxFollowZoom,
+  pedidosNecessarios,
+  planejarCamera,
+} from "./lib/map-budget";
 import { focoDasParadas } from "./lib/pois";
 import { PhotoCache, photoSources } from "./lib/photos";
 import { mapPassages, passageTimes } from "./lib/passages";
@@ -638,12 +644,14 @@ function App() {
     };
     const pedidos = pedidosNecessarios(base);
     return {
-      // o teto conta **imagens** (mapa + sombreado), não blocos de mapa
-      needed: pedidos.total,
+      // cada servidor responde pelo seu teto: mapa e sombreado não se somam
+      needed: pedidos.mapa,
       mapa: pedidos.mapa,
       relevo: pedidos.relevo,
-      fits: pedidos.total <= TILE_BUDGET,
+      fits: cabeNoTeto(pedidos),
       limite: TILE_BUDGET,
+      // o teto na prática: 1.400 com a folga que a terceira pessoa consome
+      limiteComFolga: limiteDoServidor(),
       // a sugestão só faz sentido quando a câmera é a "Seguir" e a rota não cabe
       sugestao: settings.cameraMode === "follow" ? sugestaoZoom : null,
     };
@@ -1388,19 +1396,21 @@ function App() {
         foco: focoDoVideo,
         relevo: settings.relevo,
       });
-      if (pedidosDaGravacao.total > TILE_BUDGET) {
+      if (!cabeNoTeto(pedidosDaGravacao, TILE_BUDGET)) {
+        const excesso =
+          pedidosDaGravacao.mapa > limiteDoServidor()
+            ? `${pedidosDaGravacao.mapa} blocos de mapa`
+            : `${pedidosDaGravacao.relevo} blocos de relevo`;
         throw new Error(
-          `Esta rota precisaria de ${pedidosDaGravacao.total} imagens de mapa — demais para os servidores gratuitos. ` +
-            "Divida o percurso em trechos menores.",
+          `Esta rota precisaria de ${excesso} — demais para os servidores gratuitos ` +
+            `(limite de ${limiteDoServidor()} por servidor). Divida o percurso em trechos menores.`,
         );
       }
       if (plano.reduzido) setAvisoRotaGravar(plano.zoom !== null
-        ? `Rota longa: esta rota precisaria de ${plano.pedidos.total} imagens no zoom escolhido` +
-          (plano.pedidos.relevo > 0
-            ? ` (${plano.pedidos.mapa} do mapa + ${plano.pedidos.relevo} do relevo)`
-            : "") +
-          `. O vídeo saiu no zoom ${plano.zoom}, que é o que cabe nos servidores gratuitos.`
-        : `Rota longa: nem no zoom mínimo a rota caberia nas imagens dos servidores gratuitos. ` +
+        ? `Rota longa: esta rota precisaria de ${plano.pedidos.mapa} blocos de mapa` +
+          (plano.pedidos.relevo > 0 ? ` + ${plano.pedidos.relevo} de relevo` : "") +
+          ` no zoom escolhido. O vídeo saiu no zoom ${plano.zoom}, que é o que cabe nos servidores gratuitos.`
+        : `Rota longa: nem no zoom mínimo a rota caberia nos blocos dos servidores gratuitos. ` +
           "O vídeo saiu com a câmera “Rota toda”.");
       else setAvisoRotaGravar(null);
 

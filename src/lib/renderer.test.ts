@@ -11,11 +11,12 @@ import {
 import { formatPace } from "./hud";
 import { buildTimeline, routeEnd, routeProgress, type Timeline } from "./timeline";
 import { colorizeRoute, NEUTRAL_COLOR, slopeAt, slopeSeries } from "./coloring";
+import { destaques } from "./highlights";
 import { formatClock, timesOf } from "./hud";
 import { type PhotoImage, type PhotoLookup } from "./photos";
 import { poiLatLng, type Poi } from "./pois";
 import { kmMarks } from "./km-marks";
-import { profileLayout } from "./profile";
+import { profileLayout, trailProfile } from "./profile";
 import { findCharacter, gaitOf } from "./characters";
 import {
   SceneRenderer,
@@ -4227,5 +4228,132 @@ describe("prévia de percurso (rota sem horário)", () => {
     const { textos } = desenharSemHora(trilha(() => null), 0.95);
     expect(textos).toContain("restantes");
     expect(textos).not.toContain("sem arquivo");
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* Destaques do percurso no vídeo                                      */
+/* ------------------------------------------------------------------ */
+
+/**
+ * A melhor parcial e a maior subida, desenhadas.
+ *
+ * A conta do que é "melhor" e "maior" é testada em `highlights.test.ts`; aqui
+ * interessa o que o usuário vê: o aviso entra na hora certa, sai depois, fica
+ * fora das faixas fixas do quadro e obedece ao interruptor.
+ */
+describe("destaques do percurso no vídeo", () => {
+  /** 5 km a 10 m por ponto, com o km 4 em 300 s; sobe 60 m do km 2 ao 4 */
+  const PONTOS_POR_KM = 100;
+  const DESTAQUE = Array.from({ length: 5 * PONTOS_POR_KM + 1 }, (_, i) => {
+    const km = Math.floor(i / PONTOS_POR_KM);
+    const dentro = (i % PONTOS_POR_KM) / PONTOS_POR_KM;
+    const ritmo = km === 3 ? 300 : 360;
+    let seg = 0;
+    for (let k = 0; k < km; k++) seg += k === 3 ? 300 : 360;
+    seg += dentro * ritmo;
+    // sobe 60 m do km 0,5 ao 2,5: o cume (0,5 do percurso) fica longe da
+    // melhor parcial (0,8), então os dois avisos cabem no mesmo vídeo
+    const subida = Math.max(0, Math.min(1, (i - 0.5 * PONTOS_POR_KM) / (2 * PONTOS_POR_KM)));
+    return {
+      lat: -23.5 + i * 0.00009,
+      lng: -48.4,
+      ele: 700 + subida * 60,
+      t: T0 + seg * 1000,
+    };
+  });
+  const trackDestaque = buildTrack(DESTAQUE);
+  const horasDestaque = DESTAQUE.map((p) => p.t);
+
+  /** onde cada destaque cai no percurso, pela conta da biblioteca */
+  const lista = destaques({
+    track: trackDestaque,
+    times: horasDestaque,
+    perfil: trailProfile(trackDestaque),
+    pace: true,
+  });
+  const melhor = lista.find((d) => d.tipo === "melhorKm")!;
+  const subida = lista.find((d) => d.tipo === "maiorSubida")!;
+
+  const quadro = (t: number, patch: Partial<(typeof style)> = {}) => {
+    const { ctx, textos, textosPos } = fakeCtx();
+    new SceneRenderer("dark").render(ctx, 1280, 720, {
+      ...estado(t, 14, null, horasDestaque),
+      track: trackDestaque,
+      style: { ...style, showHighlights: true, pace: true, ...patch },
+    });
+    return { textos, textosPos };
+  };
+
+  it("a melhor parcial aparece quando o personagem chega nela", () => {
+    const { textos } = quadro(melhor.em);
+    expect(textos).toContain("★");
+    expect(textos).toContain("MELHOR KM");
+    expect(textos).toContain(formatPace(300)); // 1 km em 300 s
+    expect(textos).toContain("/km");
+    expect(textos.some((t) => t.includes("km 4 de 5,0"))).toBe(true);
+  });
+
+  it("fora da janela ela não aparece", () => {
+    const { textos } = quadro(melhor.em - 0.4);
+    expect(textos).not.toContain("MELHOR KM");
+  });
+
+  it("a maior subida aparece no cume, com os metros ganhos", () => {
+    const { textos } = quadro(subida.em);
+    expect(textos).toContain("MAIOR SUBIDA");
+    expect(textos).toContain("60");
+    expect(textos).toContain("m");
+  });
+
+  it("com título, o aviso nasce abaixo da caixa dele", () => {
+    const { textosPos } = quadro(melhor.em, { showTitle: true });
+    const titulo = textosPos.find((t) => t.s === "MELHOR KM")!;
+    expect(titulo).toBeDefined();
+    // a caixa do título (40 do título + 26 do subtítulo + margens) vai até ~130
+    expect(titulo.y).toBeGreaterThan(130);
+    // e o aviso inteiro fica acima da faixa do perfil
+    const faixa = profileLayout(1280, 720, 1, true);
+    expect(titulo.y + 60).toBeLessThan(faixa.y);
+  });
+
+  it("sem título, o aviso sobe para o alto do quadro", () => {
+    const { textosPos } = quadro(melhor.em, { showTitle: false });
+    const titulo = textosPos.find((t) => t.s === "MELHOR KM")!;
+    expect(titulo.y).toBeLessThan(80);
+    expect(titulo.y).toBeGreaterThan(10);
+  });
+
+  it("não entra na coluna do HUD", () => {
+    const { textosPos } = quadro(melhor.em, { showTitle: true, showHud: true });
+    const linha = textosPos.filter((t) => t.s === "MELHOR KM" || t.s === "★");
+    expect(linha.length).toBe(2);
+    // o anel do HUD mora nos 200 px da direita
+    for (const t of linha) expect(t.x).toBeLessThan(1280 - 200);
+  });
+
+  it("com o interruptor desligado não há aviso nenhum", () => {
+    const { textos } = quadro(melhor.em, { showHighlights: false });
+    expect(textos).not.toContain("MELHOR KM");
+    expect(textos).not.toContain("★");
+  });
+
+  it("sem hora no arquivo sobra a subida; sem altitude não sobra nada", () => {
+    // a rota tem altitude: com o arquivo sem hora, o aviso é o da subida
+    const { textos } = quadro(subida.em);
+    expect(textos).toContain("MAIOR SUBIDA");
+
+    // agora uma rota sem altitude e sem hora: nenhum aviso (nada de número
+    // inventado), e o "★" nem chega a ser desenhado
+    const plana = buildTrack(
+      Array.from({ length: 300 }, (_, i) => ({ lat: -23.5 + i * 0.00009, lng: -48.4 })),
+    );
+    const { ctx, textos: semNada } = fakeCtx();
+    new SceneRenderer("dark").render(ctx, 1280, 720, {
+      ...estado(0.5, 14, null, null),
+      track: plana,
+      style: { ...style },
+    });
+    expect(semNada).not.toContain("★");
   });
 });

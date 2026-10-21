@@ -96,6 +96,14 @@ describe("encodeShare", () => {
     expect(ler(sem).s?.elevationProfile).toBe(false);
   });
 
+  it("leva os destaques do percurso no link", () => {
+    // quem abre o link tem de ver o mesmo vídeo: o aviso da melhor parcial e da
+    // maior subida também viaja
+    const sem = buildShareUrl(base({ settings: { ...DEFAULT_SETTINGS, highlights: false } }));
+    const json = JSON.parse(atob(payloadOf(sem).split(".")[1].replace(/-/g, "+").replace(/_/g, "/")));
+    expect(json.s?.highlights).toBe(false);
+  });
+
   it("monta a URL sobre a base informada", () => {
     const url = buildShareUrl(base(), "https://exemplo.org/Mapa/");
     expect(url.startsWith("https://exemplo.org/Mapa/#r=")).toBe(true);

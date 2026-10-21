@@ -125,6 +125,14 @@ describe("sanitizeSettings", () => {
     expect(DEFAULT_SETTINGS.tiltHorizonte).toBe(true);
   });
 
+  it("exige booleano nas marcas de dia, e elas nascem ligadas", () => {
+    expect(sanitizeSettings(raw({ dias: "sim" })).dias).toBeUndefined();
+    expect(sanitizeSettings(raw({ dias: false })).dias).toBe(false);
+    // ligadas por padrão: só fazem algo num arquivo multi-dia, e nesse caso
+    // são o que explica a virada do dia no vídeo
+    expect(DEFAULT_SETTINGS.dias).toBe(true);
+  });
+
   it("exige booleano também no fantasma à frente, e ele nasce desligado", () => {
     expect(sanitizeSettings(raw({ ghost: "sim" })).ghost).toBeUndefined();
     expect(sanitizeSettings(raw({ ghost: true })).ghost).toBe(true);

@@ -19,6 +19,7 @@ import { poiLatLng, type Poi } from "./pois";
 import { kmMarks } from "./km-marks";
 import { profileLayout, trailProfile } from "./profile";
 import { findCharacter, gaitOf } from "./characters";
+import { diasDoPercurso } from "./days";
 import {
   SceneRenderer,
   TileStore,
@@ -2088,6 +2089,57 @@ describe("partida e chegada no vídeo", () => {
  * posição **absoluta**, então dá para ver o corpo subir e trocar de lado de um
  * quadro para o outro — que é exatamente o que o olho chama de "andar".
  */
+describe("o aviso de dia novo", () => {
+  /** um percurso de dois dias, com a noite no meio */
+  const doisDias = buildTrack(
+    Array.from({ length: 120 }, (_, i) => ({
+      lat: -23.5 + i * 0.0005,
+      lng: -48.4 + i * 0.0003,
+      t: (i >= 60 ? T0 + 9 * 3_600_000 + (i - 60) * 60_000 : T0 + i * 60_000),
+    })),
+  );
+  const dias = diasDoPercurso(doisDias);
+  const desenharCom = (t: number, estilo: Partial<SceneStyle> = {}) => {
+    const f = fakeCtx();
+    new SceneRenderer("dark").render(f.ctx, 1280, 720, {
+      ...estado(t, 14, null),
+      track: doisDias,
+      days: dias,
+      camera: { mode: "follow", followZoom: 16 },
+      style: { ...style, ...estilo },
+    });
+    return f;
+  };
+
+  it("entra quando o personagem começa o dia 2", () => {
+    expect(dias).toHaveLength(2);
+    const f = desenharCom(dias[1].t0 + 0.4 / 14);
+    expect(f.textos).toContain("DIA 2");
+    // e leva a distância do dia junto
+    expect(f.textos.some((x) => /km|m$/.test(x))).toBe(true);
+  });
+
+  it("não aparece no dia 1 nem depois do tempo do aviso", () => {
+    expect(desenharCom(0.2).textos).not.toContain("DIA 2");
+    expect(desenharCom(dias[1].t0 + 3 / 14).textos).not.toContain("DIA 2");
+  });
+
+  it("desligado no painel, não aparece", () => {
+    const f = desenharCom(dias[1].t0 + 0.4 / 14, { showDays: false });
+    expect(f.textos).not.toContain("DIA 2");
+  });
+
+  it("num percurso de um dia só não há aviso nenhum", () => {
+    const f = fakeCtx();
+    new SceneRenderer("dark").render(f.ctx, 1280, 720, {
+      ...estado(0.5, 14, null),
+      days: [],
+      camera: { mode: "follow", followZoom: 16 },
+    });
+    expect(f.textos.filter((x) => x.startsWith("DIA "))).toEqual([]);
+  });
+});
+
 describe("o fantasma à frente", () => {
   /** um traçado de ~4 km, para o fantasma ter para onde ir */
   const trilha = buildTrack(

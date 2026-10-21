@@ -34,6 +34,7 @@ function Painel({
   avisoRapido,
   onImportGpx = () => undefined,
   musica = null,
+  variosDias = false,
 }: {
   inicial?: Partial<Settings>;
   cobertura?: { ele: number; time: number };
@@ -51,6 +52,7 @@ function Painel({
   avisoRapido?: string | null;
   onImportGpx?: (f: File) => void;
   musica?: { nome: string; duracao: number } | null;
+  variosDias?: boolean;
 }) {
   const [settings, setSettings] = useState<Settings>({ ...DEFAULT_SETTINGS, ...inicial });
   const update = <K extends keyof Settings>(key: K, value: Settings[K]) =>
@@ -68,6 +70,7 @@ function Painel({
       pois={[]}
       track={TRACK}
       cobertura={cobertura}
+      variosDias={variosDias}
       blocos={blocos}
       onUseZoom={(z) => update("followZoom", z)}
       progress={0}
@@ -518,6 +521,24 @@ describe("painel: som do vídeo", () => {
   it("a música vale só nesta sessão — o painel diz isso", () => {
     montar(<Painel />);
     expect(container.textContent ?? "").toContain("não fica salva");
+  });
+});
+
+describe("painel: marcas de dia", () => {
+  it("num percurso de um dia o interruptor nem aparece", () => {
+    montar(<Painel />);
+    expect(container.textContent ?? "").not.toContain("Marcas de dia");
+  });
+
+  it("num arquivo multi-dia, aparece ligado e explica o que faz", () => {
+    montar(<Painel variosDias />);
+    const texto = container.textContent ?? "";
+    expect(texto).toContain("Marcas de dia");
+    expect(texto).toContain("tem mais de um dia");
+    expect(texto).toContain("DIA 2");
+    expect(botao("Marcas de dia").getAttribute("aria-checked")).toBe("true");
+    clicar(botao("Marcas de dia"));
+    expect(botao("Marcas de dia").getAttribute("aria-checked")).toBe("false");
   });
 });
 

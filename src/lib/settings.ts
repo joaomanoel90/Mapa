@@ -101,6 +101,13 @@ export type Settings = {
   colorBy: ColorMode;
   /** marcas de km ao longo do traçado */
   showKmMarks: boolean;
+  /**
+   * O aviso de **dia novo** ("DIA 2 · 41,2 km") no percurso de vários dias.
+   *
+   * Só tem efeito quando o arquivo tem uma noite no meio (ver
+   * `diasDoPercurso`); num percurso de um dia não há o que avisar.
+   */
+  dias: boolean;
   /** abertura sobrevoando a região + aproximação nas paradas */
   cinematic: boolean;
   /**
@@ -230,6 +237,7 @@ export const DEFAULT_SETTINGS: Settings = {
   activity: "pedal",
   colorBy: "solid",
   showKmMarks: false,
+  dias: true,
   cinematic: false,
   thirdPerson: false,
   spinMap: false,
@@ -292,6 +300,7 @@ export function sanitizeSettings(raw: Partial<Settings>): Partial<Settings> {
     delete out.colorBy;
   }
   if (typeof out.showKmMarks !== "boolean") delete out.showKmMarks;
+  if (typeof out.dias !== "boolean") delete out.dias;
   if (typeof out.cinematic !== "boolean") delete out.cinematic;
   if (typeof out.thirdPerson !== "boolean") delete out.thirdPerson;
   if (typeof out.spinMap !== "boolean") delete out.spinMap;

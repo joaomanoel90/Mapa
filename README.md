@@ -734,16 +734,27 @@ intacto e mudam só o que é encosta.
 
 **O custo é uma requisição a mais por bloco** (o mapa e a sombra do mesmo
 pedaço) — mas **não o dobro**: até o zoom 16 cada bloco do mapa tem a sua
-sombra, e acima disso quatro blocos do 18 dividem **uma** do 16. O teto conta
-**imagens** (`pedidosDaAnimacao`), e continua sendo 1.400.
+sombra, e acima disso quatro blocos do 18 dividem **uma** do 16.
 
-A primeira versão dividia o teto por 2 (`budgetDeBlocos`) e tratava todo bloco
-como dois pedidos. Parecia conservador, mas errava justamente onde se nota: com
-relevo ligado, uma rota de **10 km no zoom 17** pedia 831 blocos de mapa + 394
-sombreados = 1.225 imagens — cabia nos 1.400 —, e o app baixava o vídeo para o
-**16,5**. Era isso que o usuário via como "o zoom não fixa" nas rotas menores,
-que são as que usam zoom alto. O contador do painel agora diz quantas imagens
-são, separando mapa e relevo.
+**Cada servidor tem o seu teto**: o mapa continua em 1.400 blocos, e o
+sombreado — que vem de outro host — responde pelo mesmo 1.400 (`cabeNoTeto`).
+Somar os dois contra um teto só foi o segundo erro, e o mais caro: abaixo do
+zoom 16 a sombra é 1:1, então *baixar* o zoom quase não diminuía a soma. Uma
+rota de **16 km no zoom 17** pedia 1.395 blocos de mapa (dentro do teto) + 229
+de relevo, e o app despencava para o **zoom 12** para fazer a soma caber em
+1.400. Hoje ela fica no 17.
+
+**A folga de 10% (`FOLGA_DO_TETO`)**: o 1.400 é uma conta de vista de cima; a
+terceira pessoa com giro e inclinação cobre mais chão no mesmo zoom. A mesma
+rota de 16 km no 17 pedia 1.381 de cima e **1.490** com giro + inclinação — 8%
+mais. Derrubar o zoom por causa disso era o mesmo defeito com outra roupa, então
+o teto de cada servidor vale até **1.540**; o painel diz quando o número passou
+do 1.400 mas está na folga.
+
+O primeiro erro tinha sido dividir o teto por 2 (`budgetDeBlocos`) e tratar todo
+bloco como dois pedidos: 10 km no zoom 17 — 831 de mapa + 394 de sombra — saíam
+no **16,5**. O contador do painel mostra as duas contas separadas, e é isso que
+o vídeo usa.
 
 Acima do zoom 16 o serviço não tem bloco próprio: o do 16 é recortado no pedaço
 que interessa (`hillshadeBloco`) em vez de pedir um bloco que não existe. Se o
@@ -1129,7 +1140,8 @@ os locais de partida e chegada, que antes eram gravados sem plano B nenhum.
 ### Rotas longas: o teto de blocos de mapa
 
 Cada bloco de mapa é um pedido a um servidor comunitário (OSM, CyclOSM,
-OpenTopoMap), e o app recusa a exportação acima de **1.400 blocos**. Acontece que
+OpenTopoMap), e o app recusa a exportação acima de **1.400 blocos** (1.540 com a
+folga da terceira pessoa). Acontece que
 a câmera "Seguir" no zoom padrão (16) mostra ~2,4 km de largura — então precisa
 de um bloco a cada ~1,4 km de rota. Medido, em 1280×720:
 

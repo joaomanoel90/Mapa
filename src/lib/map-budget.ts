@@ -88,18 +88,22 @@ export type Pedidos = {
   mapa: number;
   /** blocos do sombreado (cada um contado uma vez: um do z16 serve a quatro do z18) */
   relevo: number;
-  /** o que os servidores gratuitos efetivamente recebem */
+  /** os dois servidores juntos — informativo, não é o que decide */
   total: number;
 };
 
 /**
  * Quantas **imagens** a animação pede, separando mapa e relevo.
  *
- * É o número que vale para o teto. Com o relevo ligado, cada bloco do mapa pede
- * também a sombra do mesmo pedaço — mas as sombras **se repetem** acima do zoom
- * 16. Contar "blocos × 2" foi o erro da primeira versão: numa rota de 10 km no
- * zoom 17 a conta real é ~1,5×, e o teto dividido por 2 fazia o vídeo sair num
- * zoom menor que o escolhido (no 16,5 em vez do 17).
+ * O relevo tem servidor próprio (Esri Hillshade), e é por isso que ele **não
+ * entra no mesmo teto** do mapa: cada servidor responde pelo seu. Somar os dois
+ * contra 1.400 foi o erro da segunda versão — abaixo do zoom 16 cada bloco do
+ * mapa pede a sua própria sombra (1:1), então baixar o zoom quase não diminuía a
+ * soma, e uma rota de 16 km no zoom 17 (1.381 blocos de mapa, dentro do teto)
+ * despencava para o **12** só para caber a soma.
+ *
+ * As sombras também se repetem acima do zoom 16: quatro blocos do 18 dividem
+ * **uma** do 16 (ver `hillshadeBloco`), então a contagem é de URLs únicas.
  */
 export function pedidosDaAnimacao(
   refs: { url: string; z: number; x: number; y: number }[],
@@ -118,19 +122,52 @@ export function pedidosNecessarios(input: BudgetInput & { camera: CameraConfig }
   return pedidosDaAnimacao(refsDaAnimacao(input), input.basemap, !!input.relevo);
 }
 
+/**
+ * Quanta folga o teto aceita antes de derrubar o zoom.
+ *
+ * O 1.400 é uma proteção redonda, medida numa vista de cima. A terceira pessoa
+ * com giro e inclinação cobre mais chão — o quadro girado busca os cantos, e a
+ * inclinação comprime a vertical —, então a mesma rota pede alguns por cento a
+ * mais **no mesmo zoom**. Numa rota de 16 km no 17 a diferença medida foi de
+ * 1.381 (vista de cima) para 1.490 (terceira pessoa com giro e inclinação):
+ * 8%. Derrubar o zoom por causa disso é justamente o "o zoom não fixa" que o
+ * usuário relatou — a folga de 10% absorve a variação e mantém a escolha.
+ */
+export const FOLGA_DO_TETO = 1.1;
+
+/** O teto efetivo de cada servidor, já com a folga. */
+export function limiteDoServidor(budget = TILE_BUDGET): number {
+  return Math.round(budget * FOLGA_DO_TETO);
+}
+
+/**
+ * Cabe no teto dos servidores gratuitos?
+ *
+ * **Um teto por servidor**: o mapa e o sombreado do relevo são hosts
+ * diferentes, e o número que protege cada um é o mesmo 1.400 (com a folga
+ * acima). O que não pode acontecer é o relevo empurrar o mapa para fora do
+ * teto dele — era isso que fazia a rota curta perder o zoom.
+ */
+export function cabeNoTeto(pedidos: Pedidos, budget = TILE_BUDGET): boolean {
+  const limite = limiteDoServidor(budget);
+  return pedidos.mapa <= limite && pedidos.relevo <= limite;
+}
+
 /** Blocos **do mapa** que a câmera escolhida vai precisar. */
 export function tilesNeeded(input: BudgetInput & { camera: CameraConfig }): number {
   return refsDaAnimacao(input).length;
 }
 
 /**
- * Maior zoom de acompanhamento que ainda cabe no teto.
+ * Maior zoom de acompanhamento (até o pedido) que ainda cabe no teto.
  *
- * Busca binária na lista de zooms que o controle oferece (de 0,5 em 0,5, do
- * teto do mapa para baixo): a contagem cresce quando o zoom cresce, então dá
- * para descartar metade da lista a cada medição em vez de testar todos. Cada
- * medição percorre a rota inteira, e o painel mostra o número enquanto o
- * usuário arrasta o controle.
+ * Não é uma busca binária, e o motivo é medido: o "cabe" **não** é monotônico
+ * no zoom. Logo abaixo do 16 a sombra do relevo passa a ser 1:1 e a conta
+ * sobe; as paradas dão picos em níveis fixos. Numa rota de 16 km, a binária
+ * devolvia **16** quando o **17** cabia — o usuário pedia um zoom e recebia
+ * dois degraus abaixo. Então o caminho é: desce degrau a degrau a partir do
+ * zoom pedido (a correção de verdade costuma estar a 1–2 níveis), e só se
+ * precisar descer muitos níveis é que usa a binária para o resto.
  *
  * Devolve `null` quando nem o zoom mínimo cabe — aí só a câmera "Rota toda"
  * resolve, e é isso que a tela diz.
@@ -146,25 +183,38 @@ export function maxFollowZoom(
   const budget = input.budget ?? TILE_BUDGET;
   const min = input.minFollowZoom ?? MIN_FOLLOW_ZOOM;
 
-  // lista de zooms oferecidos, do maior para o menor
+  /*
+   * A lista começa no zoom **pedido** (nunca acima dele): a sugestão existe
+   * para dizer até onde descer, e não para subir a câmera de quem já escolheu.
+   */
+  const topo = Math.min(input.maxZoom, input.camera?.followZoom ?? input.maxZoom);
   const opcoes: number[] = [];
-  for (let z = input.maxZoom; z >= min; z -= 0.5) {
+  for (let z = topo; z >= min; z -= 0.5) {
     opcoes.push(Math.round(z * 2) / 2);
   }
   if (opcoes.length === 0) return null;
 
   const cabe = (zoom: number) =>
-    pedidosNecessarios({
-      ...input,
-      // a busca mexe só no zoom: o resto da câmera (a terceira pessoa, o giro)
-      // continua o que o painel mandou — senão a sugestão valeria para outra
-      // câmera e o vídeo estouraria o teto
-      camera: { ...(input.camera ?? {}), mode: "follow", followZoom: zoom },
-    }).total <= budget;
+    cabeNoTeto(
+      pedidosNecessarios({
+        ...input,
+        // a busca mexe só no zoom: o resto da câmera (a terceira pessoa, o giro)
+        // continua o que o painel mandou — senão a sugestão valeria para outra
+        // câmera e o vídeo estouraria o teto
+        camera: { ...(input.camera ?? {}), mode: "follow", followZoom: zoom },
+      }),
+      budget,
+    );
 
-  if (cabe(opcoes[0])) return opcoes[0];
+  /** degraus que valem a pena testar um a um antes de partir para a binária */
+  const PASSOS = 10;
 
-  let lo = 0;
+  for (let i = 0; i < opcoes.length && i < PASSOS; i++) {
+    if (cabe(opcoes[i])) return opcoes[i];
+  }
+  if (opcoes.length <= PASSOS) return null;
+
+  let lo = PASSOS;
   let hi = opcoes.length - 1;
   let melhor: number | null = null;
   while (lo <= hi) {
@@ -209,7 +259,7 @@ export function planejarCamera(
   const budget = input.budget ?? TILE_BUDGET;
   const pedidos = pedidosNecessarios(input);
   const base = { blocos: pedidos.mapa, pedidos };
-  if (pedidos.total <= budget) {
+  if (cabeNoTeto(pedidos, budget)) {
     return { ...base, camera: input.camera, reduzido: false, zoom: null };
   }
   if (input.camera.mode !== "follow") {
@@ -234,16 +284,16 @@ export function budgetAdvice(
   mode: CameraMode,
 ): string {
   if (mode !== "follow") {
-    return `Esta rota precisaria de ${needed} imagens de mapa — demais para os servidores gratuitos.`;
+    return `Esta rota precisaria de ${needed} blocos de mapa — demais para os servidores gratuitos.`;
   }
   if (suggestion === null) {
     return (
-      `Esta rota precisaria de ${needed} imagens de mapa — demais para os servidores ` +
+      `Esta rota precisaria de ${needed} blocos de mapa — demais para os servidores ` +
       `gratuitos, mesmo no zoom mínimo. Use a câmera “Rota toda”.`
     );
   }
   return (
-    `Esta rota precisaria de ${needed} imagens de mapa — demais para os servidores ` +
+    `Esta rota precisaria de ${needed} blocos de mapa — demais para os servidores ` +
     `gratuitos. Com a câmera “Seguir”, o zoom ${suggestion} cabe.`
   );
 }

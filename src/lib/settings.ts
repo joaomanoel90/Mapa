@@ -155,6 +155,14 @@ export type Settings = {
    * chegada. São **sintetizados** no arquivo (nenhum sample, nenhuma licença),
    * e é por isso que podem vir ligados por padrão.
    */
+  /**
+   * Sombreado do relevo no mapa (luz e sombra do terreno, visto de cima).
+   *
+   * Não é 3D e não é uma camada nova no desenho: o sombreado é misturado no
+   * próprio bloco do mapa. Custa uma requisição a mais por bloco — e é por isso
+   * que, ligado, o teto de blocos cai pela metade.
+   */
+  relevo: boolean;
   som: boolean;
   /**
    * Volume da música de fundo (0..1).
@@ -226,6 +234,7 @@ export const DEFAULT_SETTINGS: Settings = {
   cardPhoto: "",
   logo: "",
   logoChip: false,
+  relevo: false,
   som: true,
   musicaVolume: 0.55,
   avatar: "",
@@ -288,6 +297,7 @@ export function sanitizeSettings(raw: Partial<Settings>): Partial<Settings> {
   if (out.logo !== undefined && !isPhotoDataUrl(out.logo)) delete out.logo;
   if (typeof out.logo === "string" && out.logo.length > PHOTO_MAX_CHARS) delete out.logo;
   if (typeof out.logoChip !== "boolean") delete out.logoChip;
+  if (typeof out.relevo !== "boolean") delete out.relevo;
   if (typeof out.som !== "boolean") delete out.som;
   if (
     typeof out.musicaVolume !== "number" ||

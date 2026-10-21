@@ -236,6 +236,7 @@ exatamente o cenário do `jsdom` e o dos navegadores que falhavam.
 | Serviço | Para quê | Limite |
 |---|---|---|
 | OpenStreetMap, CyclOSM, OpenTopoMap, Esri | Mapas | Uso moderado (política de *fair use*) |
+| Esri World Hillshade (USGS) | Sombreado do relevo | Mesma origem dos mapas Esri |
 | OSRM (`routing.openstreetmap.de`) | Traçado das rotas e encaixe nas ruas | Demonstração pública |
 | Nominatim | Busca de cidades | ~1 requisição por segundo |
 
@@ -247,7 +248,8 @@ trocar as URLs em `src/lib/tiles.ts` e `src/lib/routing.ts`.
 ### Créditos obrigatórios
 
 As licenças (ODbL, CC-BY-SA) exigem atribuição. O app **já desenha o crédito automaticamente**
-no canto do mapa e dentro do vídeo exportado — não remova.
+no canto do mapa e dentro do vídeo exportado — não remova. Com o relevo ligado, o crédito cita as
+duas fontes: a do mapa e a do sombreado (`© OpenStreetMap · Esri Hillshade`).
 
 ---
 
@@ -693,6 +695,39 @@ primeiro aparece. Mais perto que isso, a permanência de cada um é encurtada pa
 ceder a vez ao seguinte — eles nunca se sobrepõem.
 
 Desligável em "🏅 Destaques do percurso" e viaja no link.
+
+### Relevo: a luz e a sombra do terreno
+
+Um interruptor **⛰️ Relevo (luz e sombra do terreno)** no painel do mapa põe o
+sombreado do terreno (Esri/USGS, sem chave) por cima de qualquer estilo. Não é
+3D: o mapa continua visto de cima, mas a serra aparece pela luz — a encosta que
+pega sol fica clara, a que está virada para o outro lado fica escura.
+
+O sombreado **não é uma segunda camada no desenho**: ele é misturado no próprio
+bloco do mapa, antes de o bloco entrar no cache (`comporRelevo`). Assim a
+gravação, o congelamento de blocos e o aquecimento não precisam saber que existe
+uma imagem a mais — o vídeo continua pedindo "o bloco 14/5123/9876" e recebe o
+mapa já sombreado.
+
+| mapa | mistura | por quê |
+|---|---|---|
+| Escuro | `screen`, 30% | o mapa já é escuro: multiplicar sombra sobre sombra não apareceria — no Escuro o relevo entra como **luz** |
+| Clean / Padrão / Ciclo / Satélite | `multiply`, 45–55% | sombra clássica: escurece a encosta virada para o lado oposto |
+| Topo | — | o OpenTopoMap já traz curvas de nível e sombreado próprios |
+
+**O custo é o dobro de requisições por bloco** (o mapa e a sombra do mesmo
+pedaço), e por isso o teto de blocos **cai pela metade** quando o relevo está
+ligado (`budgetDeBlocos`): o número que importa é o de imagens pedidas aos
+servidores gratuitos, e ele continua sendo 1.400. Na prática, uma rota longa sai
+num zoom um pouco menor com relevo do que sem ele — e o painel diz isso.
+
+Acima do zoom 16 o serviço não tem bloco próprio: o do 16 é recortado no pedaço
+que interessa (`hillshadeBloco`) em vez de pedir um bloco que não existe. Se o
+sombreado não chegar (servidor fora do ar, bloqueio de rede), o bloco sai **sem**
+o relevo — perder a sombra é ruim, perder o mapa no meio do vídeo não pode.
+
+O mapa que antes se chamava "Relevo" (OpenTopoMap) agora se chama **Topo**: o
+nome "Relevo" ficou para o sombreado.
 
 ### Rota colorida (velocidade ou inclinação)
 
@@ -1299,7 +1334,7 @@ ou cortados.
 
 ```bash
 npm run typecheck  # tsc --noEmit
-npm test           # Vitest (944 casos)
+npm test           # Vitest (966 casos)
 npm run check:dist # o build saiu autocontido e sem /src/?
 ```
 

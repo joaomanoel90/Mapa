@@ -1,6 +1,12 @@
 import { useEffect, useRef } from "react";
 import L from "leaflet";
-import { BASEMAPS, pontoEmPixelInteiro, type BasemapId } from "../lib/tiles";
+import {
+  BASEMAPS,
+  HILLSHADE,
+  pontoEmPixelInteiro,
+  relevoDoMapa,
+  type BasemapId,
+} from "../lib/tiles";
 import {
   completarTrilha,
   nearestTOnTrack,
@@ -38,6 +44,8 @@ type Props = {
   rotate: boolean;
   accent: string;
   basemap: BasemapId;
+  /** sombreado do relevo por cima do mapa (ver `RELEVO_DO_MAPA`) */
+  relevo?: boolean;
   follow: boolean;
   followZoom: number;
   /** câmera de terceira pessoa: mais perto e o personagem abaixo do centro */
@@ -95,6 +103,7 @@ export default function MapView(props: Props) {
     rotate,
     accent,
     basemap,
+    relevo = false,
     follow,
     followZoom,
     thirdPerson,
@@ -121,6 +130,7 @@ export default function MapView(props: Props) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<L.Map | null>(null);
   const tileRef = useRef<L.TileLayer | null>(null);
+  const relevoRef = useRef<L.TileLayer | null>(null);
   const plannedRef = useRef<L.Polyline | null>(null);
   const plannedHitRef = useRef<L.Polyline | null>(null);
   const traveledRef = useRef<L.Polyline | null>(null);
@@ -299,6 +309,47 @@ export default function MapView(props: Props) {
       tileRef.current = null;
     };
   }, [basemap]);
+
+  /* --- relevo: o sombreado do terreno por cima do mapa --- */
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    const estilo = relevo ? relevoDoMapa(basemap) : null;
+
+    if (!estilo) {
+      relevoRef.current?.remove();
+      relevoRef.current = null;
+      return;
+    }
+
+    /*
+     * O sombreado vive num painel próprio, **entre** o mapa (vinculado à
+     * posição) e os desenhos por cima. O modo de mistura é o mesmo do vídeo
+     * (`RELEVO_DO_MAPA`): no Escuro, `screen` acende as encostas iluminadas;
+     * nos outros, `multiply` escurece as viradas para o lado oposto.
+     */
+    if (!map.getPane("relevo")) {
+      const pane = map.createPane("relevo");
+      pane.style.zIndex = "250";
+      pane.style.pointerEvents = "none";
+    }
+    const pane = map.getPane("relevo");
+    if (pane) pane.style.mixBlendMode = estilo.modo;
+
+    if (!relevoRef.current) {
+      relevoRef.current = L.tileLayer(HILLSHADE.template, {
+        pane: "relevo",
+        maxZoom: 20,
+        maxNativeZoom: HILLSHADE.maxZoom,
+        opacity: estilo.alpha,
+        keepBuffer: 6,
+        updateWhenIdle: false,
+        attribution: HILLSHADE.attribution,
+      }).addTo(map);
+    } else {
+      relevoRef.current.setOpacity(estilo.alpha);
+    }
+  }, [basemap, relevo]);
 
   /* --- modo de posicionamento de parada (mira no cursor) --- */
   useEffect(() => {

@@ -5,6 +5,7 @@ import { TILE_BUDGET } from "./renderer";
 import {
   MIN_FOLLOW_ZOOM,
   budgetAdvice,
+  budgetDeBlocos,
   maxFollowZoom,
   planejarCamera,
   tilesNeeded,
@@ -241,5 +242,59 @@ describe("o vídeo de uma travessia intercontinental", () => {
     });
     expect(plano.camera.mode).toBe("fit");
     expect(plano.reduzido).toBe(false);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* O relevo custa o dobro de requisições                               */
+/* ------------------------------------------------------------------ */
+
+describe("teto de blocos com relevo", () => {
+  it("sem relevo, o teto é o de sempre", () => {
+    expect(budgetDeBlocos(false)).toBe(TILE_BUDGET);
+    expect(budgetDeBlocos(false, 1000)).toBe(1000);
+  });
+
+  it("com relevo, cai pela metade — cada bloco pede duas imagens", () => {
+    expect(budgetDeBlocos(true)).toBe(Math.floor(TILE_BUDGET / 2));
+    expect(budgetDeBlocos(true, 1000)).toBe(500);
+    // e o que importa é o número de requisições, que continua o mesmo
+    expect(budgetDeBlocos(true) * 2).toBeLessThanOrEqual(TILE_BUDGET);
+  });
+
+  it("a sugestão de zoom usa o teto que foi passado", () => {
+    const longo = percurso(120);
+    const camera = { mode: "follow" as const, followZoom: 17 };
+    const comTeto = maxFollowZoom({
+      track: buildTrack(longo),
+      ...base,
+      camera,
+      budget: 700,
+    });
+    const semTeto = maxFollowZoom({
+      track: buildTrack(longo),
+      ...base,
+      camera,
+      budget: TILE_BUDGET,
+    });
+    expect(comTeto).not.toBeNull();
+    expect(semTeto).not.toBeNull();
+    // metade dos blocos não pode sugerir um zoom maior
+    expect(comTeto!).toBeLessThanOrEqual(semTeto!);
+  });
+
+  it("o plano da gravação obedece ao teto de 700", () => {
+    const track = buildTrack(percurso(120));
+    const camera = { mode: "follow" as const, followZoom: 17 };
+    const plano = planejarCamera({
+      track,
+      ...base,
+      camera,
+      budget: budgetDeBlocos(true),
+    });
+    const precisa = tilesNeeded({ track, ...base, camera: plano.camera });
+    // o plano não é obrigado a caber no zoom pedido, mas tem de caber depois
+    // de ajustado — ou cair para "Rota toda", que é um enquadramento só
+    expect(plano.reduzido ? precisa <= budgetDeBlocos(true) * 1.05 : true).toBe(true);
   });
 });

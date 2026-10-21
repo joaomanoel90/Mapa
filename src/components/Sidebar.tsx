@@ -19,7 +19,7 @@ import {
 } from "../lib/settings";
 import type { EndCard, RideSummary } from "../lib/stats";
 import { PROFILES, PRESETS, type Profile, type Preset } from "../lib/routing";
-import { BASEMAPS, BASEMAP_ORDER } from "../lib/tiles";
+import { BASEMAPS, BASEMAP_ORDER, relevoDoMapa } from "../lib/tiles";
 import { TILE_BUDGET } from "../lib/map-budget";
 import { cn } from "../utils/cn";
 import { findCharacter } from "../lib/characters";
@@ -63,7 +63,7 @@ type Props = {
   /** quanto do traçado tem elevação e hora (0..1) — decide as dicas da cor */
   cobertura: { ele: number; time: number };
   /** blocos de mapa que a câmera vai precisar (o teto dos servidores gratuitos) */
-  blocos: { needed: number; fits: boolean; sugestao: number | null };
+  blocos: { needed: number; fits: boolean; sugestao: number | null; limite?: number };
   /** aplica o zoom sugerido quando a rota não cabe */
   onUseZoom: (z: number) => void;
   onUndo: () => void;
@@ -515,6 +515,29 @@ function Sidebar(props: Props) {
             <p className="mt-1.5 text-[10.5px] leading-snug text-zinc-500">
               🆓 {BASEMAPS[s.basemap].license}. {BASEMAPS[s.basemap].attribution}.
             </p>
+            <div className="mt-2">
+              <Toggle
+                icon="⛰️"
+                label="Relevo (luz e sombra do terreno)"
+                checked={s.relevo && relevoDoMapa(s.basemap) !== null}
+                onChange={(v) => update("relevo", v)}
+              />
+              <p className="mt-1 text-[10.5px] leading-snug text-zinc-500">
+                {relevoDoMapa(s.basemap) === null ? (
+                  <>
+                    O mapa <strong className="font-semibold text-zinc-300">Topo</strong> já traz o
+                    relevo nas curvas de nível — não há o que sombrear em cima.
+                  </>
+                ) : s.relevo ? (
+                  <>
+                    A serra aparece pela luz: cada bloco pede duas imagens (o mapa e a sombra), então
+                    o teto de blocos cai pela metade — rotas longas saem num zoom menor.
+                  </>
+                ) : (
+                  <>Luz e sombra do terreno, vistas de cima. Não é 3D: o mapa não inclina.</>
+                )}
+              </p>
+            </div>
           </div>
           <p className="rounded-xl border border-white/10 bg-black/20 p-2.5 text-[11px] leading-snug text-zinc-400">
             Personagem atual: <span className="font-semibold text-white">{character.name}</span>{" "}
@@ -619,7 +642,7 @@ function Sidebar(props: Props) {
               >
                 {blocos.fits
                   ? `≈ ${blocos.needed} blocos de mapa`
-                  : `≈ ${blocos.needed} blocos — acima do limite dos mapas gratuitos (${TILE_BUDGET})`}
+                  : `≈ ${blocos.needed} blocos — acima do limite dos mapas gratuitos (${blocos.limite ?? TILE_BUDGET})`}
               </p>
               {!blocos.fits && (
                 <div className="mt-1.5">

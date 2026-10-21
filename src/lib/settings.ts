@@ -98,7 +98,8 @@ export type Settings = {
    *
    * Soma alguns segundos ao vídeo — o percurso não encurta para caber. Sem
    * hora nem altitude no arquivo sobram largada/chegada; com menos de dois
-   * momentos não há recap.
+   * momentos não há recap. Vem **desligado**: é um acréscimo ao vídeo, e quem
+   * quer a sequência liga no painel.
    */
   recap: boolean;
   /** pedal, corrida ou caminhada — muda a unidade do HUD (km/h ou min/km) */
@@ -243,7 +244,7 @@ export const DEFAULT_SETTINGS: Settings = {
   minimap: true,
   elevationProfile: true,
   highlights: true,
-  recap: true,
+  recap: false,
   activity: "pedal",
   colorBy: "solid",
   showKmMarks: false,

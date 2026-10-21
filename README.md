@@ -720,8 +720,11 @@ Só entra o que o arquivo sustenta:
   recap é a segunda leitura dele, não uma segunda fonte.
 
 Durante o recap o aviso de destaque dá lugar a ele (os dois ocupam o mesmo
-canto, e dizer a mesma coisa duas vezes na mesma tela não ajuda). Desligável em
-**Animação → 🎞️ Melhores momentos no fim**, e viaja no link.
+canto, e dizer a mesma coisa duas vezes na mesma tela não ajuda).
+
+**Facultativo e desligado por padrão:** é um acréscimo ao vídeo, e o vídeo de
+quem não pediu nada continua com o tamanho que o painel promete. Liga em
+**Animação → 🎞️ Melhores momentos no fim**, e o ajuste viaja no link.
 
 ### Relevo: a luz e a sombra do terreno
 

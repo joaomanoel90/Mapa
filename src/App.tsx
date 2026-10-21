@@ -65,8 +65,8 @@ import {
   type Endpoints,
 } from "./lib/endpoints";
 import { findCharacter } from "./lib/characters";
-import { SceneRenderer, tilesForAnimation } from "./lib/renderer";
-import { budgetDeBlocos, maxFollowZoom, planejarCamera, tilesNeeded } from "./lib/map-budget";
+import { SceneRenderer, TILE_BUDGET } from "./lib/renderer";
+import { maxFollowZoom, pedidosNecessarios, planejarCamera } from "./lib/map-budget";
 import { focoDasParadas } from "./lib/pois";
 import { PhotoCache, photoSources } from "./lib/photos";
 import { mapPassages, passageTimes } from "./lib/passages";
@@ -589,16 +589,6 @@ function App() {
   );
 
   /**
-   * O teto de blocos desta configuração.
-   *
-   * Com o relevo ligado cada bloco do mapa custa duas requisições (o mapa e a
-   * sombra), então o teto cai pela metade em **toda** a conta: a sugestão de
-   * zoom, o contador do painel e o plano da gravação têm de usar o mesmo
-   * número — senão o painel diz que cabe e a exportação recusa.
-   */
-  const orcamentoDeBlocos = budgetDeBlocos(settings.relevo);
-
-  /**
    * Maior zoom de acompanhamento que cabe no teto de blocos.
    *
    * Não depende do zoom escolhido — só da rota, do tamanho da tela e do mapa —
@@ -617,23 +607,24 @@ function App() {
       camera,
       cinematic: camera.cinematic,
       foco: focoDoVideo,
-      budget: orcamentoDeBlocos,
+      relevo: settings.relevo,
     });
   }, [
     track,
     aspect,
     settings.basemap,
     settings.cameraMode,
-    orcamentoDeBlocos,
+    settings.relevo,
     cameraDoVideo,
     focoDoVideo,
     pois,
+    settings.relevo,
   ]);
 
   /** Blocos que a câmera escolhida vai precisar — muda a cada passo do controle. */
   const blocos = useMemo(() => {
     const camera = cameraDoVideo(pois);
-    const needed = tilesNeeded({
+    const base = {
       track,
       width: aspect.w,
       height: aspect.h,
@@ -643,12 +634,16 @@ function App() {
       // os blocos que o vídeo vai mesmo usar: com a abertura e as paradas
       cinematic: camera.cinematic,
       foco: focoDoVideo,
-    });
+      relevo: settings.relevo,
+    };
+    const pedidos = pedidosNecessarios(base);
     return {
-      needed,
-      fits: needed <= orcamentoDeBlocos,
-      // o painel mostra o teto que está valendo: com relevo ele é a metade
-      limite: orcamentoDeBlocos,
+      // o teto conta **imagens** (mapa + sombreado), não blocos de mapa
+      needed: pedidos.total,
+      mapa: pedidos.mapa,
+      relevo: pedidos.relevo,
+      fits: pedidos.total <= TILE_BUDGET,
+      limite: TILE_BUDGET,
       // a sugestão só faz sentido quando a câmera é a "Seguir" e a rota não cabe
       sugestao: settings.cameraMode === "follow" ? sugestaoZoom : null,
     };
@@ -1300,7 +1295,7 @@ function App() {
       camera: cameraDoVideo(stops),
       cinematic: cameraDoVideo(stops).cinematic,
       foco: focoDoVideo,
-      budget: orcamentoDeBlocos,
+      relevo: settings.relevo,
     });
     const camera = plano.camera;
 
@@ -1377,25 +1372,35 @@ function App() {
        * único), o erro diz o que fazer — mas agora isso é a exceção, não o
        * caminho de uma travessia.
        */
-      const needed = tilesForAnimation(
+      /*
+       * O teto é de **imagens**, e o relevo entra na conta com o número certo:
+       * o sombreado de quatro blocos do z18 é um só do z16. Contar "blocos × 2"
+       * era o que forçava o zoom para baixo em rota curta.
+       */
+      const pedidosDaGravacao = pedidosNecessarios({
         track,
+        width: aspect.w,
+        height: aspect.h,
+        basemap: settings.basemap,
+        maxZoom: maxZoomFor(settings.basemap),
         camera,
-        aspect.w,
-        aspect.h,
-        settings.basemap,
-        camera.cinematic,
-        focoDoVideo,
-      ).length;
-      if (needed > orcamentoDeBlocos) {
+        cinematic: camera.cinematic,
+        foco: focoDoVideo,
+        relevo: settings.relevo,
+      });
+      if (pedidosDaGravacao.total > TILE_BUDGET) {
         throw new Error(
-          `Esta rota precisaria de ${needed} blocos de mapa — demais para os servidores gratuitos. ` +
+          `Esta rota precisaria de ${pedidosDaGravacao.total} imagens de mapa — demais para os servidores gratuitos. ` +
             "Divida o percurso em trechos menores.",
         );
       }
       if (plano.reduzido) setAvisoRotaGravar(plano.zoom !== null
-        ? `Rota longa: esta rota precisaria de ${plano.blocos} blocos no zoom escolhido. ` +
-          `O vídeo saiu no zoom ${plano.zoom}, que é o que cabe nos servidores gratuitos.`
-        : `Rota longa: nem no zoom mínimo a rota caberia nos blocos dos servidores gratuitos. ` +
+        ? `Rota longa: esta rota precisaria de ${plano.pedidos.total} imagens no zoom escolhido` +
+          (plano.pedidos.relevo > 0
+            ? ` (${plano.pedidos.mapa} do mapa + ${plano.pedidos.relevo} do relevo)`
+            : "") +
+          `. O vídeo saiu no zoom ${plano.zoom}, que é o que cabe nos servidores gratuitos.`
+        : `Rota longa: nem no zoom mínimo a rota caberia nas imagens dos servidores gratuitos. ` +
           "O vídeo saiu com a câmera “Rota toda”.");
       else setAvisoRotaGravar(null);
 
@@ -1607,7 +1612,6 @@ function App() {
     linhaDoTempo,
     passagens,
     musica,
-    orcamentoDeBlocos,
   ]);
 
   /*

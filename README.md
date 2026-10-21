@@ -732,11 +732,18 @@ Ou seja: `multiply` escurece até o plano e `screen` acende até o plano — os 
 borram a informação. `overlay`/`soft-light` são os que sozinhos deixam o plano
 intacto e mudam só o que é encosta.
 
-**O custo é o dobro de requisições por bloco** (o mapa e a sombra do mesmo
-pedaço), e por isso o teto de blocos **cai pela metade** quando o relevo está
-ligado (`budgetDeBlocos`): o número que importa é o de imagens pedidas aos
-servidores gratuitos, e ele continua sendo 1.400. Na prática, uma rota longa sai
-num zoom um pouco menor com relevo do que sem ele — e o painel diz isso.
+**O custo é uma requisição a mais por bloco** (o mapa e a sombra do mesmo
+pedaço) — mas **não o dobro**: até o zoom 16 cada bloco do mapa tem a sua
+sombra, e acima disso quatro blocos do 18 dividem **uma** do 16. O teto conta
+**imagens** (`pedidosDaAnimacao`), e continua sendo 1.400.
+
+A primeira versão dividia o teto por 2 (`budgetDeBlocos`) e tratava todo bloco
+como dois pedidos. Parecia conservador, mas errava justamente onde se nota: com
+relevo ligado, uma rota de **10 km no zoom 17** pedia 831 blocos de mapa + 394
+sombreados = 1.225 imagens — cabia nos 1.400 —, e o app baixava o vídeo para o
+**16,5**. Era isso que o usuário via como "o zoom não fixa" nas rotas menores,
+que são as que usam zoom alto. O contador do painel agora diz quantas imagens
+são, separando mapa e relevo.
 
 Acima do zoom 16 o serviço não tem bloco próprio: o do 16 é recortado no pedaço
 que interessa (`hillshadeBloco`) em vez de pedir um bloco que não existe. Se o

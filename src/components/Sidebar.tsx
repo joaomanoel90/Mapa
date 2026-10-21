@@ -62,8 +62,17 @@ type Props = {
   maxZoom: number;
   /** quanto do traçado tem elevação e hora (0..1) — decide as dicas da cor */
   cobertura: { ele: number; time: number };
-  /** blocos de mapa que a câmera vai precisar (o teto dos servidores gratuitos) */
-  blocos: { needed: number; fits: boolean; sugestao: number | null; limite?: number };
+  /** imagens de mapa que a câmera vai pedir (o teto dos servidores gratuitos) */
+  blocos: {
+    /** total de **imagens** (mapa + sombreado) — é o que o teto conta */
+    needed: number;
+    /** quantas delas são do mapa, e quantas do relevo */
+    mapa?: number;
+    relevo?: number;
+    fits: boolean;
+    sugestao: number | null;
+    limite?: number;
+  };
   /** aplica o zoom sugerido quando a rota não cabe */
   onUseZoom: (z: number) => void;
   onUndo: () => void;
@@ -530,8 +539,9 @@ function Sidebar(props: Props) {
                   </>
                 ) : s.relevo ? (
                   <>
-                    A serra aparece pela luz: cada bloco pede duas imagens (o mapa e a sombra), então
-                    o teto de blocos cai pela metade — rotas longas saem num zoom menor.
+                    A serra aparece pela luz. Cada bloco pede também a sombra do mesmo pedaço — e o
+                    contador abaixo soma as duas. Acima do zoom 16 várias sombras se repetem, então
+                    o relevo custa menos do que o dobro.
                   </>
                 ) : (
                   <>Luz e sombra do terreno, vistas de cima. Não é 3D: o mapa não inclina.</>
@@ -640,9 +650,15 @@ function Sidebar(props: Props) {
                   blocos.fits ? "text-zinc-500" : "font-semibold text-amber-300",
                 )}
               >
-                {blocos.fits
-                  ? `≈ ${blocos.needed} blocos de mapa`
-                  : `≈ ${blocos.needed} blocos — acima do limite dos mapas gratuitos (${blocos.limite ?? TILE_BUDGET})`}
+                {(() => {
+                  const detalhe =
+                    (blocos.relevo ?? 0) > 0
+                      ? ` (${blocos.mapa ?? blocos.needed - (blocos.relevo ?? 0)} do mapa + ${blocos.relevo} do relevo)`
+                      : "";
+                  return blocos.fits
+                    ? `≈ ${blocos.needed} imagens de mapa${detalhe}`
+                    : `≈ ${blocos.needed} imagens${detalhe} — acima do limite dos mapas gratuitos (${blocos.limite ?? TILE_BUDGET})`;
+                })()}
               </p>
               {!blocos.fits && (
                 <div className="mt-1.5">

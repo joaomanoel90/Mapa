@@ -5,7 +5,8 @@ import { TILE_BUDGET } from "./renderer";
 import {
   MIN_FOLLOW_ZOOM,
   budgetAdvice,
-  budgetDeBlocos,
+  pedidosDaAnimacao,
+  pedidosNecessarios,
   maxFollowZoom,
   planejarCamera,
   tilesNeeded,
@@ -246,55 +247,142 @@ describe("o vídeo de uma travessia intercontinental", () => {
 });
 
 /* ------------------------------------------------------------------ */
-/* O relevo custa o dobro de requisições                               */
+/* O relevo no teto: imagens, não "blocos × 2"                         */
 /* ------------------------------------------------------------------ */
 
-describe("teto de blocos com relevo", () => {
-  it("sem relevo, o teto é o de sempre", () => {
-    expect(budgetDeBlocos(false)).toBe(TILE_BUDGET);
-    expect(budgetDeBlocos(false, 1000)).toBe(1000);
+describe("o relevo na conta de pedidos", () => {
+  const camera = (z: number) => ({ mode: "follow" as const, followZoom: z });
+
+  it("sem relevo, cada bloco é um pedido", () => {
+    const refs = [
+      { url: "a", z: 16, x: 1, y: 1 },
+      { url: "b", z: 16, x: 2, y: 1 },
+    ];
+    expect(pedidosDaAnimacao(refs, "dark", false)).toEqual({ mapa: 2, relevo: 0, total: 2 });
+    // e num mapa que já tem relevo próprio (Topo) nada é sombreado
+    expect(pedidosDaAnimacao(refs, "topo", true)).toEqual({ mapa: 2, relevo: 0, total: 2 });
   });
 
-  it("com relevo, cai pela metade — cada bloco pede duas imagens", () => {
-    expect(budgetDeBlocos(true)).toBe(Math.floor(TILE_BUDGET / 2));
-    expect(budgetDeBlocos(true, 1000)).toBe(500);
-    // e o que importa é o número de requisições, que continua o mesmo
-    expect(budgetDeBlocos(true) * 2).toBeLessThanOrEqual(TILE_BUDGET);
+  it("até o zoom 16, cada bloco do mapa tem a sua sombra", () => {
+    const refs = Array.from({ length: 4 }, (_, i) => ({ url: String(i), z: 16, x: i, y: 0 }));
+    expect(pedidosDaAnimacao(refs, "dark", true)).toEqual({ mapa: 4, relevo: 4, total: 8 });
   });
 
-  it("a sugestão de zoom usa o teto que foi passado", () => {
-    const longo = percurso(120);
-    const camera = { mode: "follow" as const, followZoom: 17 };
-    const comTeto = maxFollowZoom({
-      track: buildTrack(longo),
-      ...base,
-      camera,
-      budget: 700,
-    });
-    const semTeto = maxFollowZoom({
-      track: buildTrack(longo),
-      ...base,
-      camera,
-      budget: TILE_BUDGET,
-    });
-    expect(comTeto).not.toBeNull();
-    expect(semTeto).not.toBeNull();
-    // metade dos blocos não pode sugerir um zoom maior
-    expect(comTeto!).toBeLessThanOrEqual(semTeto!);
+  it("no zoom 17, dois blocos do mapa dividem uma sombra", () => {
+    const refs = Array.from({ length: 8 }, (_, i) => ({ url: String(i), z: 17, x: i, y: 0 }));
+    // 8 blocos do mapa; no z16 são 4 pais → 4 sombras
+    expect(pedidosDaAnimacao(refs, "dark", true)).toEqual({ mapa: 8, relevo: 4, total: 12 });
   });
 
-  it("o plano da gravação obedece ao teto de 700", () => {
-    const track = buildTrack(percurso(120));
-    const camera = { mode: "follow" as const, followZoom: 17 };
+  it("no zoom 18, quatro blocos dividem uma sombra", () => {
+    const refs = Array.from({ length: 16 }, (_, i) => ({ url: String(i), z: 18, x: i, y: 0 }));
+    expect(pedidosDaAnimacao(refs, "dark", true)).toEqual({ mapa: 16, relevo: 4, total: 20 });
+  });
+
+  it("o mesmo bloco pedido duas vezes conta uma vez", () => {
+    const refs = [
+      { url: "a", z: 17, x: 10, y: 10 },
+      { url: "b", z: 17, x: 11, y: 10 },
+      { url: "c", z: 17, x: 10, y: 10 },
+    ];
+    // dois pais do z16 para os três blocos
+    expect(pedidosDaAnimacao(refs, "dark", true).relevo).toBe(1);
+    expect(pedidosDaAnimacao(refs, "dark", true).mapa).toBe(3);
+  });
+
+  it("o relevo não reduz o zoom escolhido numa rota curta", () => {
+    // O defeito: com o teto dividido pela metade, 10 km no zoom 17 saíam no
+    // 16,5 — e o usuário via "o zoom não fixa" justamente nas rotas menores,
+    // que são as que usam zoom alto.
+    const track = buildTrack(percurso(10));
     const plano = planejarCamera({
       track,
       ...base,
-      camera,
-      budget: budgetDeBlocos(true),
+      camera: camera(17),
+      cinematic: { opening: true, stops: true, stopTs: [0.5], chegada: true },
+      relevo: true,
     });
-    const precisa = tilesNeeded({ track, ...base, camera: plano.camera });
-    // o plano não é obrigado a caber no zoom pedido, mas tem de caber depois
-    // de ajustado — ou cair para "Rota toda", que é um enquadramento só
-    expect(plano.reduzido ? precisa <= budgetDeBlocos(true) * 1.05 : true).toBe(true);
+    expect(plano.reduzido).toBe(false);
+    expect(plano.camera.followZoom).toBe(17);
+    expect(plano.pedidos.relevo).toBeGreaterThan(0);
+    expect(plano.pedidos.total).toBeLessThanOrEqual(TILE_BUDGET);
+  });
+
+  it("5 km no zoom 18 também mantém o zoom (era reduzido no teto pela metade)", () => {
+    const track = buildTrack(percurso(5));
+    const plano = planejarCamera({
+      track,
+      ...base,
+      camera: camera(18),
+      cinematic: { opening: true, stops: true, stopTs: [0.5], chegada: true },
+      relevo: true,
+    });
+    expect(plano.reduzido).toBe(false);
+    expect(plano.camera.followZoom).toBe(18);
+  });
+
+  it("no zoom 16 a sombra é 1:1 — aí a conta dobra, e a redução é honesta", () => {
+    // Não é o defeito: até o z16 cada bloco do mapa tem a sua própria sombra,
+    // então o relevo custa o dobro de verdade. 20 km no z16 passam de 1.400
+    // imagens com ou sem meia-conta.
+    const track = buildTrack(percurso(20));
+    const plano = planejarCamera({
+      track,
+      ...base,
+      camera: camera(16),
+      cinematic: { opening: true, stops: true, stopTs: [0.5], chegada: true },
+      relevo: true,
+    });
+    expect(plano.pedidos.relevo).toBeGreaterThan(plano.pedidos.mapa * 0.7);
+    expect(plano.reduzido).toBe(true);
+    // e o zoom sugerido cabe de verdade
+    const depois = pedidosNecessarios({
+      track,
+      ...base,
+      camera: plano.camera,
+      cinematic: { opening: true, stops: true, stopTs: [0.5], chegada: true },
+      relevo: true,
+    });
+    expect(depois.total).toBeLessThanOrEqual(TILE_BUDGET);
+  });
+
+  it("quando não cabe, a redução acontece — e o pedido é de verdade", () => {
+    const track = buildTrack(percurso(120));
+    const plano = planejarCamera({
+      track,
+      ...base,
+      camera: camera(17),
+      cinematic: { opening: true, stops: true, stopTs: [0.3, 0.7], chegada: true },
+      relevo: true,
+    });
+    expect(plano.reduzido).toBe(true);
+    const depois = pedidosNecessarios({
+      track,
+      ...base,
+      camera: plano.camera,
+      cinematic: { opening: true, stops: true, stopTs: [0.3, 0.7], chegada: true },
+      relevo: true,
+    });
+    expect(depois.total).toBeLessThanOrEqual(TILE_BUDGET);
+  });
+
+  it("a sugestão de zoom respeita o teto de imagens", () => {
+    const track = buildTrack(percurso(120));
+    const z = maxFollowZoom({
+      track,
+      ...base,
+      camera: camera(17),
+      cinematic: { opening: true, stops: true, stopTs: [0.3, 0.7], chegada: true },
+      relevo: true,
+    });
+    expect(z).not.toBeNull();
+    const p = pedidosNecessarios({
+      track,
+      ...base,
+      camera: { mode: "follow", followZoom: z as number },
+      cinematic: { opening: true, stops: true, stopTs: [0.3, 0.7], chegada: true },
+      relevo: true,
+    });
+    expect(p.total).toBeLessThanOrEqual(TILE_BUDGET);
   });
 });

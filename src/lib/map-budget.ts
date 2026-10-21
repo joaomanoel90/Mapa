@@ -61,6 +61,22 @@ export type BudgetInput = {
   foco?: FocusPoint | null;
 };
 
+/**
+ * O teto de blocos **com o relevo ligado**.
+ *
+ * Com o sombreado, cada bloco do mapa custa **duas** requisições (o mapa e a
+ * sombra do mesmo pedaço), então o teto cai pela metade. Sem isso, uma rota que
+ * cabia nos 1.400 blocos passaria a pedir 2.800 imagens — o dobro do que os
+ * servidores gratuitos aguentam numa gravação, e a exportação sairia com
+ * buracos.
+ *
+ * Metade é a conta certa, não um arredondamento: o número que importa é o de
+ * **requisições**, e ele continua sendo 1.400.
+ */
+export function budgetDeBlocos(relevo: boolean, base = TILE_BUDGET): number {
+  return relevo ? Math.floor(base / 2) : base;
+}
+
 /** Blocos que a câmera escolhida vai precisar. */
 export function tilesNeeded(
   input: BudgetInput & { camera: CameraConfig },

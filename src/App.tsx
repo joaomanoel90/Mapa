@@ -65,8 +65,8 @@ import {
   type Endpoints,
 } from "./lib/endpoints";
 import { findCharacter } from "./lib/characters";
-import { SceneRenderer, tilesForAnimation, TILE_BUDGET } from "./lib/renderer";
-import { maxFollowZoom, planejarCamera, tilesNeeded } from "./lib/map-budget";
+import { SceneRenderer, tilesForAnimation } from "./lib/renderer";
+import { budgetDeBlocos, maxFollowZoom, planejarCamera, tilesNeeded } from "./lib/map-budget";
 import { focoDasParadas } from "./lib/pois";
 import { PhotoCache, photoSources } from "./lib/photos";
 import { mapPassages, passageTimes } from "./lib/passages";
@@ -589,6 +589,16 @@ function App() {
   );
 
   /**
+   * O teto de blocos desta configuração.
+   *
+   * Com o relevo ligado cada bloco do mapa custa duas requisições (o mapa e a
+   * sombra), então o teto cai pela metade em **toda** a conta: a sugestão de
+   * zoom, o contador do painel e o plano da gravação têm de usar o mesmo
+   * número — senão o painel diz que cabe e a exportação recusa.
+   */
+  const orcamentoDeBlocos = budgetDeBlocos(settings.relevo);
+
+  /**
    * Maior zoom de acompanhamento que cabe no teto de blocos.
    *
    * Não depende do zoom escolhido — só da rota, do tamanho da tela e do mapa —
@@ -607,12 +617,14 @@ function App() {
       camera,
       cinematic: camera.cinematic,
       foco: focoDoVideo,
+      budget: orcamentoDeBlocos,
     });
   }, [
     track,
     aspect,
     settings.basemap,
     settings.cameraMode,
+    orcamentoDeBlocos,
     cameraDoVideo,
     focoDoVideo,
     pois,
@@ -634,7 +646,9 @@ function App() {
     });
     return {
       needed,
-      fits: needed <= TILE_BUDGET,
+      fits: needed <= orcamentoDeBlocos,
+      // o painel mostra o teto que está valendo: com relevo ele é a metade
+      limite: orcamentoDeBlocos,
       // a sugestão só faz sentido quando a câmera é a "Seguir" e a rota não cabe
       sugestao: settings.cameraMode === "follow" ? sugestaoZoom : null,
     };
@@ -1209,10 +1223,11 @@ function App() {
     // garante que o modal (e o canvas de render) já estejam montados
     await new Promise((r) => setTimeout(r, 60));
 
-    const renderer = new SceneRenderer(settings.basemap);
+    const renderer = new SceneRenderer(settings.basemap, settings.relevo);
     const style = {
       accent: settings.accent,
       basemap: settings.basemap,
+      relevo: settings.relevo,
       showRoute: settings.showRoute,
       showTraveled: settings.showTraveled,
       showEndpoints: settings.showEndpoints,
@@ -1285,6 +1300,7 @@ function App() {
       camera: cameraDoVideo(stops),
       cinematic: cameraDoVideo(stops).cinematic,
       foco: focoDoVideo,
+      budget: orcamentoDeBlocos,
     });
     const camera = plano.camera;
 
@@ -1370,7 +1386,7 @@ function App() {
         camera.cinematic,
         focoDoVideo,
       ).length;
-      if (needed > TILE_BUDGET) {
+      if (needed > orcamentoDeBlocos) {
         throw new Error(
           `Esta rota precisaria de ${needed} blocos de mapa — demais para os servidores gratuitos. ` +
             "Divida o percurso em trechos menores.",
@@ -1591,6 +1607,7 @@ function App() {
     linhaDoTempo,
     passagens,
     musica,
+    orcamentoDeBlocos,
   ]);
 
   /*
@@ -1775,6 +1792,7 @@ function App() {
               rotate={settings.rotate}
               accent={settings.accent}
               basemap={settings.basemap}
+            relevo={settings.relevo}
               follow={settings.cameraMode === "follow"}
               followZoom={settings.followZoom}
               thirdPerson={settings.thirdPerson}

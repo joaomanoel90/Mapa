@@ -76,8 +76,11 @@ export const BASEMAPS: Record<BasemapId, Basemap> = {
   },
   topo: {
     id: "topo",
-    name: "Relevo",
-    hint: "Trilhas e montanhas",
+    // chamava-se "Relevo" — e aí o interruptor do sombreado (que se chama
+    // Relevo) ficaria com o mesmo nome de um mapa. O mapa é topográfico; o
+    // nome dele é Topo.
+    name: "Topo",
+    hint: "Curvas de nível e trilhas",
     template: "https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png",
     subdomains: ["a", "b", "c"],
     maxZoom: 17,
@@ -108,14 +111,176 @@ export const BASEMAP_ORDER: BasemapId[] = [
   "satellite",
 ];
 
-export function tileUrl(basemap: Basemap, z: number, x: number, y: number): string {
+/** O que basta para montar o endereço de um bloco. */
+export type TileSource = {
+  template: string;
+  subdomains: string[];
+};
+
+/* ------------------------------------------------------------------ */
+/* Relevo: o sombreado do terreno                                      */
+/* ------------------------------------------------------------------ */
+
+/**
+ * O sombreado de relevo do Esri (USGS), sem chave de API.
+ *
+ * É a **sombra** do terreno vista de cima — claro onde a encosta pega sol,
+ * escuro onde ela está virada para o outro lado. Não é um mapa: é uma camada
+ * cinza para ser misturada por baixo (ou por cima) do mapa que já está lá.
+ *
+ * O `{y}` vem **antes** do `{x}` no endereço deste serviço; `tileUrl` troca
+ * pelos nomes, então a ordem do modelo é o que manda.
+ *
+ * O serviço serve até o zoom 16. Acima disso o bloco do relevo é o do 16
+ * recortado (`hillshadeBloco`) — pedir além disso devolve erro.
+ */
+export const HILLSHADE = {
+  template:
+    "https://server.arcgisonline.com/ArcGIS/rest/services/Elevation/World_Hillshade/MapServer/tile/{z}/{y}/{x}",
+  subdomains: [] as string[],
+  maxZoom: 16,
+  attribution: "Esri · World Hillshade (USGS)",
+};
+
+export function hillshadeUrl(z: number, x: number, y: number): string {
+  return tileUrl(HILLSHADE, z, x, y);
+}
+
+/**
+ * O bloco de relevo que cobre o bloco `z/x/y` do mapa — e o recorte dele.
+ *
+ * Em zoom acima de 16 o serviço não tem bloco próprio: o do 16 é desenhado
+ * esticado sobre o pedaço que interessa. `sx/sy/sw/sh` são esse recorte, em
+ * pixels da imagem (256 de lado, dividido por 2 a cada nível acima).
+ */
+export function hillshadeBloco(
+  z: number,
+  x: number,
+  y: number,
+): { url: string; sx: number; sy: number; sw: number; sh: number } {
+  const zRel = Math.min(z, HILLSHADE.maxZoom);
+  const acima = Math.max(0, z - HILLSHADE.maxZoom);
+  const k = Math.pow(2, acima);
+  const px = Math.floor(x / k);
+  const py = Math.floor(y / k);
+  const lado = 256 / k;
+  const dentro = (v: number) => ((v % k) + k) % k;
+  return {
+    url: hillshadeUrl(zRel, px, py),
+    sx: dentro(x) * lado,
+    sy: dentro(y) * lado,
+    sw: lado,
+    sh: lado,
+  };
+}
+
+/** Como o sombreado entra em cada estilo. */
+export type RelevoEstilo = {
+  /**
+   * O modo de mistura do canvas.
+   *
+   * `overlay` e `soft-light` são os certos para um sombreado — e a razão é o
+   * **cinza neutro**: o sombreado do USGS vem em cinza (128 = encosta plana,
+   * 255 = pegando sol, 0 = na sombra), e é justamente no 128 que a mistura
+   * `overlay`/`soft-light` deixa o mapa **como estava**. Assim só a encosta
+   * muda de brilho; o resto do mapa não escurece.
+   *
+   * `multiply` foi a primeira escolha e está errado: encosta plana (128)
+   * também escurece, e o mapa inteiro fica lavado — medido numa base #efe9df,
+   * com alpha 0,55 o chão caía de 234 para 118 de luminância. `screen` erra
+   * para o outro lado: no mapa escuro a encosta iluminada estourava para 152.
+   */
+  modo: "overlay" | "soft-light" | "multiply";
+  /** quanto do sombreado aparece (0..1) */
+  alpha: number;
+};
+
+/**
+ * A mistura de cada mapa.
+ *
+ * O **Escuro** é o que mostra o relevo com mais força: o mapa é quase preto,
+ * então a encosta iluminada é o que desenha a serra (é o mesmo truque dos
+ * mapas noturnos de montanha). Nos claros o `overlay` entra mais de leve — o
+ * mapa já tem contraste de sobra.
+ *
+ * O **Satélite** usa `soft-light`: as cores da imagem são o assunto, e o
+ * `overlay` puxaria o verde da mata para tons irreais.
+ *
+ * O **Topo** (OpenTopoMap) já vem com curvas de nível e sombreado próprios:
+ * sombrear de novo só escureceria o mapa.
+ */
+export const RELEVO_DO_MAPA: Record<BasemapId, RelevoEstilo | null> = {
+  dark: { modo: "overlay", alpha: 0.7 },
+  light: { modo: "multiply", alpha: 0.4 },
+  osm: { modo: "multiply", alpha: 0.4 },
+  cyclosm: { modo: "multiply", alpha: 0.4 },
+  satellite: { modo: "soft-light", alpha: 0.7 },
+  topo: null,
+};
+
+/** O estilo deste mapa aceita relevo? (`null` = o mapa já tem o seu) */
+export function relevoDoMapa(basemap: BasemapId): RelevoEstilo | null {
+  return RELEVO_DO_MAPA[basemap] ?? null;
+}
+
+/**
+ * Desenha o sombreado por cima do bloco já filtrado, numa imagem só.
+ *
+ * Por que juntar os dois numa imagem em vez de desenhar duas camadas no vídeo:
+ * assim o bloco continua sendo **um** objeto no cache e no desenho — a
+ * gravação, o congelamento de blocos e o aquecimento não precisam saber que
+ * existe uma segunda imagem. O custo é uma requisição a mais por bloco, e é
+ * por isso que o teto de blocos cai pela metade quando o relevo está ligado
+ * (`budgetDeBlocos`).
+ */
+export async function comporRelevo(
+  base: TileImage,
+  sombra: TileImage,
+  estilo: RelevoEstilo,
+  recorte?: { sx: number; sy: number; sw: number; sh: number },
+): Promise<TileImage> {
+  const w = Math.max(1, Number(base.width) || 256);
+  const h = Math.max(1, Number(base.height) || 256);
+  try {
+    const c = document.createElement("canvas");
+    c.width = w;
+    c.height = h;
+    const ctx = c.getContext("2d");
+    if (!ctx) return base;
+    ctx.drawImage(base as CanvasImageSource, 0, 0, w, h);
+    ctx.globalAlpha = Math.max(0, Math.min(1, estilo.alpha));
+    ctx.globalCompositeOperation = estilo.modo;
+    if (recorte) {
+      ctx.drawImage(
+        sombra as CanvasImageSource,
+        recorte.sx,
+        recorte.sy,
+        recorte.sw,
+        recorte.sh,
+        0,
+        0,
+        w,
+        h,
+      );
+    } else {
+      ctx.drawImage(sombra as CanvasImageSource, 0, 0, w, h);
+    }
+    return (await createImageBitmap(c)) as TileImage;
+  } catch {
+    // sem `createImageBitmap` (ou canvas bloqueado): o mapa sai sem o relevo,
+    // nunca sem o mapa
+    return base;
+  }
+}
+
+export function tileUrl(source: TileSource, z: number, x: number, y: number): string {
   const n = Math.pow(2, z);
   const wx = ((x % n) + n) % n;
   const sub =
-    basemap.subdomains.length > 0
-      ? basemap.subdomains[(wx + y) % basemap.subdomains.length]
+    source.subdomains.length > 0
+      ? source.subdomains[(wx + y) % source.subdomains.length]
       : "";
-  return basemap.template
+  return source.template
     .replace("{s}", sub)
     .replace("{z}", String(z))
     .replace("{x}", String(wx))

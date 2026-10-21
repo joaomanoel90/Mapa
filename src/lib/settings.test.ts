@@ -168,6 +168,14 @@ describe("sanitizeSettings", () => {
     expect(sanitizeSettings(raw({ logoChip: "sim" })).logoChip).toBeUndefined();
   });
 
+  it("o relevo nasce desligado e só aceita booleano", () => {
+    // ligado por padrão, ele dobraria as requisições de mapa de quem nunca
+    // pediu sombreado
+    expect(DEFAULT_SETTINGS.relevo).toBe(false);
+    expect(sanitizeSettings(raw({ relevo: true })).relevo).toBe(true);
+    expect(sanitizeSettings(raw({ relevo: "sim" })).relevo).toBeUndefined();
+  });
+
   it("o som nasce ligado: os pops são gerados, não licenciados", () => {
     expect(DEFAULT_SETTINGS.som).toBe(true);
     expect(sanitizeSettings(raw({ som: false })).som).toBe(false);

@@ -342,6 +342,18 @@ describe("sharedSettingsOverrides", () => {
     expect(r?.pois[0].t).toBeCloseTo(0.4, 3);
   });
 
+  it("o relevo viaja no link: quem abre vê o mesmo mapa", () => {
+    const url = buildShareUrl(base({ settings: { ...DEFAULT_SETTINGS, relevo: true } }));
+    expect(decodeShare(url)?.settings.relevo).toBe(true);
+    // e sem relevo a chave nem entra no link (o padrão fica de fora); quem
+    // recebe fica com o padrão, que também é desligado
+    const json = JSON.parse(
+      atob(payloadOf(buildShareUrl(base())).split(".")[1].replace(/-/g, "+").replace(/_/g, "/")),
+    );
+    expect(json.s?.relevo).toBeUndefined();
+    expect(decodeShare(buildShareUrl(base()))?.settings.relevo).toBe(false);
+  });
+
   it("som e volume da música vão no link (o arquivo de música não)", () => {
     // o som é parte da cena: quem abre o link vê — e ouve — os pops do mesmo
     // jeito. A música é um arquivo de quem compartilha, e fica em casa.

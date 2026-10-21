@@ -2,8 +2,13 @@ import { describe, expect, it } from "vitest";
 import {
   BASEMAP_ORDER,
   BASEMAPS,
+  HILLSHADE,
+  RELEVO_DO_MAPA,
   emPixelInteiro,
+  hillshadeBloco,
+  hillshadeUrl,
   pontoEmPixelInteiro,
+  relevoDoMapa,
   tileUrl,
   type Basemap,
 } from "./tiles";
@@ -149,5 +154,75 @@ describe("a grade de pixels", () => {
       p2 = emPixelInteiro(alvo, dpr);
       expect(Math.abs(p2 - alvo)).toBeLessThanOrEqual(0.25);
     }
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* Relevo                                                              */
+/* ------------------------------------------------------------------ */
+
+describe("o sombreado do relevo", () => {
+  it("usa {z}/{y}/{x}, como o serviço do Esri pede", () => {
+    expect(hillshadeUrl(5, 3, 7)).toContain("/tile/5/7/3");
+    expect(hillshadeUrl(5, 3, 7)).toContain("World_Hillshade");
+  });
+
+  it("até o zoom 16, o bloco é ele mesmo (sem recorte)", () => {
+    const b = hillshadeBloco(12, 100, 200);
+    expect(b.url).toContain("/tile/12/200/100");
+    expect(b).toMatchObject({ sx: 0, sy: 0, sw: 256, sh: 256 });
+  });
+
+  it("acima do 16, recorta o bloco do 16 — o serviço não tem além disso", () => {
+    const z = 18;
+    const x = 4 * 137 + 3; // 3º filho de 4 do pai 137
+    const y = 4 * 250 + 1;
+    const b = hillshadeBloco(z, x, y);
+    expect(b.url).toContain("/tile/16/250/137");
+    // um quarto do bloco do 16, no quadrante certo
+    expect(b.sw).toBe(64);
+    expect(b.sh).toBe(64);
+    expect(b.sx).toBe(3 * 64);
+    expect(b.sy).toBe(1 * 64);
+  });
+
+  it("em zoom 19, o pedaço é um oitavo do bloco do 16", () => {
+    const b = hillshadeBloco(19, 8 * 9 + 7, 8 * 4 + 2);
+    expect(b.url).toContain("/tile/16/4/9");
+    expect(b.sw).toBe(32);
+    expect(b.sx).toBe(7 * 32);
+    expect(b.sy).toBe(2 * 32);
+  });
+
+  it("cada mistura é uma escolha medida, não a primeira que veio", () => {
+    // `overlay`/`soft-light` preservam o cinza neutro (a encosta plana não muda
+    // o mapa); `multiply` é usado só nos claros, e a 40% — o bastante para a
+    // encosta aparecer sem lavar o mapa inteiro
+    for (const id of BASEMAP_ORDER) {
+      const e = relevoDoMapa(id);
+      if (!e) continue;
+      expect(["overlay", "soft-light", "multiply"]).toContain(e.modo);
+      if (e.modo === "multiply") expect(e.alpha).toBeLessThanOrEqual(0.45);
+    }
+    // `screen` foi medido e recusado: no mapa escuro estourava o relevo
+    expect(BASEMAP_ORDER.map((id) => relevoDoMapa(id)?.modo)).not.toContain("screen");
+  });
+
+  it("o Escuro é o que mais mostra o relevo", () => {
+    expect(relevoDoMapa("dark")?.alpha).toBeGreaterThan(relevoDoMapa("light")!.alpha);
+    expect(relevoDoMapa("dark")?.modo).toBe("overlay");
+    // satélite usa soft-light: o overlay puxaria o verde da mata para irreal
+    expect(relevoDoMapa("satellite")?.modo).toBe("soft-light");
+  });
+
+  it("o Topo já tem relevo: sombrear de novo só escureceria", () => {
+    expect(relevoDoMapa("topo")).toBeNull();
+  });
+
+  it("todo mapa tem uma resposta (nada de buraco no registro)", () => {
+    for (const id of BASEMAP_ORDER) {
+      expect(RELEVO_DO_MAPA[id] !== undefined).toBe(true);
+    }
+    expect(HILLSHADE.maxZoom).toBe(16);
   });
 });

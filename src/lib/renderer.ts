@@ -3,6 +3,9 @@ import { focoDasParadas, poiLatLng, type Poi } from "./pois";
 import { hasMark, type Endpoints } from "./endpoints";
 import {
   BASEMAPS,
+  comporRelevo,
+  hillshadeBloco,
+  relevoDoMapa,
   tileUrl,
   loadTile,
   filterTile,
@@ -71,6 +74,14 @@ export type CameraConfig = {
 export type SceneStyle = {
   accent: string;
   basemap: BasemapId;
+  /**
+   * Sombreado do relevo por baixo da rota (ver `RELEVO_DO_MAPA`).
+   *
+   * Não é 3D: é a luz e a sombra do terreno vistas de cima, misturadas no
+   * próprio bloco do mapa. Onde o mapa já traz o seu (OpenTopoMap), não muda
+   * nada.
+   */
+  relevo?: boolean;
   showRoute: boolean;
   showTraveled: boolean;
   showEndpoints: boolean;
@@ -221,10 +232,19 @@ export class TileStore {
   private imgs = new Map<string, TileImage | null>();
   private pending = new Set<string>();
 
-  constructor(public basemap: BasemapId) {}
+  /**
+   * O relevo entra **no mesmo bloco** do mapa (ver `comporRelevo`), mas o cache
+   * é separado: o bloco com sombreado não serve para o mapa sem ele. A chave
+   * carrega o `+r` para os dois mundos não se misturarem ao ligar e desligar o
+   * interruptor.
+   */
+  constructor(
+    public basemap: BasemapId,
+    public relevo = false,
+  ) {}
 
   key(z: number, x: number, y: number) {
-    return `${this.basemap}/${z}/${x}/${y}`;
+    return `${this.basemap}${this.relevo ? "+r" : ""}/${z}/${x}/${y}`;
   }
 
   put(z: number, x: number, y: number, img: TileImage | null) {
@@ -240,12 +260,24 @@ export class TileStore {
     return this.imgs.has(this.key(z, x, y));
   }
 
-  /** baixa + aplica o filtro do estilo uma única vez */
+  /** baixa + aplica o filtro do estilo uma única vez (e o relevo, se ligado) */
   async fetchTile(z: number, x: number, y: number): Promise<TileImage | null> {
     const bm = BASEMAPS[this.basemap];
     const raw = await loadTile(tileUrl(bm, z, x, y));
     if (!raw) return null;
-    return filterTile(raw, bm.filter);
+    const filtrado = await filterTile(raw, bm.filter);
+
+    /*
+     * O sombreado é **opcional**: servidor fora do ar, bloco que não existe ou
+     * canvas sem `createImageBitmap` devolvem o mapa sem relevo. Perder a
+     * sombra é ruim; perder o mapa no meio do vídeo não pode acontecer.
+     */
+    const estilo = this.relevo ? relevoDoMapa(this.basemap) : null;
+    if (!estilo) return filtrado;
+    const bloco = hillshadeBloco(z, x, y);
+    const sombra = await loadTile(bloco.url);
+    if (!sombra) return filtrado;
+    return comporRelevo(filtrado, sombra, estilo, bloco);
   }
 
   request(z: number, x: number, y: number) {
@@ -972,8 +1004,11 @@ export class SceneRenderer {
   private px = new Float64Array(0);
   private py = new Float64Array(0);
 
-  constructor(basemap: BasemapId) {
-    this.store = new TileStore(basemap);
+  constructor(
+    basemap: BasemapId,
+    relevo = false,
+  ) {
+    this.store = new TileStore(basemap, relevo);
   }
 
   get tiles() {
@@ -1004,7 +1039,19 @@ export class SceneRenderer {
 
   setBasemap(basemap: BasemapId) {
     if (this.store.basemap === basemap) return;
-    this.store = new TileStore(basemap);
+    this.store = new TileStore(basemap, this.store.relevo);
+  }
+
+  /**
+   * Liga/desliga o sombreado do relevo — e **descarta** o cache quando muda.
+   *
+   * Sem descartar, metade do vídeo sairia com relevo (os blocos já baixados
+   * com ele) e metade sem. Numa rota com relevo ligado os blocos são outros, e
+   * o aquecimento vai baixá-los antes de gravar.
+   */
+  setRelevo(ligado: boolean) {
+    if (this.store.relevo === ligado) return;
+    this.store = new TileStore(this.store.basemap, ligado);
   }
 
   /**
@@ -2104,11 +2151,19 @@ export class SceneRenderer {
      * do perfil. Antes ela ficava por cima do canto direito do gráfico — o
      * crédito ilegível e a linha do relevo cortada.
      */
+    /*
+     * Com o relevo ligado entram **duas** licenças no crédito: a do mapa e a do
+     * sombreado. Um crédito só deixaria a fonte do terreno sem citar.
+     */
+    const credito =
+      this.store.relevo && relevoDoMapa(style.basemap) !== null
+        ? `${bm.attribution} · Esri Hillshade`
+        : bm.attribution;
     drawAttribution(
       ctx,
       width,
       height,
-      bm.attribution,
+      credito,
       style.showProgress,
       sf,
       /*

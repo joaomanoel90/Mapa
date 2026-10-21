@@ -236,6 +236,7 @@ exatamente o cenário do `jsdom` e o dos navegadores que falhavam.
 | Serviço | Para quê | Limite |
 |---|---|---|
 | OpenStreetMap, CyclOSM, OpenTopoMap, Esri | Mapas | Uso moderado (política de *fair use*) |
+| Esri World Hillshade (USGS) | Sombreado do relevo | Mesma origem dos mapas Esri |
 | OSRM (`routing.openstreetmap.de`) | Traçado das rotas e encaixe nas ruas | Demonstração pública |
 | Nominatim | Busca de cidades | ~1 requisição por segundo |
 
@@ -247,7 +248,8 @@ trocar as URLs em `src/lib/tiles.ts` e `src/lib/routing.ts`.
 ### Créditos obrigatórios
 
 As licenças (ODbL, CC-BY-SA) exigem atribuição. O app **já desenha o crédito automaticamente**
-no canto do mapa e dentro do vídeo exportado — não remova.
+no canto do mapa e dentro do vídeo exportado — não remova. Com o relevo ligado, o crédito cita as
+duas fontes: a do mapa e a do sombreado (`© OpenStreetMap · Esri Hillshade`).
 
 ---
 
@@ -693,6 +695,56 @@ primeiro aparece. Mais perto que isso, a permanência de cada um é encurtada pa
 ceder a vez ao seguinte — eles nunca se sobrepõem.
 
 Desligável em "🏅 Destaques do percurso" e viaja no link.
+
+### Relevo: a luz e a sombra do terreno
+
+Um interruptor **⛰️ Relevo (luz e sombra do terreno)** no painel do mapa põe o
+sombreado do terreno (Esri/USGS, sem chave) por cima de qualquer estilo. Não é
+3D: o mapa continua visto de cima, mas a serra aparece pela luz — a encosta que
+pega sol fica clara, a que está virada para o outro lado fica escura.
+
+O sombreado **não é uma segunda camada no desenho**: ele é misturado no próprio
+bloco do mapa, antes de o bloco entrar no cache (`comporRelevo`). Assim a
+gravação, o congelamento de blocos e o aquecimento não precisam saber que existe
+uma imagem a mais — o vídeo continua pedindo "o bloco 14/5123/9876" e recebe o
+mapa já sombreado.
+
+| mapa | mistura | por quê |
+|---|---|---|
+| Escuro | `overlay`, 70% | é o que mais mostra o relevo: sobre quase-preto, a encosta iluminada é o que desenha a serra |
+| Clean / Padrão / Ciclo | `multiply`, 40% | sombra clássica; 40% é o ponto em que a encosta aparece sem lavar o mapa |
+| Satélite | `soft-light`, 70% | o `overlay` puxaria o verde da mata para um tom irreal |
+| Topo | — | o OpenTopoMap já traz curvas de nível e sombreado próprios |
+
+A escolha do modo tem um motivo medido, e ele é o **cinza neutro**. O sombreado
+do USGS vem em cinza: 128 é encosta plana, 255 é encosta pegando sol, 0 é
+sombra. É justamente no 128 que `overlay` e `soft-light` deixam o mapa **como
+estava** — só a encosta muda de brilho. As duas primeiras tentativas erraram
+nisso, e as duas foram descartadas por medida, não por gosto:
+
+| mistura | base clara (#f2ede4) | base escura (#141a22) |
+|---|---|---|
+| `multiply` 55% | luminância média cai de 239 para **201** — o mapa lava | 27 → 23, e o relevo quase não aparece |
+| `screen` 30% | 239 → 244, quase nada | 27 → **82**: a encosta iluminada estoura |
+| `overlay` 70% | 239 → 243 | 27 → 34, com a serra legível |
+
+Ou seja: `multiply` escurece até o plano e `screen` acende até o plano — os dois
+borram a informação. `overlay`/`soft-light` são os que sozinhos deixam o plano
+intacto e mudam só o que é encosta.
+
+**O custo é o dobro de requisições por bloco** (o mapa e a sombra do mesmo
+pedaço), e por isso o teto de blocos **cai pela metade** quando o relevo está
+ligado (`budgetDeBlocos`): o número que importa é o de imagens pedidas aos
+servidores gratuitos, e ele continua sendo 1.400. Na prática, uma rota longa sai
+num zoom um pouco menor com relevo do que sem ele — e o painel diz isso.
+
+Acima do zoom 16 o serviço não tem bloco próprio: o do 16 é recortado no pedaço
+que interessa (`hillshadeBloco`) em vez de pedir um bloco que não existe. Se o
+sombreado não chegar (servidor fora do ar, bloqueio de rede), o bloco sai **sem**
+o relevo — perder a sombra é ruim, perder o mapa no meio do vídeo não pode.
+
+O mapa que antes se chamava "Relevo" (OpenTopoMap) agora se chama **Topo**: o
+nome "Relevo" ficou para o sombreado.
 
 ### Rota colorida (velocidade ou inclinação)
 
@@ -1299,7 +1351,7 @@ ou cortados.
 
 ```bash
 npm run typecheck  # tsc --noEmit
-npm test           # Vitest (944 casos)
+npm test           # Vitest (967 casos)
 npm run check:dist # o build saiu autocontido e sem /src/?
 ```
 

@@ -21,6 +21,7 @@ import { profileLayout, trailProfile } from "./profile";
 import { findCharacter, gaitOf } from "./characters";
 import {
   SceneRenderer,
+  TileStore,
   PINO_CRESCE_S,
   SANGRIA_PX,
   TILE_BUDGET,
@@ -4567,5 +4568,61 @@ describe("a distância aparece num lugar só", () => {
       trackSubida,
     );
     expect(textos.some((t) => /\d\/\d paradas/.test(t))).toBe(true);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* Relevo no armazém de blocos                                         */
+/* ------------------------------------------------------------------ */
+
+describe("o relevo no armazém de blocos", () => {
+  it("o bloco com sombreado não se confunde com o bloco limpo", () => {
+    const limpo = new TileStore("dark", false);
+    const sombreado = new TileStore("dark", true);
+    expect(limpo.key(12, 3, 4)).toBe("dark/12/3/4");
+    expect(sombreado.key(12, 3, 4)).toBe("dark+r/12/3/4");
+    // ligar e desligar não reaproveita imagem errada do cache
+    expect(limpo.key(12, 3, 4)).not.toBe(sombreado.key(12, 3, 4));
+  });
+
+  it("ligar o relevo troca o armazém e mantém o mapa", () => {
+    const r = new SceneRenderer("osm");
+    expect(r.tiles.relevo).toBe(false);
+    r.setRelevo(true);
+    expect(r.tiles.relevo).toBe(true);
+    expect(r.tiles.basemap).toBe("osm");
+    // ligar de novo não joga fora o que já foi baixado
+    const mesmo = r.tiles;
+    r.setRelevo(true);
+    expect(r.tiles).toBe(mesmo);
+  });
+
+  it("o crédito do vídeo cita a fonte do sombreado", () => {
+    // com relevo entram duas licenças: a do mapa e a do terreno
+    const comOsm = { ...estado(0.5, 14, null), style: { ...style, basemap: "osm" as const } };
+    const sem = fakeCtx();
+    new SceneRenderer("osm", false).render(sem.ctx, 1280, 720, comOsm);
+    expect(sem.textos.some((t) => t.includes("Esri Hillshade"))).toBe(false);
+
+    const com = fakeCtx();
+    new SceneRenderer("osm", true).render(com.ctx, 1280, 720, comOsm);
+    expect(com.textos.some((t) => t.includes("© OpenStreetMap"))).toBe(true);
+    expect(com.textos.some((t) => t.includes("Esri Hillshade"))).toBe(true);
+  });
+
+  it("no mapa Topo o crédito não ganha uma fonte que não foi usada", () => {
+    const { ctx, textos } = fakeCtx();
+    const comTopo = { ...estado(0.5, 14, null), style: { ...style, basemap: "topo" as const } };
+    new SceneRenderer("topo", true).render(ctx, 1280, 720, comTopo);
+    expect(textos.some((t) => t.includes("Esri Hillshade"))).toBe(false);
+    expect(textos.some((t) => t.includes("OpenTopoMap"))).toBe(true);
+  });
+
+  it("trocar o mapa preserva o relevo ligado", () => {
+    const r = new SceneRenderer("osm", true);
+    r.setBasemap("light");
+    expect(r.tiles.basemap).toBe("light");
+    expect(r.tiles.relevo).toBe(true);
+    expect(r.tiles.loadedCount).toBe(0);
   });
 });

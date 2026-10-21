@@ -37,7 +37,7 @@ function Painel({
 }: {
   inicial?: Partial<Settings>;
   cobertura?: { ele: number; time: number };
-  blocos?: { needed: number; fits: boolean; sugestao: number | null };
+  blocos?: { needed: number; fits: boolean; sugestao: number | null; limite?: number };
   avisoSalvar?: string | null;
   /** `null` = o navegador suporta o ⚡; texto = motivo de não suportar */
   avisoRapido?: string | null;
@@ -510,5 +510,47 @@ describe("painel: som do vídeo", () => {
   it("a música vale só nesta sessão — o painel diz isso", () => {
     montar(<Painel />);
     expect(container.textContent ?? "").toContain("não fica salva");
+  });
+});
+
+describe("painel: relevo", () => {
+  /*
+   * O sombreado custa duas requisições por bloco, então ligá-lo muda o teto de
+   * blocos — o painel precisa dizer isso antes, e não depois de a exportação
+   * recusar a rota.
+   */
+  it("oferece o interruptor desligado, com o que ele faz", () => {
+    montar(<Painel />);
+    const texto = container.textContent ?? "";
+    expect(texto).toContain("Relevo (luz e sombra do terreno)");
+    expect(texto).toContain("Não é 3D");
+  });
+
+  it("ligado, avisa que o teto de blocos cai pela metade", () => {
+    montar(<Painel inicial={{ relevo: true }} />);
+    expect(container.textContent ?? "").toContain("duas imagens");
+    expect(container.textContent ?? "").toContain("metade");
+  });
+
+  it("o contador mostra o teto que está valendo (700 com relevo)", () => {
+    montar(
+      <Painel
+        inicial={{ relevo: true }}
+        blocos={{ needed: 900, fits: false, sugestao: 15, limite: 700 }}
+      />,
+    );
+    const texto = container.textContent ?? "";
+    expect(texto).toContain("900");
+    expect(texto).toContain("(700)");
+    // e oferece o zoom que cabe
+    expect(texto).toContain("Usar zoom 15");
+  });
+
+  it("no mapa Topo não há o que sombrear — e o painel explica", () => {
+    montar(<Painel inicial={{ basemap: "topo", relevo: true }} />);
+    expect(container.textContent ?? "").toContain("já traz o relevo");
+    // e o interruptor aparece desligado: o vídeo não vai sombrear nada
+    const toggle = botao("Relevo (luz e sombra do terreno)");
+    expect(toggle.getAttribute("aria-checked")).toBe("false");
   });
 });

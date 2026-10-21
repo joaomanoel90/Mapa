@@ -37,7 +37,14 @@ function Painel({
 }: {
   inicial?: Partial<Settings>;
   cobertura?: { ele: number; time: number };
-  blocos?: { needed: number; fits: boolean; sugestao: number | null; limite?: number };
+  blocos?: {
+    needed: number;
+    mapa?: number;
+    relevo?: number;
+    fits: boolean;
+    sugestao: number | null;
+    limite?: number;
+  };
   avisoSalvar?: string | null;
   /** `null` = o navegador suporta o ⚡; texto = motivo de não suportar */
   avisoRapido?: string | null;
@@ -191,15 +198,15 @@ describe("painel: marcas de km e câmera cinematográfica", () => {
     expect(botao("Câmera cinematográfica").getAttribute("aria-checked")).toBe("true");
   });
 
-  it("mostra quantos blocos de mapa a rota precisa", () => {
+  it("mostra quantas imagens de mapa a rota precisa", () => {
     montar(<Painel blocos={{ needed: 924, fits: true, sugestao: null }} />);
-    expect(container.textContent ?? "").toContain("≈ 924 blocos de mapa");
+    expect(container.textContent ?? "").toContain("≈ 924 imagens de mapa");
   });
 
   it("avisa e oferece o zoom que cabe quando a rota é longa demais", () => {
     montar(<Painel blocos={{ needed: 7237, fits: false, sugestao: 13.5 }} />);
     const texto = container.textContent ?? "";
-    expect(texto).toContain("7237 blocos");
+    expect(texto).toContain("7237 imagens");
     expect(texto).toContain("acima do limite");
     clicar(botao("Usar zoom"));
     // o botão aplica o zoom no mesmo estado que alimenta o controle
@@ -526,23 +533,37 @@ describe("painel: relevo", () => {
     expect(texto).toContain("Não é 3D");
   });
 
-  it("ligado, avisa que o teto de blocos cai pela metade", () => {
+  it("ligado, avisa que cada bloco pede também a sombra — e que o contador soma as duas", () => {
     montar(<Painel inicial={{ relevo: true }} />);
-    expect(container.textContent ?? "").toContain("duas imagens");
-    expect(container.textContent ?? "").toContain("metade");
+    const texto = container.textContent ?? "";
+    expect(texto).toContain("sombra do mesmo pedaço");
+    expect(texto).toContain("contador abaixo soma as duas");
+    // e o número não é "o dobro": acima do z16 as sombras se repetem
+    expect(texto).toContain("menos do que o dobro");
   });
 
-  it("o contador mostra o teto que está valendo (700 com relevo)", () => {
+  it("o contador mostra imagens e separa mapa de relevo", () => {
     montar(
       <Painel
         inicial={{ relevo: true }}
-        blocos={{ needed: 900, fits: false, sugestao: 15, limite: 700 }}
+        blocos={{ needed: 1225, mapa: 831, relevo: 394, fits: true, sugestao: null, limite: 1400 }}
       />,
     );
     const texto = container.textContent ?? "";
-    expect(texto).toContain("900");
-    expect(texto).toContain("(700)");
-    // e oferece o zoom que cabe
+    expect(texto).toContain("1225 imagens");
+    expect(texto).toContain("831 do mapa + 394 do relevo");
+  });
+
+  it("acima do teto, diz o limite e oferece o zoom que cabe", () => {
+    montar(
+      <Painel
+        inicial={{ relevo: true }}
+        blocos={{ needed: 1604, mapa: 874, relevo: 730, fits: false, sugestao: 15, limite: 1400 }}
+      />,
+    );
+    const texto = container.textContent ?? "";
+    expect(texto).toContain("1604 imagens");
+    expect(texto).toContain("(1400)");
     expect(texto).toContain("Usar zoom 15");
   });
 

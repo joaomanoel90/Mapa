@@ -1,5 +1,5 @@
 /**
- * Orçamento de blocos de mapa: quantos a rota precisa, e qual zoom cabe.
+ * Orçamento do mapa: quantas imagens a rota pede, e qual zoom cabe.
  *
  * O problema que este arquivo resolve tem número: a câmera "Seguir" no zoom 16
  * mostra ~2,4 km de largura, então o app precisa de um bloco a cada ~1,4 km de
@@ -24,7 +24,7 @@
  */
 
 import type { Track } from "./geo";
-import type { BasemapId } from "./tiles";
+import { hillshadeBloco, relevoDoMapa, type BasemapId } from "./tiles";
 import {
   TILE_BUDGET,
   tilesForAnimation,
@@ -59,38 +59,68 @@ export type BudgetInput = {
    * — a mesma função que o desenho usa tem de entrar aqui.
    */
   foco?: FocusPoint | null;
+  /**
+   * O sombreado do relevo está ligado?
+   *
+   * Ele custa pedidos extras — mas **não o dobro**, e é essa diferença que
+   * mantém o zoom escolhido. Acima do zoom 16 o relevo não tem bloco próprio:
+   * quatro blocos do 18 compartilham **um** do 16 (ver `hillshadeBloco`), então
+   * a conta certa é a de **URLs únicas**, não a de blocos × 2.
+   */
+  relevo?: boolean;
+};
+
+/** Os blocos de mapa que a animação inteira desenha. */
+function refsDaAnimacao(input: BudgetInput & { camera: CameraConfig }) {
+  return tilesForAnimation(
+    input.track,
+    input.camera,
+    input.width,
+    input.height,
+    input.basemap,
+    input.cinematic,
+    input.foco,
+  );
+}
+
+export type Pedidos = {
+  /** blocos do mapa */
+  mapa: number;
+  /** blocos do sombreado (cada um contado uma vez: um do z16 serve a quatro do z18) */
+  relevo: number;
+  /** o que os servidores gratuitos efetivamente recebem */
+  total: number;
 };
 
 /**
- * O teto de blocos **com o relevo ligado**.
+ * Quantas **imagens** a animação pede, separando mapa e relevo.
  *
- * Com o sombreado, cada bloco do mapa custa **duas** requisições (o mapa e a
- * sombra do mesmo pedaço), então o teto cai pela metade. Sem isso, uma rota que
- * cabia nos 1.400 blocos passaria a pedir 2.800 imagens — o dobro do que os
- * servidores gratuitos aguentam numa gravação, e a exportação sairia com
- * buracos.
- *
- * Metade é a conta certa, não um arredondamento: o número que importa é o de
- * **requisições**, e ele continua sendo 1.400.
+ * É o número que vale para o teto. Com o relevo ligado, cada bloco do mapa pede
+ * também a sombra do mesmo pedaço — mas as sombras **se repetem** acima do zoom
+ * 16. Contar "blocos × 2" foi o erro da primeira versão: numa rota de 10 km no
+ * zoom 17 a conta real é ~1,5×, e o teto dividido por 2 fazia o vídeo sair num
+ * zoom menor que o escolhido (no 16,5 em vez do 17).
  */
-export function budgetDeBlocos(relevo: boolean, base = TILE_BUDGET): number {
-  return relevo ? Math.floor(base / 2) : base;
+export function pedidosDaAnimacao(
+  refs: { url: string; z: number; x: number; y: number }[],
+  basemap: BasemapId,
+  relevo: boolean,
+): Pedidos {
+  const mapa = refs.length;
+  if (!relevo || !relevoDoMapa(basemap)) return { mapa, relevo: 0, total: mapa };
+  const urls = new Set<string>();
+  for (const r of refs) urls.add(hillshadeBloco(r.z, r.x, r.y).url);
+  return { mapa, relevo: urls.size, total: mapa + urls.size };
 }
 
-/** Blocos que a câmera escolhida vai precisar. */
-export function tilesNeeded(
-  input: BudgetInput & { camera: CameraConfig },
-): number {
-  const { camera, ...resto } = input;
-  return tilesForAnimation(
-    resto.track,
-    camera,
-    resto.width,
-    resto.height,
-    resto.basemap,
-    resto.cinematic,
-    resto.foco,
-  ).length;
+/** Os pedidos da câmera escolhida (mapa + sombreado). */
+export function pedidosNecessarios(input: BudgetInput & { camera: CameraConfig }): Pedidos {
+  return pedidosDaAnimacao(refsDaAnimacao(input), input.basemap, !!input.relevo);
+}
+
+/** Blocos **do mapa** que a câmera escolhida vai precisar. */
+export function tilesNeeded(input: BudgetInput & { camera: CameraConfig }): number {
+  return refsDaAnimacao(input).length;
 }
 
 /**
@@ -124,13 +154,13 @@ export function maxFollowZoom(
   if (opcoes.length === 0) return null;
 
   const cabe = (zoom: number) =>
-    tilesNeeded({
+    pedidosNecessarios({
       ...input,
       // a busca mexe só no zoom: o resto da câmera (a terceira pessoa, o giro)
       // continua o que o painel mandou — senão a sugestão valeria para outra
       // câmera e o vídeo estouraria o teto
       camera: { ...(input.camera ?? {}), mode: "follow", followZoom: zoom },
-    }) <= budget;
+    }).total <= budget;
 
   if (cabe(opcoes[0])) return opcoes[0];
 
@@ -167,21 +197,34 @@ export function maxFollowZoom(
  */
 export function planejarCamera(
   input: BudgetInput & { camera: CameraConfig; budget?: number },
-): { camera: CameraConfig; blocos: number; reduzido: boolean; zoom: number | null } {
+): {
+  camera: CameraConfig;
+  /** blocos do mapa (sem o relevo) */
+  blocos: number;
+  /** mapa + relevo, que é o que o teto conta */
+  pedidos: Pedidos;
+  reduzido: boolean;
+  zoom: number | null;
+} {
   const budget = input.budget ?? TILE_BUDGET;
-  const blocos = tilesNeeded(input);
-  if (blocos <= budget) return { camera: input.camera, blocos, reduzido: false, zoom: null };
-  if (input.camera.mode !== "follow") return { camera: input.camera, blocos, reduzido: false, zoom: null };
+  const pedidos = pedidosNecessarios(input);
+  const base = { blocos: pedidos.mapa, pedidos };
+  if (pedidos.total <= budget) {
+    return { ...base, camera: input.camera, reduzido: false, zoom: null };
+  }
+  if (input.camera.mode !== "follow") {
+    return { ...base, camera: input.camera, reduzido: false, zoom: null };
+  }
 
   const zoom = maxFollowZoom({ ...input, budget });
   if (zoom !== null) {
-    return { camera: { ...input.camera, followZoom: zoom }, blocos, reduzido: true, zoom };
+    return { ...base, camera: { ...input.camera, followZoom: zoom }, reduzido: true, zoom };
   }
   // último recurso: um enquadramento só, do traçado inteiro
-  return { camera: { ...input.camera, mode: "fit" }, blocos, reduzido: true, zoom: null };
+  return { ...base, camera: { ...input.camera, mode: "fit" }, reduzido: true, zoom: null };
 }
 
-/** Teto de blocos, reexportado para a tela não precisar saber do renderizador. */
+/** Teto de imagens, reexportado para a tela não precisar saber do renderizador. */
 export { TILE_BUDGET };
 
 /** Texto do aviso de rota longa — o mesmo no painel e no erro da exportação. */
@@ -191,16 +234,16 @@ export function budgetAdvice(
   mode: CameraMode,
 ): string {
   if (mode !== "follow") {
-    return `Esta rota precisaria de ${needed} blocos de mapa — demais para os servidores gratuitos.`;
+    return `Esta rota precisaria de ${needed} imagens de mapa — demais para os servidores gratuitos.`;
   }
   if (suggestion === null) {
     return (
-      `Esta rota precisaria de ${needed} blocos de mapa — demais para os servidores ` +
+      `Esta rota precisaria de ${needed} imagens de mapa — demais para os servidores ` +
       `gratuitos, mesmo no zoom mínimo. Use a câmera “Rota toda”.`
     );
   }
   return (
-    `Esta rota precisaria de ${needed} blocos de mapa — demais para os servidores ` +
+    `Esta rota precisaria de ${needed} imagens de mapa — demais para os servidores ` +
     `gratuitos. Com a câmera “Seguir”, o zoom ${suggestion} cabe.`
   );
 }

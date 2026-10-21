@@ -229,9 +229,9 @@ export function relevoDoMapa(basemap: BasemapId): RelevoEstilo | null {
  * Por que juntar os dois numa imagem em vez de desenhar duas camadas no vídeo:
  * assim o bloco continua sendo **um** objeto no cache e no desenho — a
  * gravação, o congelamento de blocos e o aquecimento não precisam saber que
- * existe uma segunda imagem. O custo é uma requisição a mais por bloco, e é
- * por isso que o teto de blocos cai pela metade quando o relevo está ligado
- * (`budgetDeBlocos`).
+ * existe uma segunda imagem. O custo é uma requisição a mais por bloco — mas
+ * só até o zoom 16: acima disso quatro blocos do 18 dividem um do 16, e a
+ * conta do teto (`pedidosDaAnimacao`) usa esse número, não "blocos × 2".
  */
 export async function comporRelevo(
   base: TileImage,

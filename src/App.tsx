@@ -17,10 +17,13 @@ import { pinsAsDots } from "./lib/pins";
 import { endCard, rideSummary } from "./lib/stats";
 import { timesOf } from "./lib/hud";
 import { diasDoPercurso } from "./lib/days";
+import { momentosDoRecap } from "./lib/recap";
+import { destaques } from "./lib/highlights";
+import { trailProfile } from "./lib/profile";
 import { colorizeRoute, dataCoverage } from "./lib/coloring";
 import { kmMarks } from "./lib/km-marks";
 import { parseDuration } from "./lib/duration";
-import { buildTimeline, routeProgress } from "./lib/timeline";
+import { buildTimeline, routeProgress, videoLength } from "./lib/timeline";
 import {
   checkAudioFile,
   duracaoDaFaixa,
@@ -679,6 +682,30 @@ function App() {
     [settings.showKmMarks, track],
   );
 
+  /**
+   * Os **melhores momentos** do fim do vídeo.
+   *
+   * Só entra o que o arquivo sustenta: a largada e a chegada quando há hora, a
+   * melhor parcial e a maior subida quando os destaques existem. Com menos de
+   * dois momentos não há bloco — e aí o vídeo termina como sempre terminou.
+   */
+  const recap = useMemo(() => {
+    if (!settings.recap) return [];
+    const lista = destaques({
+      track,
+      times: horas,
+      perfil: trailProfile(track),
+      pace: usaRitmo(settings.activity),
+    });
+    return momentosDoRecap({
+      track,
+      times: horas,
+      // o aviso no meio do percurso e o recap contam a mesma coisa: os
+      // destaques só entram no recap se o interruptor deles está ligado
+      destaques: settings.highlights ? lista : [],
+    });
+  }, [settings.recap, settings.highlights, settings.activity, track, horas]);
+
   const cartela = useMemo(
     () =>
       endCard(
@@ -716,9 +743,26 @@ function App() {
       buildTimeline(settings.duration, {
         voo: settings.cinematic && settings.cameraMode === "follow",
         cartela: settings.endCard && cartela !== null,
+        recap: recap.length >= 2,
       }),
-    [settings.duration, settings.cinematic, settings.cameraMode, settings.endCard, cartela],
+    [
+      settings.duration,
+      settings.cinematic,
+      settings.cameraMode,
+      settings.endCard,
+      cartela,
+      recap,
+    ],
   );
+
+  /**
+   * Quanto dura o **arquivo**: a duração do painel mais os melhores momentos.
+   *
+   * A duração escolhida no painel é o tempo de percurso; o recap é um acréscimo
+   * (não sai do percurso). É este número que a prévia, o progresso e a
+   * exportação têm de usar.
+   */
+  const durationSec = useMemo(() => videoLength(linhaDoTempo), [linhaDoTempo]);
 
   /**
    * Onde a personagem está **na rota** no instante atual (0..1).
@@ -773,9 +817,11 @@ function App() {
     const tick = (now: number) => {
       // `progress` (e o mapa) fala em progresso do percurso; quem manda é o
       // relógio do vídeo, porque é ele que a exportação usa
-      const seg = from * settings.duration + (now - startedAt) / 1000;
+      // o `from` é progresso do percurso; o vídeo começa no fim do voo
+      const inicio = linhaDoTempo.voo + from * linhaDoTempo.percurso;
+      const seg = inicio + (now - startedAt) / 1000;
       const t = routeProgress(linhaDoTempo, seg);
-      if (seg >= settings.duration) {
+      if (seg >= durationSec) {
         setProgress(1);
         progressRef.current = 1;
         setPlaying(false);
@@ -787,7 +833,7 @@ function App() {
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
-  }, [playing, hasRoute, settings.duration, routeKey, linhaDoTempo]);
+  }, [playing, hasRoute, durationSec, routeKey, linhaDoTempo]);
 
   /* ---------- interações com o mapa ---------- */
 
@@ -1279,7 +1325,8 @@ function App() {
      */
     const eventos = settings.som
       ? momentosDoSom({
-          duration: settings.duration,
+          // o som vai até o fim do arquivo, incluindo os melhores momentos
+          duration: durationSec,
           timeline: linhaDoTempo,
           // as passagens são guardadas por parada (`id → instantes`); o som
           // quer só a lista de instantes
@@ -1287,12 +1334,14 @@ function App() {
             .flat()
             .map((t) => ({ t })),
           cartela: cartela !== null,
+          // um pop discreto em cada virada dos melhores momentos
+          recap: recap.length,
         })
       : [];
     const trilha =
       eventos.length > 0 || musica
         ? montarTrilha({
-            duration: settings.duration,
+            duration: durationSec,
             eventos,
             musica: musica?.faixa ?? null,
             volume: settings.musicaVolume,
@@ -1377,11 +1426,12 @@ function App() {
           passages: passagens,
           endpoints,
           elapsed,
-          duration: settings.duration,
+          duration: durationSec,
           timeline: linhaDoTempo,
           summary: cartela,
           times: horas,
           days: dias,
+          recap,
           cardSeconds: tempoCartela,
           colored,
           marks: marcas,
@@ -1540,7 +1590,7 @@ function App() {
         for (let i = 0; i < 5; i++) {
           const t = (i + 1) / 6;
           const antes = performance.now();
-          paint(t, settings.duration * t);
+          paint(t, durationSec * t);
           amostras.push(performance.now() - antes);
         }
         amostras.sort((a, b) => a - b);
@@ -1559,7 +1609,7 @@ function App() {
         width: aspect.w,
         height: aspect.h,
         fps: fpsFinal,
-        durationSec: settings.duration,
+        durationSec,
         format: activeFormat,
         bitrate: bitrateFinal,
         onProgress: (t: number) => {
@@ -1577,7 +1627,7 @@ function App() {
         draw: (c: CanvasRenderingContext2D, t: number, elapsed: number) => {
           void c;
           // o gravador fala em tempo de vídeo; o desenho, em progresso do percurso
-          const seg = t * settings.duration;
+          const seg = t * durationSec;
           void elapsed;
           // o vídeo desenha a **posição** no percurso, não a fração do vídeo
           // (era aqui que a freada das paradas entrava)
@@ -2027,7 +2077,9 @@ function App() {
           comSom={video?.comSom}
           width={aspect.w}
           height={aspect.h}
-          duration={settings.duration}
+          // o arquivo inclui os melhores momentos: mostrar a duração do painel
+          // aqui seria prometer um clipe mais curto do que o que sai
+          duration={durationSec}
           onCancel={() => {
             cancelRef.current = true;
           }}

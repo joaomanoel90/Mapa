@@ -1,5 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { CARTA_SECONDS, buildTimeline, routeEnd, routeProgress, timelineOr } from "./timeline";
+import {
+  CARTA_SECONDS,
+  buildTimeline,
+  cardStart,
+  routeEnd,
+  routeProgress,
+  timelineOr,
+  videoLength,
+} from "./timeline";
+import { RECAP_SECONDS } from "./recap";
 import { openingSeconds } from "./camera";
 
 describe("linha do tempo do vídeo", () => {
@@ -19,7 +28,7 @@ describe("linha do tempo do vídeo", () => {
 
   it("sem voo e sem cartela, o percurso é o vídeo inteiro", () => {
     const tl = buildTimeline(14, { voo: false, cartela: false });
-    expect(tl).toEqual({ voo: 0, percurso: 14, cartela: 0 });
+    expect(tl).toEqual({ voo: 0, percurso: 14, recap: 0, cartela: 0 });
   });
 
   it("em clipe curto, voo e cartela encolhem juntos (o percurso fica com 40%)", () => {
@@ -45,10 +54,30 @@ describe("linha do tempo do vídeo", () => {
     expect(Number.isFinite(tl.voo)).toBe(true);
   });
 
+  it("os melhores momentos somam tempo e não encurtam o percurso", () => {
+    const semRecap = buildTimeline(20, { voo: true, cartela: true });
+    const comRecap = buildTimeline(20, { voo: true, cartela: true, recap: true });
+    // o percurso é o mesmo: o recap é acréscimo, não uma fatia
+    expect(comRecap.percurso).toBeCloseTo(semRecap.percurso, 6);
+    expect(comRecap.voo).toBeCloseTo(semRecap.voo, 6);
+    expect(comRecap.cartela).toBeCloseTo(semRecap.cartela, 6);
+    expect(comRecap.recap).toBeCloseTo(RECAP_SECONDS, 6);
+    // e o arquivo fica 3,6 s mais longo
+    expect(videoLength(comRecap)).toBeCloseTo(20 + RECAP_SECONDS, 6);
+  });
+
+  it("a cartela só começa depois dos melhores momentos", () => {
+    const tl = buildTimeline(20, { voo: true, cartela: true, recap: true });
+    // a chegada continua sendo o fim do percurso
+    expect(routeEnd(tl)).toBeCloseTo(tl.voo + tl.percurso, 6);
+    expect(cardStart(tl) - routeEnd(tl)).toBeCloseTo(RECAP_SECONDS, 6);
+  });
+
   it("sem linha do tempo, o vídeo inteiro é percurso (a cartela reserva a fatia)", () => {
     expect(timelineOr(null, 14)).toEqual({
       voo: 0,
       percurso: 14 - CARTA_SECONDS,
+      recap: 0,
       cartela: CARTA_SECONDS,
     });
     const tl = buildTimeline(14, { voo: true, cartela: true });

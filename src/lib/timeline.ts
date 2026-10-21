@@ -22,6 +22,7 @@
  */
 
 import { openingSeconds } from "./camera";
+import { RECAP_SECONDS } from "./recap";
 
 /** Quanto a cartela final fica na tela, em segundos de vídeo. */
 export const CARTA_SECONDS = 4.2;
@@ -31,6 +32,8 @@ export type Timeline = {
   voo: number;
   /** segundos de vídeo em que a rota é percorrida */
   percurso: number;
+  /** segundos de vídeo dos **melhores momentos**, depois do percurso (0 = sem) */
+  recap: number;
   /** segundos de vídeo da cartela final (0 = sem cartela) */
   cartela: number;
 };
@@ -43,7 +46,15 @@ export type Timeline = {
  */
 export function buildTimeline(
   duration: number,
-  opts: { voo: boolean; cartela: boolean },
+  opts: {
+    voo: boolean;
+    cartela: boolean;
+    /**
+     * Há melhores momentos no fim? Eles **somam** tempo ao vídeo (ver
+     * `RECAP_SECONDS`): a duração do painel é o percurso, não o arquivo.
+     */
+    recap?: boolean;
+  },
 ): Timeline {
   const d = Number.isFinite(duration) && duration > 0 ? duration : 10;
   let voo = opts.voo ? openingSeconds(d) : 0;
@@ -54,7 +65,27 @@ export function buildTimeline(
     voo *= k;
     cartela *= k;
   }
-  return { voo, percurso: Math.max(0, d - voo - cartela), cartela };
+  return {
+    voo,
+    percurso: Math.max(0, d - voo - cartela),
+    recap: opts.recap ? RECAP_SECONDS : 0,
+    cartela,
+  };
+}
+
+/**
+ * Quanto dura o **arquivo**: a duração do painel mais os melhores momentos.
+ *
+ * É este o número que o gravador, a barra de progresso e a trilha sonora
+ * precisam — `buildTimeline(...).percurso` continua sendo o tempo de rota.
+ */
+export function videoLength(tl: Timeline): number {
+  return tl.voo + tl.percurso + tl.recap + tl.cartela;
+}
+
+/** Em que instante (segundos de vídeo) a cartela final começa. */
+export function cardStart(tl: Timeline): number {
+  return tl.voo + tl.percurso + tl.recap;
 }
 
 /** Em que instante (segundos de vídeo) o percurso termina. */

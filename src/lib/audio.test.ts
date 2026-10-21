@@ -13,7 +13,7 @@ import {
 } from "./audio";
 import type { Timeline } from "./timeline";
 
-const TL: Timeline = { voo: 2, percurso: 10, cartela: 4.2 };
+const TL: Timeline = { voo: 2, percurso: 10, recap: 0, cartela: 4.2 };
 
 /** Um único pico na faixa: onde ele está e quão alto. */
 function pico(canal: Float32Array) {
@@ -47,7 +47,7 @@ describe("quando cada pop acontece", () => {
   it("sem voo não há largada — o personagem já sai andando", () => {
     const eventos = momentosDoSom({
       duration: 14,
-      timeline: { voo: 0, percurso: 9.8, cartela: 4.2 },
+      timeline: { voo: 0, percurso: 9.8, recap: 0, cartela: 4.2 },
     });
     expect(eventos.map((e) => e.kind)).toEqual(["chegada"]);
   });
@@ -74,10 +74,26 @@ describe("quando cada pop acontece", () => {
     expect(eventos.map((e) => e.kind)).toEqual(["largada", "chegada"]);
   });
 
+  it("cada virada dos melhores momentos tem um pop, e a chegada fica onde estava", () => {
+    const timeline: Timeline = { voo: 0, percurso: 10, recap: 3.6, cartela: 4.2 };
+    const eventos = momentosDoSom({ duration: 17.8, timeline, recap: 4 });
+    const recap = eventos.filter((e) => e.kind === "recap");
+    // 4 momentos → 3 viradas (o primeiro cartão entra junto da chegada)
+    expect(recap).toHaveLength(3);
+    expect(recap.map((e) => e.at)).toEqual([10.9, 11.8, 12.7].map((x) => expect.closeTo(x, 6)));
+    // a chegada continua no fim do percurso, não no fim do arquivo
+    expect(eventos.find((e) => e.kind === "chegada")?.at).toBeCloseTo(10, 6);
+  });
+
+  it("sem melhores momentos não há pop de recap", () => {
+    const eventos = momentosDoSom({ duration: 16.2, timeline: TL, recap: 0 });
+    expect(eventos.some((e) => e.kind === "recap")).toBe(false);
+  });
+
   it("nada sai do vídeo, nem quando a timeline é apertada", () => {
     const eventos = momentosDoSom({
       duration: 3,
-      timeline: { voo: 0, percurso: 2, cartela: 1 },
+      timeline: { voo: 0, percurso: 2, recap: 0, cartela: 1 },
       passages: [{ t: 0.4 }, { t: 0.9 }],
     });
     for (const e of eventos) {

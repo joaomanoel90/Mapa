@@ -27,12 +27,13 @@ import {
   type CinematicConfig,
   type FocusPoint,
 } from "./camera";
-import { routeEnd, timelineOr, type Timeline } from "./timeline";
+import { cardStart, routeEnd, timelineOr, type Timeline } from "./timeline";
 import { NEUTRAL_COLOR, slopeAt, slopeSeries, type ColoredRoute } from "./coloring";
 import { destaqueEmCena, destaques, type Destaque } from "./highlights";
 import type { KmMark } from "./km-marks";
 import { countPassed } from "./passages";
 import { diaNaTela, type Dia } from "./days";
+import { momentoNaTela, type RecapMoment } from "./recap";
 import {
   elevacaoEm,
   inclinacaoDaSubida,
@@ -179,6 +180,11 @@ export type FrameState = {
   style: SceneStyle;
   /** dias do percurso (vazio ou ausente = percurso de um dia só) */
   days?: Dia[] | null;
+  /**
+   * Os **melhores momentos** do fim do vídeo. Vazio ou ausente = não há bloco,
+   * e a linha do tempo também não reserva segundos para ele.
+   */
+  recap?: RecapMoment[] | null;
   /** paradas do percurso (aparecem quando o personagem passa) */
   stops: Poi[];
   /** locais marcados de partida/chegada (null = letras A/B) */
@@ -1921,7 +1927,17 @@ export class SceneRenderer {
     const destaquesDoQuadro = style.showHighlights
       ? this.destaquesDo(track, horasAlinhadas(input, track), !!style.pace, this.perfilDo(track))
       : [];
-    const emCena = destaqueEmCena(destaquesDoQuadro, t, tl.percurso);
+    /*
+     * Os **melhores momentos** são medidos aqui, junto dos avisos: eles ocupam o
+     * mesmo lugar do aviso de destaque, então um desliga o outro. Na chegada, o
+     * aviso que estiver em cena dá lugar ao recap — os dois dizem a mesma coisa,
+     * e dois cartões iguais na tela seriam dois cartões demais.
+     */
+    const recapEmCena =
+      input.recap && input.recap.length >= 2 && tl.recap > 0
+        ? momentoNaTela(input.recap, input.elapsed - routeEnd(tl), tl.recap)
+        : null;
+    const emCena = recapEmCena ? null : destaqueEmCena(destaquesDoQuadro, t, tl.percurso);
     const avisoNaTela = emCena
       ? posicionarDestaque(ctx, {
           destaque: emCena.destaque,
@@ -1930,6 +1946,10 @@ export class SceneRenderer {
           quadro: { width, height },
           style,
         })
+      : null;
+    // o mesmo lugar, o mesmo desenho — só o conteúdo é o do momento
+    const recapNaTela = recapEmCena
+      ? posicionarRecap(ctx, recapEmCena, { sf, quadro: { width, height }, style })
       : null;
 
     // --- paradas do percurso ---
@@ -1963,8 +1983,9 @@ export class SceneRenderer {
       });
     }
 
-    // o aviso dos destaques, por cima de tudo o que está no mapa
+    // o aviso dos destaques (ou o cartão do recap no lugar dele), por cima do mapa
     if (avisoNaTela) pintarDestaque(ctx, avisoNaTela, { accent: style.accent, onDark, sf });
+    if (recapNaTela) pintarDestaque(ctx, recapNaTela, { accent: style.accent, onDark, sf });
 
     /*
      * --- o horizonte ---
@@ -2898,7 +2919,36 @@ function posicionarDestaque(
   return { destaque: o.destaque, alfa: o.alfa, x: centro - w / 2, y: topo, w, h, fontes };
 }
 
-/** O desenho do aviso: etiqueta, número grande e a linha de baixo. */
+/**
+ * O cartão de um dos **melhores momentos** do fim do vídeo.
+ *
+ * É a **mesma pílula** dos avisos do percurso (mesmo tamanho, mesma letra,
+ * mesmo aro): o recap não inventa um bloco novo, ele reaproveita o lugar e o
+ * desenho do aviso de destaque. A única diferença é o contador (`2/4`) no
+ * título, que diz onde se está na sequência.
+ */
+function posicionarRecap(
+  ctx: CanvasRenderingContext2D,
+  emCena: { momento: RecapMoment; indice: number; total: number; alfa: number },
+  o: { sf: number; quadro: { width: number; height: number }; style: SceneStyle },
+): DestaqueNaTela {
+  const { momento, indice, total, alfa } = emCena;
+  return posicionarDestaque(ctx, {
+    destaque: {
+      tipo: "melhorKm",
+      em: 1,
+      titulo: `${momento.titulo} · ${indice + 1}/${total}`,
+      valor: momento.valor,
+      unidade: momento.unidade,
+      detalhe: momento.detalhe,
+    },
+    alfa,
+    sf: o.sf,
+    quadro: o.quadro,
+    style: o.style,
+  });
+}
+
 /**
  * O aviso de dia novo: uma pílula no alto do quadro — "DIA 2 · 41,2 km".
  *
@@ -2952,6 +3002,7 @@ function drawDayChip(
   ctx.restore();
 }
 
+/** O desenho do aviso: etiqueta, número grande e a linha de baixo. */
 function pintarDestaque(
   ctx: CanvasRenderingContext2D,
   t: DestaqueNaTela,
@@ -4109,7 +4160,8 @@ export function summaryBox(
    * fim do percurso: o usuário viu isso como "cartela aparecendo muito antes".
    */
   const tl = timelineOr(input.timeline, input.duration);
-  const inicio = routeEnd(tl);
+  // a cartela vem **depois** dos melhores momentos
+  const inicio = cardStart(tl);
   if (input.elapsed < inicio) return null;
   const alpha =
     SUMMARY_FADE_S > 0

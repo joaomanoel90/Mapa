@@ -818,6 +818,19 @@ function Sidebar(props: Props) {
               </p>
             )}
             <Toggle
+              icon="🎞️"
+              label="Melhores momentos no fim"
+              checked={s.recap}
+              onChange={(v) => update("recap", v)}
+            />
+            {s.recap && (
+              <p className="text-[10.5px] leading-snug text-zinc-500">
+                Depois da chegada, uma sequência curta com a largada, a melhor parcial, a
+                maior subida e a chegada — o mapa parado no fim do percurso. Soma ~4 s ao
+                vídeo; o percurso não encurta.
+              </p>
+            )}
+            <Toggle
               icon="🏁"
               label="Cartela final"
               checked={s.endCard}

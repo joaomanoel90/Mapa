@@ -542,6 +542,24 @@ describe("painel: marcas de dia", () => {
   });
 });
 
+describe("painel: melhores momentos no fim", () => {
+  it("vem desligado, e a explicação só aparece quando liga", () => {
+    montar(<Painel />);
+    expect(container.textContent ?? "").toContain("Melhores momentos no fim");
+    expect(container.textContent ?? "").not.toContain("Soma ~4 s");
+    expect(botao("Melhores momentos no fim").getAttribute("aria-checked")).toBe("false");
+  });
+
+  it("ligado, avisa que soma segundos ao vídeo (o percurso não encurta)", () => {
+    montar(<Painel />);
+    clicar(botao("Melhores momentos no fim"));
+    const texto = container.textContent ?? "";
+    expect(botao("Melhores momentos no fim").getAttribute("aria-checked")).toBe("true");
+    expect(texto).toContain("Soma ~4 s");
+    expect(texto).toContain("o percurso não encurta");
+  });
+});
+
 describe("painel: fantasma à frente", () => {
   it("vem desligado e diz o que é", () => {
     montar(<Painel />);

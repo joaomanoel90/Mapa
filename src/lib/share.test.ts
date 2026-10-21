@@ -361,9 +361,10 @@ describe("sharedSettingsOverrides", () => {
   });
 
   it("os melhores momentos viajam no link", () => {
-    const url = buildShareUrl(base({ settings: { ...DEFAULT_SETTINGS, recap: false } }));
-    expect(decodeShare(url)?.settings.recap).toBe(false);
-    expect(decodeShare(buildShareUrl(base()))?.settings.recap).toBe(true);
+    const url = buildShareUrl(base({ settings: { ...DEFAULT_SETTINGS, recap: true } }));
+    expect(decodeShare(url)?.settings.recap).toBe(true);
+    // o padrão é desligado, e é isso que um link sem ajuste carrega
+    expect(decodeShare(buildShareUrl(base()))?.settings.recap).toBe(false);
   });
 
   it("o fantasma à frente viaja no link (é parte da cena)", () => {

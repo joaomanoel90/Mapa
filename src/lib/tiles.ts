@@ -176,8 +176,21 @@ export function hillshadeBloco(
 
 /** Como o sombreado entra em cada estilo. */
 export type RelevoEstilo = {
-  /** `multiply` escurece a encosta virada para o outro lado; `screen` acende a que pega sol */
-  modo: "multiply" | "screen";
+  /**
+   * O modo de mistura do canvas.
+   *
+   * `overlay` e `soft-light` são os certos para um sombreado — e a razão é o
+   * **cinza neutro**: o sombreado do USGS vem em cinza (128 = encosta plana,
+   * 255 = pegando sol, 0 = na sombra), e é justamente no 128 que a mistura
+   * `overlay`/`soft-light` deixa o mapa **como estava**. Assim só a encosta
+   * muda de brilho; o resto do mapa não escurece.
+   *
+   * `multiply` foi a primeira escolha e está errado: encosta plana (128)
+   * também escurece, e o mapa inteiro fica lavado — medido numa base #efe9df,
+   * com alpha 0,55 o chão caía de 234 para 118 de luminância. `screen` erra
+   * para o outro lado: no mapa escuro a encosta iluminada estourava para 152.
+   */
+  modo: "overlay" | "soft-light" | "multiply";
   /** quanto do sombreado aparece (0..1) */
   alpha: number;
 };
@@ -185,23 +198,23 @@ export type RelevoEstilo = {
 /**
  * A mistura de cada mapa.
  *
- * O **Escuro** é o único que não pode usar `multiply`: o mapa já é escuro, e
- * multiplicar sombra sobre sombra não muda nada — o relevo sumiria. Nele o
- * sombreado entra por `screen`, que acende as encostas iluminadas: a serra
- * aparece como luz, não como mancha.
+ * O **Escuro** é o que mostra o relevo com mais força: o mapa é quase preto,
+ * então a encosta iluminada é o que desenha a serra (é o mesmo truque dos
+ * mapas noturnos de montanha). Nos claros o `overlay` entra mais de leve — o
+ * mapa já tem contraste de sobra.
  *
- * O **Satélite** já mostra o terreno nas cores; um pouco de sombra ajuda a
- * separar serra de planície sem inventar cor.
+ * O **Satélite** usa `soft-light`: as cores da imagem são o assunto, e o
+ * `overlay` puxaria o verde da mata para tons irreais.
  *
- * O **Relevo/Topo** (OpenTopoMap) já vem com curvas de nível e sombreado
- * próprios: sombrear de novo só escureceria o mapa.
+ * O **Topo** (OpenTopoMap) já vem com curvas de nível e sombreado próprios:
+ * sombrear de novo só escureceria o mapa.
  */
 export const RELEVO_DO_MAPA: Record<BasemapId, RelevoEstilo | null> = {
-  dark: { modo: "screen", alpha: 0.3 },
-  light: { modo: "multiply", alpha: 0.55 },
-  osm: { modo: "multiply", alpha: 0.5 },
-  cyclosm: { modo: "multiply", alpha: 0.45 },
-  satellite: { modo: "multiply", alpha: 0.5 },
+  dark: { modo: "overlay", alpha: 0.7 },
+  light: { modo: "multiply", alpha: 0.4 },
+  osm: { modo: "multiply", alpha: 0.4 },
+  cyclosm: { modo: "multiply", alpha: 0.4 },
+  satellite: { modo: "soft-light", alpha: 0.7 },
   topo: null,
 };
 

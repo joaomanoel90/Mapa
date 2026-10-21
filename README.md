@@ -711,9 +711,26 @@ mapa já sombreado.
 
 | mapa | mistura | por quê |
 |---|---|---|
-| Escuro | `screen`, 30% | o mapa já é escuro: multiplicar sombra sobre sombra não apareceria — no Escuro o relevo entra como **luz** |
-| Clean / Padrão / Ciclo / Satélite | `multiply`, 45–55% | sombra clássica: escurece a encosta virada para o lado oposto |
+| Escuro | `overlay`, 70% | é o que mais mostra o relevo: sobre quase-preto, a encosta iluminada é o que desenha a serra |
+| Clean / Padrão / Ciclo | `multiply`, 40% | sombra clássica; 40% é o ponto em que a encosta aparece sem lavar o mapa |
+| Satélite | `soft-light`, 70% | o `overlay` puxaria o verde da mata para um tom irreal |
 | Topo | — | o OpenTopoMap já traz curvas de nível e sombreado próprios |
+
+A escolha do modo tem um motivo medido, e ele é o **cinza neutro**. O sombreado
+do USGS vem em cinza: 128 é encosta plana, 255 é encosta pegando sol, 0 é
+sombra. É justamente no 128 que `overlay` e `soft-light` deixam o mapa **como
+estava** — só a encosta muda de brilho. As duas primeiras tentativas erraram
+nisso, e as duas foram descartadas por medida, não por gosto:
+
+| mistura | base clara (#f2ede4) | base escura (#141a22) |
+|---|---|---|
+| `multiply` 55% | luminância média cai de 239 para **201** — o mapa lava | 27 → 23, e o relevo quase não aparece |
+| `screen` 30% | 239 → 244, quase nada | 27 → **82**: a encosta iluminada estoura |
+| `overlay` 70% | 239 → 243 | 27 → 34, com a serra legível |
+
+Ou seja: `multiply` escurece até o plano e `screen` acende até o plano — os dois
+borram a informação. `overlay`/`soft-light` são os que sozinhos deixam o plano
+intacto e mudam só o que é encosta.
 
 **O custo é o dobro de requisições por bloco** (o mapa e a sombra do mesmo
 pedaço), e por isso o teto de blocos **cai pela metade** quando o relevo está
@@ -1334,7 +1351,7 @@ ou cortados.
 
 ```bash
 npm run typecheck  # tsc --noEmit
-npm test           # Vitest (966 casos)
+npm test           # Vitest (967 casos)
 npm run check:dist # o build saiu autocontido e sem /src/?
 ```
 

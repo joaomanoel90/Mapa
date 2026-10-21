@@ -194,11 +194,25 @@ describe("o sombreado do relevo", () => {
     expect(b.sy).toBe(2 * 32);
   });
 
-  it("o Escuro não usa multiply: sombra sobre sombra não apareceria", () => {
-    expect(relevoDoMapa("dark")).toEqual({ modo: "screen", alpha: 0.3 });
-    expect(relevoDoMapa("light")?.modo).toBe("multiply");
-    expect(relevoDoMapa("osm")?.modo).toBe("multiply");
-    expect(relevoDoMapa("satellite")?.modo).toBe("multiply");
+  it("cada mistura é uma escolha medida, não a primeira que veio", () => {
+    // `overlay`/`soft-light` preservam o cinza neutro (a encosta plana não muda
+    // o mapa); `multiply` é usado só nos claros, e a 40% — o bastante para a
+    // encosta aparecer sem lavar o mapa inteiro
+    for (const id of BASEMAP_ORDER) {
+      const e = relevoDoMapa(id);
+      if (!e) continue;
+      expect(["overlay", "soft-light", "multiply"]).toContain(e.modo);
+      if (e.modo === "multiply") expect(e.alpha).toBeLessThanOrEqual(0.45);
+    }
+    // `screen` foi medido e recusado: no mapa escuro estourava o relevo
+    expect(BASEMAP_ORDER.map((id) => relevoDoMapa(id)?.modo)).not.toContain("screen");
+  });
+
+  it("o Escuro é o que mais mostra o relevo", () => {
+    expect(relevoDoMapa("dark")?.alpha).toBeGreaterThan(relevoDoMapa("light")!.alpha);
+    expect(relevoDoMapa("dark")?.modo).toBe("overlay");
+    // satélite usa soft-light: o overlay puxaria o verde da mata para irreal
+    expect(relevoDoMapa("satellite")?.modo).toBe("soft-light");
   });
 
   it("o Topo já tem relevo: sombrear de novo só escureceria", () => {

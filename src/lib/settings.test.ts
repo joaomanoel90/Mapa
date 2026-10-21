@@ -125,6 +125,13 @@ describe("sanitizeSettings", () => {
     expect(DEFAULT_SETTINGS.tiltHorizonte).toBe(true);
   });
 
+  it("exige booleano também no fantasma à frente, e ele nasce desligado", () => {
+    expect(sanitizeSettings(raw({ ghost: "sim" })).ghost).toBeUndefined();
+    expect(sanitizeSettings(raw({ ghost: true })).ghost).toBe(true);
+    expect(sanitizeSettings(raw({ ghost: false })).ghost).toBe(false);
+    expect(DEFAULT_SETTINGS.ghost).toBe(false);
+  });
+
   it("nasce com a linha sólida e as novidades desligadas", () => {
     // as três são facultativas: quem não mexer no painel não vê diferença
     expect(DEFAULT_SETTINGS.colorBy).toBe("solid");

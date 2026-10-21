@@ -1244,6 +1244,8 @@ function App() {
       showMinimap: settings.minimap,
       showProfile: settings.elevationProfile,
       showHighlights: settings.highlights,
+      // o fantasma à frente: só desenho, não muda a câmera nem os blocos
+      ghost: settings.ghost,
       avatar: settings.avatar,
       // o logo da marca entra na cartela como a foto do projeto
       logo: settings.logo,

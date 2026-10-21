@@ -43,6 +43,7 @@ import {
   projetorDaVista,
   summaryBox,
   medidaDoLogo,
+  pontoFantasma,
   tilesDaVista,
   tilesForAnimation,
   vistaDe,
@@ -2087,6 +2088,98 @@ describe("partida e chegada no vídeo", () => {
  * posição **absoluta**, então dá para ver o corpo subir e trocar de lado de um
  * quadro para o outro — que é exatamente o que o olho chama de "andar".
  */
+describe("o fantasma à frente", () => {
+  /** um traçado de ~4 km, para o fantasma ter para onde ir */
+  const trilha = buildTrack(
+    Array.from({ length: 120 }, (_, i) => ({
+      lat: -23.5 + i * 0.0003,
+      lng: -48.4 + i * 0.00018,
+    })),
+  );
+  const centro = trilha.pts[0];
+  const vista = (zoom: number) => ({ zoom, height: 720, centro, percurso: 20 });
+
+  it("anda à frente, e a mesma distância na tela vale mais metros no zoom menor", () => {
+    const z17 = pontoFantasma(trilha, 0.3, vista(17))!;
+    const z13 = pontoFantasma(trilha, 0.3, vista(13))!;
+    expect(z17.t).toBeGreaterThan(0.3);
+    expect(z13.t).toBeGreaterThan(z17.t);
+
+    // 4 níveis de zoom = 16× mais metros para os mesmos 16% de altura
+    const m17 = (z17.t - 0.3) * trilha.total;
+    const m13 = (z13.t - 0.3) * trilha.total;
+    expect(m13 / m17).toBeGreaterThan(14);
+    expect(m13 / m17).toBeLessThan(18);
+  });
+
+  it("é o mesmo personagem: aponta o rumo do caminho adiante", () => {
+    const p = pontoFantasma(trilha, 0.2, vista(17))!;
+    const esperado = sampleTrack(trilha, p.t).pos;
+    expect(p.pos.lat).toBeCloseTo(esperado.lat, 6);
+    expect(p.pos.lng).toBeCloseTo(esperado.lng, 6);
+    expect(p.index).toBeGreaterThan(0);
+    expect(Number.isFinite(p.rumo)).toBe(true);
+  });
+
+  it("some perto da chegada — fantasma não chega antes", () => {
+    expect(pontoFantasma(trilha, 0.999, vista(17))).toBeNull();
+    // e nos últimos 3% a opacidade cai até zero
+    const ultimo = pontoFantasma(trilha, 0.98, vista(17));
+    if (ultimo) expect(ultimo.alpha).toBeLessThan(0.34);
+  });
+
+  it("sem traçado, sem fantasma", () => {
+    expect(pontoFantasma(buildTrack([]), 0.2, vista(17))).toBeNull();
+  });
+
+  it("com o fantasma ligado, o personagem é desenhado duas vezes no quadro", () => {
+    const emoji = findCharacter("car").emoji;
+    const camera = { mode: "follow" as const, followZoom: 16 };
+    const sem = fakeCtx();
+    new SceneRenderer("dark").render(sem.ctx, 1280, 720, {
+      ...estado(0.2, 14, null),
+      camera,
+    });
+    expect(sem.textos.filter((t) => t === emoji)).toHaveLength(1);
+
+    const com = fakeCtx();
+    new SceneRenderer("dark").render(com.ctx, 1280, 720, {
+      ...estado(0.2, 14, null),
+      camera,
+      style: { ...style, ghost: true },
+    });
+    expect(com.textos.filter((t) => t === emoji)).toHaveLength(2);
+    // e os dois estão em pontos diferentes da tela (um à frente do outro)
+    const [a, b] = com.textos
+      .map((t, i) => ({ t, i }))
+      .filter((x) => x.t === emoji)
+      .map((x) => ({ x: com.textosXAbs[x.i], y: com.textosYAbs[x.i] }));
+    expect(Math.hypot(a.x - b.x, a.y - b.y)).toBeGreaterThan(20);
+  });
+
+  it("no fim do percurso o fantasma já saiu: um personagem só", () => {
+    const emoji = findCharacter("car").emoji;
+    const f = fakeCtx();
+    new SceneRenderer("dark").render(f.ctx, 1280, 720, {
+      ...estado(0.995, 14, null),
+      camera: { mode: "follow", followZoom: 16 },
+      style: { ...style, ghost: true },
+    });
+    expect(f.textos.filter((t) => t === emoji)).toHaveLength(1);
+  });
+
+  it("desligado, o vídeo é o de sempre", () => {
+    const emoji = findCharacter("car").emoji;
+    const f = fakeCtx();
+    new SceneRenderer("dark").render(f.ctx, 1280, 720, {
+      ...estado(0.2, 14, null),
+      camera: { mode: "follow", followZoom: 16 },
+      style: { ...style, ghost: false },
+    });
+    expect(f.textos.filter((t) => t === emoji)).toHaveLength(1);
+  });
+});
+
 describe("o andar do personagem", () => {
   const semVoo = buildTimeline(14, { voo: false, cartela: false });
   const quadro = (elapsed: number, id = "run", timeline: Timeline = semVoo) => ({

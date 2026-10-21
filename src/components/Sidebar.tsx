@@ -623,6 +623,22 @@ function Sidebar(props: Props) {
                     tela.
                   </p>
                 ))}
+              {/*
+                O fantasma não depende da câmera: é um desenho a mais no vídeo.
+                Fica aqui, junto do personagem/câmera, porque é ali que a pessoa
+                pensa "quem anda na tela".
+              */}
+              <Toggle
+                icon="👻"
+                label="Fantasma à frente"
+                checked={s.ghost}
+                onChange={(v) => update("ghost", v)}
+              />
+              <p className="mt-1 text-[10.5px] leading-snug text-zinc-500">
+                Uma cópia translúcida do personagem, um pouco à frente na rota: mostra para onde
+                o caminho vai sem tirar o olho de quem está andando. Ele some perto da chegada —
+                fantasma não chega antes. Só no vídeo.
+              </p>
             </div>
           </div>
           {s.cameraMode === "follow" && (

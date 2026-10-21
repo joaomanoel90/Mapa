@@ -354,6 +354,16 @@ describe("sharedSettingsOverrides", () => {
     expect(decodeShare(buildShareUrl(base()))?.settings.relevo).toBe(false);
   });
 
+  it("o fantasma à frente viaja no link (é parte da cena)", () => {
+    const url = buildShareUrl(base({ settings: { ...DEFAULT_SETTINGS, ghost: true } }));
+    expect(decodeShare(url)?.settings.ghost).toBe(true);
+    const json = JSON.parse(
+      atob(payloadOf(buildShareUrl(base())).split(".")[1].replace(/-/g, "+").replace(/_/g, "/")),
+    );
+    expect(json.s?.ghost).toBeUndefined();
+    expect(decodeShare(buildShareUrl(base()))?.settings.ghost).toBe(false);
+  });
+
   it("som e volume da música vão no link (o arquivo de música não)", () => {
     // o som é parte da cena: quem abre o link vê — e ouve — os pops do mesmo
     // jeito. A música é um arquivo de quem compartilha, e fica em casa.

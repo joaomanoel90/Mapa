@@ -46,6 +46,7 @@ const SHARED_KEYS = [
   "thirdPerson",
   "spinMap",
   "tiltHorizonte",
+  "ghost",
   "duration",
   "cameraMode",
   "followZoom",

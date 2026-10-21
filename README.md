@@ -818,6 +818,29 @@ Rota de 55 km: passo 5 → 11 marcas, de 5 a 55. Rota de 3 km: passo 1 → 3 mar
 Abaixo de 1 km não há marca nenhuma (não existe km redondo para marcar).
 Rota de 435 km: passo 50 → 9 marcas, de 50 a 450, todas numeradas.
 
+### Fantasma à frente
+
+Um segundo desenho do **mesmo personagem**, translúcido (34% de opacidade), um
+pouco à frente na rota — o caminho que vem, sem trocar a figura por uma seta ou
+por um ponto de luz. Facultativo e desligado por padrão.
+
+A distância é medida **na tela**: 16% da altura do quadro
+(`GHOST_FRACAO`), convertida para metros no zoom em vigor. Em 1280×720, na
+latitude de São Paulo, isso dá **~126 m no zoom 17** e **~2 km no zoom 13** —
+ou seja, ele fica sempre à mesma distância visual, em vez de sumir num zoom e
+sair pela borda no outro.
+
+Duas decisões que evitam estranheza:
+
+- **desenhado antes do personagem de verdade** — quem está na frente da fila na
+  tela é o personagem, não o fantasma;
+- **sem halo, sem anel de pulso e sem seta** (as três coisas que fazem o
+  personagem "vivo" ficam só nele), e **sumindo nos últimos 3%** do percurso:
+  um fantasma que chega antes da linha de chegada transforma a leitura em erro.
+
+Não muda câmera, velocidade nem a conta de blocos: é um desenho a mais no mesmo
+quadro, e só no vídeo (a prévia do mapa não o mostra).
+
 ### Câmera cinematográfica
 
 Também facultativa, e só faz sentido na câmera **Seguir** (no "Rota toda" a rota

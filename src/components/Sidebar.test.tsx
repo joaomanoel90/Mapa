@@ -521,6 +521,25 @@ describe("painel: som do vídeo", () => {
   });
 });
 
+describe("painel: fantasma à frente", () => {
+  it("vem desligado e diz o que é", () => {
+    montar(<Painel />);
+    const texto = container.textContent ?? "";
+    expect(texto).toContain("Fantasma à frente");
+    expect(texto).toContain("cópia translúcida do personagem");
+    expect(texto).toContain("Só no vídeo");
+    expect(botao("Fantasma à frente").getAttribute("aria-checked")).toBe("false");
+  });
+
+  it("liga e desliga", () => {
+    montar(<Painel />);
+    clicar(botao("Fantasma à frente"));
+    expect(botao("Fantasma à frente").getAttribute("aria-checked")).toBe("true");
+    clicar(botao("Fantasma à frente"));
+    expect(botao("Fantasma à frente").getAttribute("aria-checked")).toBe("false");
+  });
+});
+
 describe("painel: relevo", () => {
   /*
    * O sombreado vem de outro servidor, com o próprio teto — o painel mostra as

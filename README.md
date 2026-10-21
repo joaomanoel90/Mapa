@@ -464,7 +464,13 @@ Strava": eles mostram o traçado visto de cima, não a **dureza** do caminho.
   rota plana não ganha um retângulo decorativo. Sem `<ele>` no arquivo, a faixa
   simplesmente não existe (não há linha reta inventada);
 - **sai de cena quando a cartela final entra**, e o crédito do OpenStreetMap
-  sobe para não ficar por cima do gráfico.
+  sobe para não ficar por cima do gráfico;
+- a **legenda da rota colorida** mora no mesmo canto do rodapé e é desenhada
+  depois da faixa: ela sobe a altura do painel (`liftExtra`), como o crédito.
+  Sem isso ela cobria o começo do gráfico e o rótulo da altitude máxima — foi o
+  "o gráfico está atrás da legenda de elevação";
+- a faixa é a **última** do rodapé na ordem de desenho: barra de progresso,
+  perfil e, acima dos dois, legenda e crédito.
 
 O perfil é calculado **uma vez por traçado** e cacheado no renderizador: são 160
 colunas em vez de 5.700 pontos, e o desenho de cada quadro só lê o resultado —
@@ -1122,7 +1128,7 @@ ou cortados.
 
 ```bash
 npm run typecheck  # tsc --noEmit
-npm test           # Vitest (839 casos)
+npm test           # Vitest (842 casos)
 npm run check:dist # o build saiu autocontido e sem /src/?
 ```
 

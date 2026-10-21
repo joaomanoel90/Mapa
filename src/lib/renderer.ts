@@ -1966,8 +1966,28 @@ export class SceneRenderer {
         });
       }
     }
+    /**
+     * A faixa do perfil está na tela? É o que faz a legenda e o crédito do mapa
+     * subirem — os dois moram no rodapé e foram desenhados **depois** dela.
+     */
+    const faixaDoPerfil = style.showProfile ? this.perfilDo(track) : null;
     if (colored && style.showRoute) {
-      drawLegend(ctx, width, height, colored, sf, style.showProgress);
+      /*
+       * A legenda da rota colorida mora no **mesmo canto** da faixa do perfil, e
+       * é desenhada depois dela: sem subir, ela cobre o começo do gráfico e o
+       * rótulo da altitude máxima (o usuário viu "o gráfico está atrás da
+       * legenda"). A altura da faixa entra na conta, como já acontece com a
+       * barra de progresso.
+       */
+      drawLegend(
+        ctx,
+        width,
+        height,
+        colored,
+        sf,
+        style.showProgress,
+        faixaDoPerfil ? profileLayout(width, height, sf, !!style.showProgress).h + 10 * sf : 0,
+      );
     }
     if (cartao) drawSummary(ctx, width, height, cartao, onDark, sf);
 
@@ -1978,7 +1998,6 @@ export class SceneRenderer {
      * do perfil. Antes ela ficava por cima do canto direito do gráfico — o
      * crédito ilegível e a linha do relevo cortada.
      */
-    const faixaDoPerfil = style.showProfile && this.perfilDo(track);
     drawAttribution(
       ctx,
       width,
@@ -4495,6 +4514,8 @@ function drawLegend(
   colored: ColoredRoute,
   sf: number,
   lifted: boolean,
+  /** quanto subir além da barra de progresso (a faixa do perfil, quando há) */
+  liftExtra = 0,
 ) {
   const pad = 30 * sf;
   const chipW = 22 * sf;
@@ -4504,7 +4525,7 @@ function drawLegend(
   const placW = innerW + 16 * sf;
   const placH = 44 * sf;
   const px = pad;
-  const py = height - pad - (lifted ? 34 * sf : 0) - placH - 8 * sf;
+  const py = height - pad - (lifted ? 34 * sf : 0) - liftExtra - placH - 8 * sf;
   if (px + placW > width) return;
 
   ctx.save();

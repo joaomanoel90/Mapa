@@ -250,6 +250,7 @@ function fakeCtx() {
     textosYAbs,
     textosXAbs,
     caixas,
+    caixasDesenhadas,
     textosPos,
     textosCor,
     ordem,
@@ -4047,5 +4048,77 @@ describe("perfil de elevação no vídeo", () => {
     expect(barra).toBeDefined();
     expect(dmais!.y).toBeLessThan(barra!.y);
     expect(alturaDoTexto(f, ["842 m"]).length).toBeGreaterThan(0);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* Legenda da rota colorida x faixa do perfil                          */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Os dois moram no rodapé esquerdo.
+ *
+ * A legenda é desenhada **depois** da faixa do perfil, então — sem conta — ela
+ * cobria o começo do gráfico e o rótulo da altitude máxima. Foi o que o usuário
+ * viu: "o gráfico de elevação está atrás da legenda de elevação".
+ */
+describe("legenda da rota colorida e perfil de elevação", () => {
+  /**
+   * A caixa do painel da legenda.
+   *
+   * Não dá para pegar pelo texto: o casamento do `fakeCtx` exige o retângulo
+   * **centrado** no texto, e o título fica no canto do painel. O painel é o
+   * `roundRect` de 44 px de altura e largura da escala.
+   */
+  const caixaDaEscala = (f: ReturnType<typeof fakeCtx>) => {
+    if (!f.textos.includes("inclinação %")) return null;
+    return (
+      f.caixasDesenhadas.find(
+        (b) => Math.abs(b.y1 - b.y0 - 44) < 1.5 && b.x1 - b.x0 > 120 && b.x1 - b.x0 < 360,
+      ) ?? null
+    );
+  };
+
+  it("a legenda sobe e não encosta na faixa do perfil", () => {
+    const f = fakeCtx();
+    desenhar(f.ctx, {
+      ...estado(1, 14, null, null),
+      colored: colorida,
+      style: { ...style, showProfile: true, showProgress: true } as SceneStyle,
+    }, trackSubida);
+    const legenda = caixaDaEscala(f);
+    expect(legenda).not.toBeNull();
+    const faixa = profileLayout(1280, 720, 1, true);
+    // a legenda inteira fica **acima** da faixa
+    expect(legenda!.y1).toBeLessThanOrEqual(faixa.y);
+    // sanidade: a faixa existe e está no rodapé
+    expect(f.textos.join(" ")).toMatch(/D\+ /);
+  });
+
+  it("com o perfil desligado, a legenda desce para o lugar de sempre", () => {
+    const f = fakeCtx();
+    desenhar(f.ctx, {
+      ...estado(1, 14, null, null),
+      colored: colorida,
+      style: { ...style, showProfile: false, showProgress: true } as SceneStyle,
+    }, trackSubida);
+    const legenda = caixaDaEscala(f);
+    expect(legenda).not.toBeNull();
+    // encosta na barra de progresso, e não na faixa do perfil
+    const faixa = profileLayout(1280, 720, 1, true);
+    expect(legenda!.y1).toBeGreaterThan(faixa.y);
+  });
+
+  it("o crédito do mapa também fica acima da faixa", () => {
+    const f = fakeCtx();
+    desenhar(f.ctx, {
+      ...estado(1, 14, null, null),
+      colored: colorida,
+      style: { ...style, showProfile: true, showProgress: true } as SceneStyle,
+    }, trackSubida);
+    const credito = f.textosPos.find((t) => /OpenStreetMap|OpenTopoMap|Esri/.test(t.s));
+    expect(credito).toBeDefined();
+    const faixa = profileLayout(1280, 720, 1, true);
+    expect(credito!.y).toBeLessThan(faixa.y);
   });
 });

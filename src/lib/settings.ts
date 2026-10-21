@@ -2,6 +2,7 @@ import { BASEMAPS, type BasemapId } from "./tiles";
 import type { CameraMode } from "./renderer";
 import type { ColorMode } from "./coloring";
 import { PHOTO_MAX_CHARS, isPhotoDataUrl } from "./photos";
+import type { Boneco } from "./boneco";
 import type { Profile } from "./routing";
 
 /**
@@ -206,6 +207,15 @@ export type Settings = {
    * Vazio = o emoji do personagem escolhido, como sempre foi.
    */
   avatar: string;
+  /**
+   * O **boneco com o rosto**: a foto do avatar como cabeça de uma figura de
+   * corpo inteiro — pedalando, correndo ou andando.
+   *
+   * É a resposta ao "colocar o rosto no boneco que parece pedalando, correndo,
+   * andando". Sem foto escolhida não há rosto para pôr, e o desenho de sempre
+   * (emoji dentro do selo) continua valendo.
+   */
+  boneco: Boneco;
   title: string;
   subtitle: string;
   aspect: AspectId;
@@ -267,6 +277,9 @@ export const DEFAULT_SETTINGS: Settings = {
   som: true,
   musicaVolume: 0.55,
   avatar: "",
+  // desligado por padrão: é um desenho novo no vídeo, e quem já tem o selo com
+  // o emoji não ganha outro personagem sem pedir
+  boneco: "off",
   title: "Minha rota",
   subtitle: "",
   aspect: "16:9",
@@ -347,6 +360,14 @@ export function sanitizeSettings(raw: Partial<Settings>): Partial<Settings> {
   if (out.avatar !== undefined && !isPhotoDataUrl(out.avatar)) delete out.avatar;
   if (typeof out.avatar === "string" && out.avatar.length > PHOTO_MAX_CHARS) {
     delete out.avatar;
+  }
+  if (
+    out.boneco !== "off" &&
+    out.boneco !== "pedala" &&
+    out.boneco !== "corre" &&
+    out.boneco !== "anda"
+  ) {
+    delete out.boneco;
   }
   if (typeof out.fastExport !== "boolean") delete out.fastExport;
   const profiles = ["car", "bike", "foot", "straight"];

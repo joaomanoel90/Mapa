@@ -62,6 +62,7 @@ const SHARED_KEYS = [
   "elevationProfile",
   "highlights",
   "recap",
+  "boneco",
   "activity",
   "colorBy",
   "showKmMarks",

@@ -367,6 +367,13 @@ describe("sharedSettingsOverrides", () => {
     expect(decodeShare(buildShareUrl(base()))?.settings.recap).toBe(false);
   });
 
+  it("o boneco com o rosto viaja no link", () => {
+    const url = buildShareUrl(base({ settings: { ...DEFAULT_SETTINGS, boneco: "corre" } }));
+    expect(decodeShare(url)?.settings.boneco).toBe("corre");
+    // sem escolha, o link carrega o padrão (o selo de sempre)
+    expect(decodeShare(buildShareUrl(base()))?.settings.boneco).toBe("off");
+  });
+
   it("o fantasma à frente viaja no link (é parte da cena)", () => {
     const url = buildShareUrl(base({ settings: { ...DEFAULT_SETTINGS, ghost: true } }));
     expect(decodeShare(url)?.settings.ghost).toBe(true);

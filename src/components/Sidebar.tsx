@@ -23,6 +23,7 @@ import { BASEMAPS, BASEMAP_ORDER, relevoDoMapa } from "../lib/tiles";
 import { TILE_BUDGET } from "../lib/map-budget";
 import { cn } from "../utils/cn";
 import { findCharacter } from "../lib/characters";
+import { BONECO_POSES, type Boneco } from "../lib/boneco";
 import { formatDistance, formatSpeed, type LatLng, type Track } from "../lib/geo";
 import type { VideoFormat } from "../lib/recorder";
 
@@ -491,6 +492,36 @@ function Sidebar(props: Props) {
                 ? "A foto aparece dentro do selo do personagem, no vídeo e na prévia. A seta continua mostrando o rumo."
                 : "Opcional. Sem foto, vale o emoji do personagem escolhido acima."}
             </p>
+
+            {/*
+              O boneco com o rosto: a mesma foto vira a **cabeça** de uma figura
+              de corpo inteiro. Só faz sentido com foto escolhida — sem ela, os
+              botões ficam desligados e o texto diz por quê.
+            */}
+            <div className="mt-3 border-t border-white/10 pt-3">
+              <Label>Boneco com o rosto</Label>
+              <Segmented<Boneco>
+                size="sm"
+                value={s.boneco}
+                onChange={(v) => update("boneco", v)}
+                options={[
+                  { id: "off", label: "Selo", title: "A foto dentro do selo redondo (como é hoje)" },
+                  ...BONECO_POSES.map((p) => ({
+                    id: p.id as Boneco,
+                    label: p.label,
+                    icon: p.icon,
+                    title: `Boneco ${p.label.toLowerCase()} com a sua foto no lugar da cabeça`,
+                  })),
+                ]}
+              />
+              <p className="mt-1.5 text-[10.5px] leading-snug text-zinc-500">
+                {!s.avatar
+                  ? "Escolha a foto acima para o boneco ter um rosto: sem foto, vale o selo."
+                  : s.boneco === "off"
+                    ? "Selo: a foto aparece dentro do aro, sem corpo. Escolha uma pose para a foto virar a cabeça de um boneco de corpo inteiro."
+                    : "A foto vira a cabeça do boneco, com braços e pernas que se mexem no ritmo do percurso. O corpo vira para o lado do rumo — o rosto, não."}
+              </p>
+            </div>
           </div>
           <div>
             <Label>Cor do rastro</Label>

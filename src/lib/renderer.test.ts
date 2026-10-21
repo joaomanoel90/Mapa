@@ -4280,6 +4280,60 @@ describe("avatar do personagem", () => {
     desenhar(f.ctx, { ...estado(0.5, 10, null), photos: cache(true) });
     expect(f.textos).toContain("🚗");
   });
+
+  /*
+   * O **boneco com o rosto**: a mesma foto como cabeça de uma figura de corpo
+   * inteiro. O que se prova: com pose escolhida e foto pronta, o selo redondo
+   * some (nada de emoji, nada de aro) e a foto é desenhada **acima** do ponto
+   * do percurso — a cabeça de quem está em pé, e não o centro do selo.
+   */
+  it("com boneco ligado, a foto vira a cabeça de uma figura em pé", () => {
+    const f = fakeCtx();
+    desenhar(f.ctx, {
+      ...estado(0.5, 10, null),
+      style: { ...style, avatar: FOTO, boneco: "corre" },
+      photos: cache(true),
+    });
+    expect(f.textos).not.toContain("🚗");
+
+    /*
+     * Os `drawImage` da foto dentro do selo são os recortados (8 argumentos) e
+     * pequenos; o corpo do boneco é vetor, então a única imagem é a cabeça. Ela
+     * fica **acima** do ponto do personagem: o y de destino é negativo.
+     */
+    const cabecas = f.imagens.filter((i) => i.args.length === 8);
+    expect(cabecas.length).toBeGreaterThan(0);
+    // a cabeça do boneco é menor que o aro do selo…
+    expect(Math.max(...cabecas.map((i) => i.args[6]))).toBeLessThan(50);
+    // …e a posição da cabeça (acima do ponto do percurso) vem da geometria:
+    // o desenho translada até ela antes de pintar (ver boneco.test.ts)
+    expect(cabecas[cabecas.length - 1].args[5]).toBeLessThan(0);
+  });
+
+  it("com boneco desligado, o selo redondo continua", () => {
+    const f = fakeCtx();
+    desenhar(f.ctx, {
+      ...estado(0.5, 10, null),
+      style: { ...style, avatar: FOTO, boneco: "off" },
+      photos: cache(true),
+    });
+    expect(f.textos).not.toContain("🚗");
+    // a foto do selo é desenhada no tamanho cheio do aro (e não no tamanho de
+    // uma cabeça de boneco, que é menor)
+    const selo = f.imagens.filter((i) => i.args.length === 8);
+    expect(selo.length).toBeGreaterThan(0);
+    expect(Math.max(...selo.map((i) => i.args[6]))).toBeGreaterThan(50);
+  });
+
+  it("boneco sem foto cai no emoji (o personagem nunca some)", () => {
+    const f = fakeCtx();
+    desenhar(f.ctx, {
+      ...estado(0.5, 10, null),
+      style: { ...style, boneco: "pedala" },
+      photos: cache(true),
+    });
+    expect(f.textos).toContain("🚗");
+  });
 });
 
 /*

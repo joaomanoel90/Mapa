@@ -1304,6 +1304,8 @@ function App() {
       ghost: settings.ghost,
       // o aviso de dia novo (só aparece em arquivo multi-dia)
       showDays: settings.dias,
+      // o boneco com o rosto (só vale com a foto do avatar carregada)
+      boneco: settings.boneco,
       avatar: settings.avatar,
       // o logo da marca entra na cartela como a foto do projeto
       logo: settings.logo,
@@ -1869,6 +1871,8 @@ function App() {
               flyTo={flyTo}
               fitRequest={fitRequest}
               character={character}
+              avatar={settings.avatar}
+              boneco={settings.boneco}
               rotate={settings.rotate}
               accent={settings.accent}
               basemap={settings.basemap}

@@ -342,6 +342,21 @@ describe("sharedSettingsOverrides", () => {
     expect(r?.pois[0].t).toBeCloseTo(0.4, 3);
   });
 
+  it("o logo da marca não vai no link, mas a placa clara vai", () => {
+    // o logo é a marca de quem compartilha: no link, ou pesaria dezenas de KB,
+    // ou trocaria a marca de quem abre. A placa clara é só uma escolha de leitura
+    const logo = "data:image/png;base64," + "A".repeat(400);
+    const url = buildShareUrl(
+      base({ settings: { ...DEFAULT_SETTINGS, logo, logoChip: true } }),
+    );
+    expect(url).not.toContain("data:image");
+    const r = decodeShare(url);
+    expect(r).not.toBeNull();
+    expect(r?.settings.logo).toBe("");
+    expect(sharedSettingsOverrides(r?.settings as never).logo).toBeUndefined();
+    expect(r?.settings.logoChip).toBe(true);
+  });
+
   it("a foto da partida e da chegada não entra no link", () => {
     // o link leva emoji e nome, mas não a foto: ~70 KB de texto não passam por
     // mensageiro, e a foto de quem abre continua sendo a dele

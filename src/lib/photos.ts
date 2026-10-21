@@ -166,6 +166,7 @@ export async function downscaleImage(
   file: Blob,
   max = PHOTO_MAX_PX,
   qualidade = PHOTO_QUALITY,
+  alfa = false,
 ): Promise<string> {
   const fonte = await abrirImagem(file);
   const { w, h } = fitSize(fonte.width, fonte.height, max);
@@ -180,7 +181,15 @@ export async function downscaleImage(
   ctx.drawImage(fonte.imagem as CanvasImageSource, 0, 0, w, h);
   liberar(fonte);
 
-  const url = canvas.toDataURL("image/jpeg", qualidade);
+  /*
+   * Logo com fundo transparente vira PNG — JPEG pintaria o vazio de preto e a
+   * marca apareceria num retângulo escuro sobre a cartela. A escolha olha o
+   * tipo do arquivo: foto de celular (JPEG) continua JPEG, que é bem menor.
+   */
+  const comAlfa = alfa && /^image\/(png|webp|gif)$/.test(file.type ?? "");
+  const url = comAlfa
+    ? canvas.toDataURL("image/png")
+    : canvas.toDataURL("image/jpeg", qualidade);
   if (!isPhotoDataUrl(url)) {
     throw new Error("A imagem não pôde ser convertida. Tente outra foto.");
   }

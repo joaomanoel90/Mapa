@@ -40,12 +40,22 @@ export function saveSettings(
   } catch {
     /* provavelmente cota estourada */
   }
-  if (settings.cardPhoto) {
+  if (settings.cardPhoto || settings.logo) {
     try {
-      storage.setItem(chave, JSON.stringify({ ...settings, cardPhoto: "" }));
+      // primeiro só a foto sai; o logo pode ser o que ainda faz caber
+      storage.setItem(
+        chave,
+        JSON.stringify({ ...settings, cardPhoto: "", logo: settings.logo }),
+      );
       return "sem-foto";
     } catch {
       /* nem sem a foto coube */
+    }
+    try {
+      storage.setItem(chave, JSON.stringify({ ...settings, cardPhoto: "", logo: "" }));
+      return "sem-foto";
+    } catch {
+      /* nem sem as imagens coube */
     }
   }
   return "falhou";

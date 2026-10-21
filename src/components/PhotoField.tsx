@@ -25,6 +25,9 @@ export default function PhotoField({
   compacto = false,
   rotulo = "Foto",
   ariaLabel = "Foto",
+  max,
+  alfa = false,
+  onde = "no alto da cartela final",
 }: {
   valor: string;
   onValor: (v: string) => void;
@@ -32,6 +35,12 @@ export default function PhotoField({
   compacto?: boolean;
   rotulo?: string;
   ariaLabel?: string;
+  /** lado maior da imagem guardada (o logo não precisa de 640 px) */
+  max?: number;
+  /** guarda PNG quando o arquivo tem transparência (logo, não foto) */
+  alfa?: boolean;
+  /** onde a imagem aparece, para o texto abaixo do botão */
+  onde?: string;
 }) {
   const input = useRef<HTMLInputElement | null>(null);
   const [erro, setErro] = useState<string | null>(null);
@@ -47,7 +56,7 @@ export default function PhotoField({
     setErro(null);
     setOcupado(true);
     try {
-      onValor(await downscaleImage(file));
+      onValor(await downscaleImage(file, max, undefined, alfa));
     } catch (err) {
       setErro(err instanceof Error ? err.message : "Não foi possível usar esta foto.");
     } finally {
@@ -117,7 +126,7 @@ export default function PhotoField({
                   : "border-dashed border-white/20 text-zinc-500 hover:border-white/35 hover:text-zinc-200",
                 ocupado && "opacity-50",
               )}
-              title={valor ? "Trocar a foto" : "Adicionar a foto do projeto"}
+              title={valor ? `Trocar: ${rotulo}` : `Adicionar: ${rotulo}`}
             >
               {valor ? <img src={valor} alt="" className="h-full w-full object-cover" /> : "📷"}
             </button>
@@ -127,8 +136,8 @@ export default function PhotoField({
                 {ocupado
                   ? "Preparando a foto…"
                   : valor
-                    ? `${tamanho} · aparece no alto da cartela final`
-                    : "Aparece no alto da cartela final"}
+                    ? `${tamanho} · aparece ${onde}`
+                    : `Aparece ${onde}`}
               </p>
               {valor && (
                 <div className="mt-1 flex gap-1.5">
@@ -151,8 +160,9 @@ export default function PhotoField({
             </div>
           </div>
           <p className="text-[10px] leading-snug text-zinc-600">
-            A foto é reduzida para 640 px e fica só neste navegador — ela não vai
-            no link compartilhado.
+            {alfa
+              ? "A imagem mantém o fundo transparente (PNG) e fica só neste navegador — ela não vai no link compartilhado."
+              : `A foto é reduzida para ${max ?? 640} px e fica só neste navegador — ela não vai no link compartilhado.`}
           </p>
         </>
       )}

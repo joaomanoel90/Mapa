@@ -868,7 +868,9 @@ Duas fotos, as duas **reduzidas a 640 px** antes de entrar no app:
 - **foto do projeto** — aparece em círculo no alto da cartela final;
 - **foto da partida e da chegada** — o painel "Partida e chegada" tem o mesmo
   campo de foto das paradas; ela aparece no vídeo (círculo, na largada e na
-  chegada) e no pino A/B do mapa.
+  chegada) e no pino A/B do mapa;
+- **logo da marca** — no painel da cartela, ao lado da foto do projeto; aparece
+  na cartela final (ver abaixo).
 
 **Por que reduzir.** Uma foto de celular tem 4.000 px e 4 MB. Guardada como veio,
 estouraria o `localStorage` (que tem ~5 MB para o site inteiro) e desenharia uma
@@ -888,6 +890,26 @@ inclinado) e ficou estranha no vídeo: o branco chamava mais atenção do que a
 própria foto, e o quadrado parecia um papel colado no mapa. Virou **círculo**,
 com o anel na cor da parada e um contorno escuro fino para não sumir no mapa
 claro — a mesma ideia do pino e do avatar da cartela, que já eram redondos.
+
+**A marca do projeto: o logo na cartela.** O painel da cartela ganhou o campo
+**Logo** — a mesma peneira da foto (só data URL de imagem, reduzida e dentro do
+teto que protege o `localStorage`), com duas diferenças: a imagem é guardada em
+**PNG** quando tem transparência (o JPEG pintaria o vazio de preto, e a marca
+apareceria num retângulo escuro) e o lado maior vai a 480 px, que é mais do que
+a cartela usa. O desenho depende do que já está no alto do painel:
+
+| cartela | onde o logo fica |
+|---|---|
+| **com foto do projeto** | na mesma linha do avatar, à esquerda — encolhe para caber no espaço que sobra e nunca encosta no círculo |
+| **sem foto** | sozinho, centralizado no alto; a altura dele entra na conta do painel, então os números descem em vez de serem cobertos |
+
+**A placa clara** (interruptor ao lado do campo) desenha um retângulo branco atrás
+do logo. É para marca escura: o painel da cartela é escuro, e um logo escuro
+sumiria nele. Sem a placa, o logo é desenhado como veio.
+
+Como as outras imagens, o logo **não vai no link compartilhado** — só o
+interruptor da placa clara vai, porque é uma escolha de leitura do painel. O link
+continua servindo para descrever a cena, não para carregar imagens de ninguém.
 
 **O pino da partida e da chegada é o mesmo pino das paradas** — mesmo aro
 colorido, mesmo fundo, mesmo brilho. Antes ele tinha o seu próprio desenho, mais
@@ -1226,7 +1248,7 @@ ou cortados.
 
 ```bash
 npm run typecheck  # tsc --noEmit
-npm test           # Vitest (889 casos)
+npm test           # Vitest (906 casos)
 npm run check:dist # o build saiu autocontido e sem /src/?
 ```
 

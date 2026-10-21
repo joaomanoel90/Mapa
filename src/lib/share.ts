@@ -68,6 +68,7 @@ const SHARED_KEYS = [
   "cardElevation",
   "cardTime",
   "cardNote",
+  "logoChip",
   "title",
   "subtitle",
   "aspect",
@@ -392,6 +393,13 @@ export function sharedSettingsOverrides(settings: Settings): Partial<Settings> {
    * pessoa tinha escolhido.
    */
   delete out.cardPhoto;
+  /*
+   * O logo da marca também fica em casa. Ele é uma imagem do projeto de quem
+   * compartilha: colada no link, ou aumentaria o endereço em dezenas de KB, ou
+   * trocaria a marca de quem abre. Vai só o interruptor da placa clara, que é
+   * uma escolha de leitura do painel.
+   */
+  delete out.logo;
   return out;
 }
 

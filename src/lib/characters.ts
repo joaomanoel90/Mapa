@@ -5,7 +5,7 @@ export type Character = {
   id: string;
   name: string;
   emoji: string;
-  group: "Veículos" | "Pessoas" | "Bichos" | "Voadores" | "Esportes";
+  group: "Veículos" | "Pessoas" | "Ofícios" | "Bichos" | "Voadores" | "Esportes";
   /** gira o emoji conforme a direção da rota */
   rotate?: boolean;
   /** compensação (graus) do desenho do emoji (0 = aponta para cima) */
@@ -24,6 +24,16 @@ export type Character = {
   gait?: Gait;
   /** passadas por segundo de vídeo (o padrão vem do tipo de andar) */
   gaitHz?: number;
+  /**
+   * Um emoji **pequeno** no canto do selo, por cima da figura.
+   *
+   * Existe porque o Unicode simplesmente não tem peregrino nem padre: o jeito
+   * de ter os dois é compor — a pessoa que anda (🚶) mais a mochila (🎒), o
+   * homem de preto (🤵) mais a cruz (✝️). O acessório entra com um disco escuro
+   * atrás para não se perder no emoji grande, do mesmo tamanho no painel, na
+   * prévia e no vídeo.
+   */
+  acessorio?: string;
 };
 
 export const CHARACTERS: Character[] = [
@@ -46,6 +56,23 @@ export const CHARACTERS: Character[] = [
   { id: "tractor", name: "Trator", emoji: "🚜", group: "Veículos", size: 1.1 },
   { id: "race", name: "Fórmula", emoji: "🏎️", group: "Veículos", size: 1 },
   { id: "tuktuk", name: "Tuk-tuk", emoji: "🛺", group: "Veículos", size: 1 },
+  /*
+   * --- veículos que faltavam ---
+   *
+   * Os que existem em emoji e aparecem numa rota de verdade: a lambreta da
+   * cidade, a carreta da estrada, o trem (locomotiva, trem-bala, bonde) e o
+   * teleférico da serra.
+   */
+  { id: "moped", name: "Lambreta", emoji: "🛵", group: "Veículos", size: 1 },
+  { id: "heavytruck", name: "Carreta", emoji: "🚛", group: "Veículos", size: 1.15 },
+  { id: "steam", name: "Locomotiva", emoji: "🚂", group: "Veículos", size: 1.1 },
+  { id: "bullet", name: "Trem-bala", emoji: "🚄", group: "Veículos", size: 1.1 },
+  { id: "tram", name: "Bonde", emoji: "🚋", group: "Veículos", size: 1.05 },
+  { id: "cablecar", name: "Teleférico", emoji: "🚡", group: "Veículos", size: 1.05 },
+  { id: "ferry", name: "Balsa", emoji: "⛴️", group: "Veículos", size: 1.1 },
+  { id: "canoe", name: "Canoa", emoji: "🛶", group: "Veículos", size: 1 },
+  // "cruzeiro" também é a cruz de beira de estrada lá nas paradas: o nome diz qual é qual
+  { id: "cruise", name: "Navio de cruzeiro", emoji: "🛳️", group: "Veículos", size: 1.15 },
   { id: "walk", name: "Caminhada", emoji: "🚶", group: "Pessoas", size: 1, gait: "passo", gaitHz: 1.9 },
   { id: "run", name: "Corrida", emoji: "🏃", group: "Pessoas", size: 1, gait: "passo", gaitHz: 3 },
   { id: "hike", name: "Trilha", emoji: "🥾", group: "Pessoas", size: 1, gait: "passo", gaitHz: 1.8 },
@@ -57,6 +84,76 @@ export const CHARACTERS: Character[] = [
   { id: "mage", name: "Mago", emoji: "🧙", group: "Pessoas", size: 1.05 },
   { id: "mermaid", name: "Sereia", emoji: "🧜", group: "Pessoas", size: 1.05, gait: "flutua", gaitHz: 0.9 },
   { id: "guard", name: "Guarda", emoji: "👮", group: "Pessoas", size: 1 },
+  /*
+   * --- fé e caminhada (os compostos) ---
+   *
+   * Não existe emoji de peregrino nem de padre. Em vez de inventar um desenho
+   * (que brigaria com o resto da lista), os dois são **compostos**: a figura
+   * base mais um acessório pequeno no canto do selo. É o mesmo emoji em todo
+   * lugar — painel, prévia e vídeo.
+   */
+  {
+    id: "peregrino",
+    name: "Peregrino",
+    emoji: "🚶",
+    acessorio: "🎒",
+    group: "Pessoas",
+    size: 1,
+    gait: "passo",
+    gaitHz: 1.6,
+  },
+  {
+    id: "padre",
+    name: "Padre",
+    emoji: "🤵",
+    acessorio: "✝️",
+    group: "Pessoas",
+    size: 1,
+    gait: "passo",
+    gaitHz: 1.7,
+  },
+  /*
+   * --- o resto de gente que cabe no selo ---
+   *
+   * Cada um com o seu passo: o bebê e a pessoa idosa andam devagar, o
+   * supervilão anda depressa. Quem paira (anjo, fada, gênio) sobe e desce
+   * devagar, como o fantasma.
+   */
+  { id: "angel", name: "Anjo", emoji: "👼", group: "Pessoas", size: 0.95, gait: "flutua", gaitHz: 0.7 },
+  { id: "fairy", name: "Fada", emoji: "🧚", group: "Pessoas", size: 0.95, gait: "flutua", gaitHz: 1.1 },
+  { id: "vampire", name: "Vampiro", emoji: "🧛", group: "Pessoas", size: 1, gait: "passo", gaitHz: 1.9 },
+  { id: "genie", name: "Gênio", emoji: "🧞", group: "Pessoas", size: 1.05, gait: "flutua", gaitHz: 0.8 },
+  { id: "villain", name: "Supervilão", emoji: "🦹", group: "Pessoas", size: 1, gait: "passo", gaitHz: 2.3 },
+  { id: "santa", name: "Papai Noel", emoji: "🎅", group: "Pessoas", size: 1, gait: "passo", gaitHz: 1.5 },
+  { id: "mrs-claus", name: "Mamãe Noel", emoji: "🤶", group: "Pessoas", size: 1, gait: "passo", gaitHz: 1.5 },
+  { id: "bride", name: "Noiva", emoji: "👰", group: "Pessoas", size: 1, gait: "passo", gaitHz: 1.8 },
+  { id: "groom", name: "Noivo", emoji: "🤵", group: "Pessoas", size: 1, gait: "passo", gaitHz: 1.9 },
+  { id: "prince", name: "Príncipe", emoji: "🤴", group: "Pessoas", size: 1, gait: "passo", gaitHz: 1.9 },
+  { id: "princess", name: "Princesa", emoji: "👸", group: "Pessoas", size: 1, gait: "passo", gaitHz: 1.9 },
+  { id: "grandpa", name: "Vovô", emoji: "👴", group: "Pessoas", size: 1, gait: "passo", gaitHz: 1.5 },
+  { id: "grandma", name: "Vovó", emoji: "👵", group: "Pessoas", size: 1, gait: "passo", gaitHz: 1.5 },
+  { id: "baby", name: "Bebê", emoji: "👶", group: "Pessoas", size: 0.9, gait: "passo", gaitHz: 2.2 },
+  { id: "elder", name: "Pessoa idosa", emoji: "🧓", group: "Pessoas", size: 1, gait: "passo", gaitHz: 1.4 },
+  /*
+   * --- ofícios ---
+   *
+   * Um grupo novo: a pessoa pelo que ela faz. É o que dá sentido a uma rota de
+   * entrega, de obra ou de visita — o mapa passa a ter quem trabalha nela.
+   */
+  { id: "farmer", name: "Fazendeiro", emoji: "🧑‍🌾", group: "Ofícios", size: 1, gait: "passo", gaitHz: 1.8 },
+  { id: "cook", name: "Cozinheiro", emoji: "🧑‍🍳", group: "Ofícios", size: 1, gait: "passo", gaitHz: 2 },
+  { id: "doctor", name: "Médico", emoji: "🧑‍⚕️", group: "Ofícios", size: 1, gait: "passo", gaitHz: 1.9 },
+  { id: "teacher", name: "Professor", emoji: "🧑‍🏫", group: "Ofícios", size: 1, gait: "passo", gaitHz: 1.8 },
+  { id: "student", name: "Estudante", emoji: "🧑‍🎓", group: "Ofícios", size: 1, gait: "passo", gaitHz: 2 },
+  { id: "scientist", name: "Cientista", emoji: "🧑‍🔬", group: "Ofícios", size: 1, gait: "passo", gaitHz: 1.9 },
+  { id: "dev", name: "Programador", emoji: "🧑‍💻", group: "Ofícios", size: 1, gait: "passo", gaitHz: 1.9 },
+  { id: "mechanic", name: "Mecânico", emoji: "🧑‍🔧", group: "Ofícios", size: 1, gait: "passo", gaitHz: 1.8 },
+  { id: "worker", name: "Operário", emoji: "🧑‍🏭", group: "Ofícios", size: 1, gait: "passo", gaitHz: 1.8 },
+  { id: "judge", name: "Juiz", emoji: "🧑‍⚖️", group: "Ofícios", size: 1, gait: "passo", gaitHz: 1.8 },
+  { id: "pilot", name: "Piloto", emoji: "🧑‍✈️", group: "Ofícios", size: 1, gait: "passo", gaitHz: 1.9 },
+  { id: "astronaut", name: "Astronauta", emoji: "🧑‍🚀", group: "Ofícios", size: 1, gait: "flutua", gaitHz: 0.7 },
+  { id: "artist", name: "Artista", emoji: "🧑‍🎨", group: "Ofícios", size: 1, gait: "passo", gaitHz: 1.8 },
+  { id: "singer", name: "Cantor", emoji: "🧑‍🎤", group: "Ofícios", size: 1, gait: "passo", gaitHz: 1.8 },
   { id: "dog", name: "Cachorro", emoji: "🐕", group: "Bichos", size: 1, gait: "passo", gaitHz: 3.4 },
   { id: "cat", name: "Gato", emoji: "🐈", group: "Bichos", size: 1, gait: "passo", gaitHz: 2.6 },
   { id: "horse", name: "Cavalo", emoji: "🐎", group: "Bichos", size: 1, gait: "passo", gaitHz: 2.2 },
@@ -71,6 +168,38 @@ export const CHARACTERS: Character[] = [
   { id: "penguin", name: "Pinguim", emoji: "🐧", group: "Bichos", size: 1 },
   { id: "croc", name: "Jacaré", emoji: "🐊", group: "Bichos", size: 1.05 },
   { id: "bee", name: "Abelha", emoji: "🐝", group: "Bichos", size: 0.85 },
+  /*
+   * --- o resto da fauna ---
+   *
+   * Boi, ovelha e galo de sítio; lobo, raposa e urso de trilha; o bicharedo de
+   * zoológico. Quem nada ou voa paira devagar; quem anda tem passo.
+   */
+  { id: "cow", name: "Vaca", emoji: "🐄", group: "Bichos", size: 1.1, gait: "passo", gaitHz: 1.6 },
+  { id: "ox", name: "Boi", emoji: "🐂", group: "Bichos", size: 1.1, gait: "passo", gaitHz: 1.6 },
+  { id: "sheep", name: "Ovelha", emoji: "🐑", group: "Bichos", size: 1, gait: "passo", gaitHz: 1.8 },
+  { id: "goat", name: "Cabra", emoji: "🐐", group: "Bichos", size: 1, gait: "passo", gaitHz: 2.4 },
+  { id: "rooster", name: "Galo", emoji: "🐓", group: "Bichos", size: 0.95, gait: "passo", gaitHz: 2.8 },
+  { id: "duck", name: "Pato", emoji: "🦆", group: "Bichos", size: 0.9, gait: "passo", gaitHz: 2.4 },
+  { id: "owl", name: "Coruja", emoji: "🦉", group: "Bichos", size: 0.95, gait: "flutua", gaitHz: 1.4 },
+  { id: "wolf", name: "Lobo", emoji: "🐺", group: "Bichos", size: 1.05, gait: "passo", gaitHz: 3 },
+  { id: "fox", name: "Raposa", emoji: "🦊", group: "Bichos", size: 0.95, gait: "passo", gaitHz: 2.8 },
+  { id: "bear", name: "Urso", emoji: "🐻", group: "Bichos", size: 1.15, gait: "passo", gaitHz: 1.8 },
+  { id: "panda", name: "Panda", emoji: "🐼", group: "Bichos", size: 1.1, gait: "passo", gaitHz: 1.4 },
+  { id: "kangaroo", name: "Canguru", emoji: "🦘", group: "Bichos", size: 1.05, gait: "passo", gaitHz: 2.2 },
+  { id: "camel", name: "Camelo", emoji: "🐫", group: "Bichos", size: 1.1, gait: "passo", gaitHz: 1.3 },
+  { id: "llama", name: "Lhama", emoji: "🦙", group: "Bichos", size: 1, gait: "passo", gaitHz: 1.8 },
+  { id: "giraffe", name: "Girafa", emoji: "🦒", group: "Bichos", size: 1.15, gait: "passo", gaitHz: 1.4 },
+  { id: "zebra", name: "Zebra", emoji: "🦓", group: "Bichos", size: 1.1, gait: "passo", gaitHz: 2.2 },
+  { id: "lion", name: "Leão", emoji: "🦁", group: "Bichos", size: 1.1, gait: "passo", gaitHz: 2 },
+  { id: "tiger", name: "Tigre", emoji: "🐯", group: "Bichos", size: 1.05, gait: "passo", gaitHz: 2.4 },
+  { id: "sloth", name: "Preguiça", emoji: "🦥", group: "Bichos", size: 1, gait: "passo", gaitHz: 0.5 },
+  { id: "rabbit", name: "Coelho", emoji: "🐇", group: "Bichos", size: 0.95, gait: "passo", gaitHz: 2.6 },
+  { id: "parrot", name: "Papagaio", emoji: "🦜", group: "Bichos", size: 0.95, gait: "flutua", gaitHz: 1.8 },
+  { id: "butterfly", name: "Borboleta", emoji: "🦋", group: "Bichos", size: 0.85, gait: "flutua", gaitHz: 2.4 },
+  { id: "whale", name: "Baleia", emoji: "🐳", group: "Bichos", size: 1.15, gait: "flutua", gaitHz: 0.5 },
+  { id: "dolphin", name: "Golfinho", emoji: "🐬", group: "Bichos", size: 1.05, gait: "flutua", gaitHz: 1.4 },
+  { id: "octopus", name: "Polvo", emoji: "🐙", group: "Bichos", size: 1, gait: "flutua", gaitHz: 0.9 },
+  { id: "snake", name: "Cobra", emoji: "🐍", group: "Bichos", size: 1, gait: "flutua", gaitHz: 1 },
   { id: "plane", name: "Avião", emoji: "✈️", group: "Voadores", size: 1.05, rotate: true, baseAngle: -45 },
   { id: "jet", name: "Jato", emoji: "🛩️", group: "Voadores", size: 1.05, rotate: true, baseAngle: -45 },
   { id: "heli", name: "Helicóptero", emoji: "🚁", group: "Voadores", size: 1.05, rotate: true, baseAngle: 180 },
@@ -88,6 +217,22 @@ export const CHARACTERS: Character[] = [
   { id: "row", name: "Remo", emoji: "🚣", group: "Esportes", size: 1, gait: "flutua", gaitHz: 1 },
   { id: "skate", name: "Skate", emoji: "🛹", group: "Esportes", size: 1, gait: "roda" },
   { id: "sled", name: "Trenó", emoji: "🛷", group: "Esportes", size: 1, gait: "roda" },
+  /*
+   * --- esportes ---
+   *
+   * Os que se vê numa rota de fim de semana: mountain bike na terra, snowboard
+   * e esqui na neve, e o resto (ginástica, yoga, musculação, basquete, golfe,
+   * esgrima) para uma rota que passa pela academia, pela quadra ou pelo campo.
+   */
+  { id: "mtb", name: "Mountain bike", emoji: "🚵", group: "Esportes", size: 1, gait: "roda" },
+  { id: "snowboard", name: "Snowboard", emoji: "🏂", group: "Esportes", size: 1, gait: "roda" },
+  { id: "xcski", name: "Esqui de fundo", emoji: "🎿", group: "Esportes", size: 1, gait: "roda" },
+  { id: "gymnast", name: "Ginasta", emoji: "🤸", group: "Esportes", size: 1, gait: "passo", gaitHz: 2.6 },
+  { id: "yoga", name: "Yoga", emoji: "🧘", group: "Esportes", size: 1, gait: "flutua", gaitHz: 0.5 },
+  { id: "lifter", name: "Musculação", emoji: "🏋️", group: "Esportes", size: 1, gait: "passo", gaitHz: 1.4 },
+  { id: "basket", name: "Basquete", emoji: "⛹️", group: "Esportes", size: 1, gait: "passo", gaitHz: 2.6 },
+  { id: "golf", name: "Golfe", emoji: "🏌️", group: "Esportes", size: 1, gait: "passo", gaitHz: 1.6 },
+  { id: "fencing", name: "Esgrima", emoji: "🤺", group: "Esportes", size: 1, gait: "passo", gaitHz: 2.6 },
 ];
 
 /** Passadas por segundo de cada tipo de andar (padrão). */

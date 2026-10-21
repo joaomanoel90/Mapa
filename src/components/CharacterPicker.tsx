@@ -13,7 +13,12 @@ export function CharacterPicker({
   const groups = useMemo(() => {
     const q = query.trim().toLowerCase();
     return CHARACTERS.filter(
-      (c) => !q || c.name.toLowerCase().includes(q) || c.emoji.includes(q),
+      (c) =>
+        !q ||
+        c.name.toLowerCase().includes(q) ||
+        c.emoji.includes(q) ||
+        // colar o emoji do acessório (🎒, ✝️) também acha o personagem
+        (c.acessorio ?? "").includes(q),
     ).reduce<Record<string, Character[]>>((acc, c) => {
       (acc[c.group] ??= []).push(c);
       return acc;
@@ -49,6 +54,20 @@ export function CharacterPicker({
                   )}
                 >
                   <span className="drop-shadow-[0_2px_4px_rgba(0,0,0,0.5)]">{c.emoji}</span>
+                  {/*
+                    O acessório dos compostos (a mochila do peregrino, a cruz do
+                    padre) aparece aqui como aparece no vídeo: pequeno, no canto,
+                    com um disco escuro atrás. Sem isso os dois "🤵" da lista
+                    ficariam idênticos no painel.
+                  */}
+                  {c.acessorio && (
+                    <span
+                      className="absolute bottom-0.5 right-0.5 grid h-3.5 w-3.5 place-items-center rounded-full bg-zinc-950/95 text-[8px] ring-1 ring-white/30"
+                      aria-hidden
+                    >
+                      {c.acessorio}
+                    </span>
+                  )}
                   {value === c.id && (
                     <span className="absolute -right-1 -top-1 grid h-4 w-4 place-items-center rounded-full bg-violet-500 text-[9px] font-black text-white">
                       ✓

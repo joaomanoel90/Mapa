@@ -236,6 +236,26 @@ body {
   place-items: center;
 }
 
+/*
+ * O acessório dos personagens compostos (mochila do peregrino, cruz do padre)
+ * na prévia: o mesmo disco escuro com aro do acento que o vídeo desenha.
+ */
+.char-acessorio {
+  position: absolute;
+  right: 4px;
+  bottom: 4px;
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 999px;
+  background: rgba(9, 12, 20, 0.96);
+  border: 1.5px solid var(--accent, #a3e635);
+  font-size: 10px;
+  line-height: 1;
+  pointer-events: none;
+}
+
 .char-emoji {
   position: relative;
   /* maior, como no vídeo: a figura não pode ficar pequena dentro do aro */

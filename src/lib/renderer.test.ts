@@ -4337,6 +4337,45 @@ describe("avatar do personagem", () => {
 });
 
 /*
+ * O **acessório** dos personagens compostos — a mochila do peregrino, a cruz do
+ * padre. O Unicode não tem peregrino nem padre: o jeito de ter os dois é
+ * compor, e o desenho precisa mostrar as duas partes.
+ */
+describe("o acessório do personagem composto", () => {
+  const desenharCom = (id: string) => {
+    const f = fakeCtx();
+    desenhar(f.ctx, { ...estado(0.5, 10, null), character: findCharacter(id) });
+    return f;
+  };
+
+  it("o peregrino desenha a figura e a mochila", () => {
+    const f = desenharCom("peregrino");
+    expect(f.textos).toContain("🚶");
+    expect(f.textos).toContain("🎒");
+  });
+
+  it("a mochila entra no canto de baixo, fora do centro do selo", () => {
+    const f = desenharCom("peregrino");
+    const i = f.textos.indexOf("🎒");
+    const p = f.textosPos[i];
+    expect(p.x).toBeGreaterThan(0);
+    expect(p.y).toBeGreaterThan(0);
+  });
+
+  it("o padre leva a cruz", () => {
+    const f = desenharCom("padre");
+    expect(f.textos).toContain("🤵");
+    expect(f.textos).toContain("✝️");
+  });
+
+  it("personagem sem acessório não ganha enfeite nenhum", () => {
+    const f = desenharCom("cow");
+    const extras = f.textos.filter((t) => t === "🎒" || t === "✝️");
+    expect(extras).toEqual([]);
+  });
+});
+
+/*
  * O rastro do vídeo não pode passar do personagem.
  *
  * Numa rota de cidade o exagero era de metros; num traçado de poucos pontos —

@@ -97,6 +97,63 @@ export const POI_KINDS: PoiKind[] = [
   { id: "recarga", name: "Recarga elétrica", emoji: "🔌", color: "#a3e635", group: "Transporte" },
   { id: "balsa", name: "Balsa", emoji: "⛴️", color: "#67e8f9", group: "Transporte" },
   { id: "teleferico", name: "Teleférico", emoji: "🚡", color: "#fbbf24", group: "Transporte" },
+
+  /*
+   * ------------------------------------------------------------------
+   * Tipos novos — **sempre no fim da lista**
+   * ------------------------------------------------------------------
+   *
+   * O link compartilhado guarda a parada pelo **índice** do tipo aqui (ver
+   * `kindIndexFor`, em `share.ts`): um link antigo abre no tipo certo porque a
+   * posição não mudou. Por isso tudo que entra depois disto é acrescentado —
+   * nunca no meio —, e `pois.test.ts` congela os 67 primeiros índices.
+   */
+
+  // Natureza: o que aparece numa travessia e não cabia em "montanha"
+  { id: "pico", name: "Pico", emoji: "🗻", color: "#94a3b8", group: "Natureza" },
+  { id: "costa", name: "Costa", emoji: "🌊", color: "#0ea5e9", group: "Natureza" },
+  { id: "campo", name: "Campo", emoji: "🌾", color: "#ca8a04", group: "Natureza" },
+  { id: "girassol", name: "Girassol", emoji: "🌻", color: "#facc15", group: "Natureza" },
+  { id: "vinhedo", name: "Vinhedo", emoji: "🍇", color: "#7c3aed", group: "Natureza" },
+  { id: "concha", name: "Concha", emoji: "🐚", color: "#fda4af", group: "Natureza" },
+  { id: "nascente", name: "Nascente", emoji: "💧", color: "#38bdf8", group: "Natureza" },
+  { id: "cacto", name: "Cacto", emoji: "🌵", color: "#22c55e", group: "Natureza" },
+  { id: "sol", name: "Nascer do sol", emoji: "🌅", color: "#f97316", group: "Natureza" },
+
+  // Cultura: os lugares de fé de uma peregrinação, e o que sobrou de outros tempos
+  { id: "santuario", name: "Santuário", emoji: "🕯️", color: "#fbbf24", group: "Cultura" },
+  { id: "cruzeiro", name: "Cruzeiro", emoji: "✝️", color: "#fef08a", group: "Cultura" },
+  { id: "sinagoga", name: "Sinagoga", emoji: "🕍", color: "#93c5fd", group: "Cultura" },
+  { id: "torii", name: "Portal torii", emoji: "⛩️", color: "#f87171", group: "Cultura" },
+  { id: "ruinas", name: "Ruínas", emoji: "🏚️", color: "#a8a29e", group: "Cultura" },
+  { id: "mural", name: "Mural", emoji: "🎨", color: "#f472b6", group: "Cultura" },
+
+  // Cidade: o que dá referência no meio do quarteirão
+  { id: "bairro", name: "Bairro", emoji: "🏘️", color: "#fca5a5", group: "Cidade" },
+  { id: "fabrica", name: "Fábrica", emoji: "🏭", color: "#94a3b8", group: "Cidade" },
+  { id: "predio", name: "Prédio", emoji: "🏢", color: "#60a5fa", group: "Cidade" },
+  { id: "loja", name: "Loja", emoji: "🏪", color: "#34d399", group: "Cidade" },
+  { id: "vista", name: "Vista urbana", emoji: "🏙️", color: "#818cf8", group: "Cidade" },
+
+  // Serviços: comida, apoio e o que se procura no meio do caminho
+  { id: "lanchonete", name: "Lanchonete", emoji: "🍔", color: "#fb923c", group: "Serviços" },
+  { id: "churrascaria", name: "Churrascaria", emoji: "🥩", color: "#ef4444", group: "Serviços" },
+  { id: "confeitaria", name: "Confeitaria", emoji: "🧁", color: "#f9a8d4", group: "Serviços" },
+  { id: "chocolateria", name: "Chocolateria", emoji: "🍫", color: "#a16207", group: "Serviços" },
+  { id: "adega", name: "Adega", emoji: "🍷", color: "#991b1b", group: "Serviços" },
+  { id: "oficina", name: "Oficina", emoji: "🔧", color: "#a3a3a3", group: "Serviços" },
+  { id: "caixa", name: "Caixa eletrônico", emoji: "🏧", color: "#60a5fa", group: "Serviços" },
+  { id: "wifi", name: "Wi-fi", emoji: "📶", color: "#22d3ee", group: "Serviços" },
+  { id: "apoio", name: "Ponto de apoio", emoji: "🆘", color: "#f87171", group: "Serviços" },
+  { id: "japones", name: "Restaurante japonês", emoji: "🍣", color: "#f472b6", group: "Serviços" },
+  { id: "albergue", name: "Albergue", emoji: "🛏️", color: "#a78bfa", group: "Serviços" },
+
+  // Transporte: onde a rota cruza ou troca de meio
+  { id: "rodoviaria", name: "Rodoviária", emoji: "🚌", color: "#60a5fa", group: "Transporte" },
+  { id: "rodovia", name: "Rodovia", emoji: "🛣️", color: "#a3a3a3", group: "Transporte" },
+  { id: "cruzamento", name: "Cruzamento", emoji: "🚦", color: "#4ade80", group: "Transporte" },
+  { id: "marco", name: "Marco", emoji: "🪧", color: "#fbbf24", group: "Transporte" },
+  { id: "heliponto", name: "Heliponto", emoji: "🚁", color: "#38bdf8", group: "Transporte" },
 ];
 
 export const POI_GROUPS: PoiKind["group"][] = [

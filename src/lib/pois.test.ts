@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { buildTrack } from "./geo";
 import {
+  POI_GROUPS,
+  POI_KINDS,
   isOffRoute,
   kindById,
   makePoi,
@@ -122,5 +124,60 @@ describe("posição da parada em relação à rota", () => {
     const colada = snapPoiToRoute(longe);
     expect(colada.pos).toBeUndefined();
     expect(poiOffset(colada, track)).toBe(0);
+  });
+});
+
+/*
+ * O link compartilhado guarda a parada pelo **índice** do tipo em `POI_KINDS`
+ * (ver `kindIndexFor` em share.ts). Isto é o contrato com todo link já
+ * publicado: os 67 primeiros tipos não podem mudar de posição. Tipo novo entra
+ * no **fim** da lista — e esta lista congelada avisa quando alguém esquecer.
+ */
+describe("a ordem dos tipos de parada", () => {
+  const CONGELADOS = [
+    "ponte", "cachoeira", "mirante", "parque", "praia", "lago", "montanha",
+    "floresta", "trilha", "rio", "praca", "estatua", "portal", "torre", "coreto",
+    "feira", "igreja", "museu", "castelo", "teatro", "monumento", "farol",
+    "restaurante", "cafe", "padaria", "mercado", "hotel", "camping", "hospital",
+    "escola", "estacao", "aeroporto", "post", "pedagio", "tunel", "parada",
+    "porto", "destino", "vulcao", "deserto", "ilha", "gruta", "jardim",
+    "reserva", "zoologico", "aquario", "estadio", "roda-gigante", "observatorio",
+    "biblioteca", "cinema", "galeria", "templo", "mesquita", "pizzaria",
+    "sorveteria", "bar", "farmacia", "banco", "compras", "banheiro",
+    "agua-potavel", "estacionamento", "bicicletario", "recarga", "balsa",
+    "teleferico",
+  ];
+
+  it("os tipos que já existiam continuam no mesmo índice", () => {
+    expect(CONGELADOS).toHaveLength(67);
+    expect(POI_KINDS.slice(0, CONGELADOS.length).map((k) => k.id)).toEqual(CONGELADOS);
+  });
+
+  it("todo tipo novo fica depois dos congelados", () => {
+    expect(POI_KINDS.length).toBeGreaterThan(CONGELADOS.length);
+  });
+
+  it("não há id repetido nem dois tipos com a mesma aparência", () => {
+    expect(new Set(POI_KINDS.map((k) => k.id)).size).toBe(POI_KINDS.length);
+    // a aparência identifica o tipo na hora de compartilhar (emoji + cor)
+    const aparencias = POI_KINDS.map((k) => `${k.emoji}|${k.color}`);
+    expect(new Set(aparencias).size).toBe(aparencias.length);
+  });
+
+  it("todo tipo tem nome, emoji e um grupo que existe no painel", () => {
+    for (const k of POI_KINDS) {
+      expect(k.name.trim()).not.toBe("");
+      expect(k.emoji.trim()).not.toBe("");
+      expect(POI_GROUPS).toContain(k.group);
+    }
+  });
+
+  it("as paradas de uma peregrinação existem", () => {
+    for (const id of ["santuario", "cruzeiro", "albergue", "capela"]) {
+      const kind = POI_KINDS.find((k) => k.id === id);
+      // "capela" não entra: a igreja já cobre, e dois templos iguais confundem
+      if (id === "capela") expect(kind).toBeUndefined();
+      else expect(kind, id).toBeDefined();
+    }
   });
 });

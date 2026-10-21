@@ -1,6 +1,6 @@
 # 🧭 RotaCast
 
-Trace uma rota no mapa, escolha o personagem (são **61**), marque as paradas e exporte tudo em vídeo — **100% no navegador**, sem servidor próprio e sem chave de API.
+Trace uma rota no mapa, escolha o personagem (são **144**) e os **103** tipos de parada e exporte tudo em vídeo — **100% no navegador**, sem servidor próprio e sem chave de API.
 
 ---
 
@@ -413,6 +413,42 @@ avatar tem de ser um arquivo escolhido aqui. O emoji gira com o rumo (o barco
 aponta para onde vai); a foto **não** gira, para a cara não sair de cabeça para
 baixo. Enquanto a foto não chega, o emoji continua no lugar: o personagem nunca
 some do vídeo.
+
+### O catálogo: 144 personagens e 103 tipos de parada
+
+Personagem e parada são **dados**, não código: cada um é uma linha numa lista
+(`characters.ts` e `pois.ts`), e o painel, a busca, o vídeo e o link já sabem
+lidar com o que estiver lá. Foi assim que o catálogo cresceu de 61 para 144
+personagens e de 67 para 103 tipos de parada sem um `if` novo no desenho.
+
+**Personagens.** Seis grupos no seletor (Veículos, Pessoas, Ofícios, Bichos,
+Voadores, Esportes). Cada um traz o jeito de andar junto com a figura: roda para
+o que tem rodas (carro, moto, trem, teleférico), passo para gente e bicho,
+flutuação para o que voa ou paira (avião, anjo, astronauta).
+Sem isso o carro quicaria pelo mapa como um sapo. O tamanho também é por
+personagem: a baleia é grande, o bebê é pequeno.
+
+**Os que o Unicode não tem.** Não existe emoji de peregrino nem de padre. Em vez
+de inventar um desenho novo (e um segundo jeito de desenhar personagem), o
+personagem pode ser **composto**: uma figura base mais um `acessorio` — 🚶 + 🎒
+para o peregrino, 🤵 + ✝️ para o padre. O acessório aparece num disco escuro no
+canto de baixo do selo, com o aro do acento: na grade do painel, na prévia do
+mapa e no vídeo. No vídeo ele é desenhado **fora** da rotação do personagem —
+uma mochila de cabeça para baixo não se lê. Quem usa foto no avatar vê a foto
+(acessório nenhum por cima de um rosto), e a busca acha o composto pelo nome ou
+pelo próprio acessório (o 🎒 chega no peregrino).
+
+**Paradas.** Além das de sempre (ponte, igreja, mirante, pousada), entraram as de
+**peregrinação e travessia** (santuário, cruzeiro, albergue, pico, nascente,
+campo, vinhedo, ruínas) e as de **cidade** que faltavam (rodoviária, cruzamento,
+marco, caixa eletrônico, wi-fi, ponto de apoio). Todas caem nos grupos que já
+existem no painel, com busca por nome, grupo ou emoji. `capela` ficou de fora de
+propósito: a igreja já cobre, e dois templos quase iguais só confundem a
+escolha.
+
+**Tipo novo entra no fim da lista.** O link compartilhado guarda a parada pelo
+**índice** do tipo, então mexer na ordem abriria links antigos no ícone errado.
+`pois.test.ts` congela os 67 primeiros índices e falha se alguém inserir no meio.
 
 ### Travessias longas (intercontinental)
 
@@ -1487,7 +1523,7 @@ ou cortados.
 
 ```bash
 npm run typecheck  # tsc --noEmit
-npm test           # Vitest (967 casos)
+npm test           # Vitest (1065 casos)
 npm run check:dist # o build saiu autocontido e sem /src/?
 ```
 

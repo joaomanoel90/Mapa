@@ -4,6 +4,7 @@ import {
   buildTrack,
   cumDoDesenho,
   cumulative,
+  formatDistance,
   haversine,
   rumoSuave,
   sampleTrack,
@@ -4355,5 +4356,58 @@ describe("destaques do percurso no vídeo", () => {
       style: { ...style },
     });
     expect(semNada).not.toContain("★");
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* Um lugar só para a distância                                        */
+/* ------------------------------------------------------------------ */
+
+/**
+ * O mesmo número não pode aparecer duas vezes no quadro.
+ *
+ * O selo do canto superior direito (dentro do título) escrevia a distância
+ * percorrida em `6.00 km`, e a faixa sob o anel do HUD escrevia a **mesma**
+ * distância em `6,00 km`: dois formatos do mesmo número, um acima e outro abaixo
+ * do anel. O usuário viu ("tanto em cima quanto em baixo dele, tem a marcação de
+ * km"). O selo saiu; o contador de paradas, que mora no mesmo canto e não tem
+ * nada a ver com isso, ficou.
+ */
+describe("a distância aparece num lugar só", () => {
+  it("o canto do título não repete a distância da faixa do anel", () => {
+    const { ctx, textos } = fakeCtx();
+    desenhar(
+      ctx,
+      { ...estado(0.5, 14, null, null), style: { ...style, showTitle: true, showHud: true } },
+      trackSubida,
+    );
+    // o selo antigo: ponto decimal e " km" no fim
+    expect(textos.some((t) => /^\d+\.\d+ km$/.test(t))).toBe(false);
+    // a faixa do anel continua sendo o lugar da distância, em pt-BR...
+    const linha = formatDistance(sampleTrack(trackSubida, 0.5).distance);
+    expect(textos).toContain(linha);
+    // ...e uma vez só
+    expect(textos.filter((t) => t === linha)).toHaveLength(1);
+  });
+
+  it("o contador de paradas continua no canto quando está ligado", () => {
+    const { ctx, textos } = fakeCtx();
+    const parada = {
+      id: "p1",
+      label: "Cachoeira",
+      lat: -23.5 + 0.000075 * 150,
+      lng: -48.4,
+      color: "#22d3ee",
+    };
+    desenhar(
+      ctx,
+      {
+        ...estado(1, 14, null, null),
+        stops: [parada as never],
+        style: { ...style, showTitle: true, showStopCounter: true },
+      },
+      trackSubida,
+    );
+    expect(textos.some((t) => /\d\/\d paradas/.test(t))).toBe(true);
   });
 });

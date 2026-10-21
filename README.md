@@ -494,6 +494,14 @@ ponta a ponta, e o anel brigava com ela):
             18,4 km · 1:12:30   distância percorrida · tempo
 ```
 
+**A distância mora num lugar só.** O canto superior direito do título chegou a
+mostrar a distância percorrida também — `6.00 km`, com ponto decimal —, enquanto
+a faixa sob o anel mostrava a mesma distância em `6,00 km`: dois formatos do
+mesmo número, um acima e outro abaixo do anel (o usuário viu: *"tanto em cima
+quanto em baixo dele, tem a marcação de km"*). O selo da distância saiu. Naquele
+canto fica só o **contador de paradas** (quando ligado), e o número do percurso
+fica na faixa — com o relógio ao lado quando há relógio.
+
 **A velocidade e o relógio vêm, nesta ordem:**
 
 | situação | velocidade | relógio |
@@ -1218,7 +1226,7 @@ ou cortados.
 
 ```bash
 npm run typecheck  # tsc --noEmit
-npm test           # Vitest (887 casos)
+npm test           # Vitest (889 casos)
 npm run check:dist # o build saiu autocontido e sem /src/?
 ```
 

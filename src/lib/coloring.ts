@@ -150,8 +150,12 @@ export const SLOPE_WINDOW_M = 100;
  *
  * A altitude entra suavizada e a rampa sai de dois pontos afastados 200 m —
  * uma subida de verdade, não o degrau entre dois pontos vizinhos.
+ *
+ * Exportada porque **o número do HUD tem de ser o mesmo da cor da linha**: numa
+ * rota sem hora, o anel mostra a inclinação do trecho, e ela é lida desta mesma
+ * série — se fossem duas contas, o anel diria "+6%" numa linha verde.
  */
-function slopesAlong(pts: LatLng[], cum: number[]): number[] {
+export function slopeSeries(pts: LatLng[], cum: number[]): number[] {
   const ele = pts.map((p) => (typeof p.ele === "number" && Number.isFinite(p.ele) ? p.ele : NaN));
   const suave = averageByDistance(ele, cum, ELE_SMOOTH_M);
   const n = suave.length;
@@ -168,6 +172,31 @@ function slopesAlong(pts: LatLng[], cum: number[]): number[] {
     if (d >= 40 && Number.isFinite(a) && Number.isFinite(b)) out[i] = ((b - a) / d) * 100;
   }
   return out;
+}
+
+/**
+ * A rampa (%) no progresso `t` (0..1) do traçado.
+ *
+ * Lê a **mesma** série que pinta a linha (`slopeSeries`), pelo mesmo índice de
+ * distância que o personagem usa. Devolve `null` onde não há elevação — o HUD
+ * então mostra outra coisa em vez de um número sem base.
+ */
+export function slopeAt(series: number[], cum: number[], t: number): number | null {
+  const n = Math.min(series.length, cum.length);
+  if (n < 2) return null;
+  const total = cum[n - 1];
+  if (!(total > 0)) return null;
+  const alvo = Math.max(0, Math.min(1, Number.isFinite(t) ? t : 0)) * total;
+  // busca binária: primeiro índice cuja distância acumulada alcança o alvo
+  let lo = 0;
+  let hi = n - 1;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (cum[mid] < alvo) lo = mid + 1;
+    else hi = mid;
+  }
+  const v = series[lo];
+  return Number.isFinite(v) ? v : null;
 }
 
 /**
@@ -252,7 +281,7 @@ export function colorizeRoute(input: {
   if (mode === "solid" || pts.length < 2 || cum.length !== pts.length) return null;
 
   if (mode === "slope") {
-    const values = slopesAlong(pts, cum);
+    const values = slopeSeries(pts, cum);
     const measured = values.reduce((n, v) => n + (Number.isFinite(v) ? 1 : 0), 0);
     if (measured < 2) return null;
     const bands = values.map((v) => (Number.isFinite(v) ? slopeBand(v) : NaN));

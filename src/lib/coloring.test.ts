@@ -4,7 +4,9 @@ import {
   COLOR_BANDS,
   colorizeRoute,
   dataCoverage,
+  slopeAt,
   slopeBand,
+  slopeSeries,
   speedBands,
 } from "./coloring";
 
@@ -147,5 +149,42 @@ describe("modo sólido", () => {
   it("traçado vazio não quebra", () => {
     const t = buildTrack([]);
     expect(colorizeRoute({ pts: t.pts, cum: t.cum, times: null, mode: "slope" })).toBeNull();
+  });
+});
+
+describe("a inclinação de um instante (HUD da prévia)", () => {
+  /** 10 m por ponto: `ele(i) = i` é 10% de rampa */
+  const subida = reta(60, { ele: (i) => 700 + i * 1 });
+  const track = buildTrack(subida);
+  const serie = slopeSeries(track.pts, track.cum);
+
+  it("lê a mesma série que pinta a linha", () => {
+    for (const t of [0.1, 0.35, 0.5, 0.9]) {
+      const lido = slopeAt(serie, track.cum, t);
+      expect(lido).not.toBeNull();
+      // 1 m a cada 10 m = 10%
+      expect(lido!).toBeCloseTo(10, 0);
+    }
+  });
+
+  it("não passa dos limites do percurso", () => {
+    // nas pontas a janela de 200 m fica de um lado só (é a mesma série da
+    // linha), então o valor é o do primeiro/último ponto — e não um null
+    expect(slopeAt(serie, track.cum, -3)).toBe(serie[0]);
+    expect(slopeAt(serie, track.cum, 7)).toBe(serie[serie.length - 1]);
+  });
+
+  it("onde não há elevação, devolve null em vez de zero", () => {
+    // metade do arquivo sem altitude: zero seria "plano", e não é o que sabemos
+    const mista = reta(60, { ele: (i) => (i < 30 ? NaN : 700 + i) });
+    const tm = buildTrack(mista);
+    const sm = slopeSeries(tm.pts, tm.cum);
+    expect(slopeAt(sm, tm.cum, 0.1)).toBeNull();
+    expect(slopeAt(sm, tm.cum, 0.95)).not.toBeNull();
+  });
+
+  it("traçado vazio ou de um ponto não tem inclinação", () => {
+    expect(slopeAt([], [], 0.5)).toBeNull();
+    expect(slopeAt([1], [0], 0.5)).toBeNull();
   });
 });

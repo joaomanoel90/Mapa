@@ -24,7 +24,7 @@ import {
   type FocusPoint,
 } from "./camera";
 import { routeEnd, timelineOr, type Timeline } from "./timeline";
-import { NEUTRAL_COLOR, type ColoredRoute } from "./coloring";
+import { NEUTRAL_COLOR, slopeAt, slopeSeries, type ColoredRoute } from "./coloring";
 import type { KmMark } from "./km-marks";
 import { countPassed } from "./passages";
 import {
@@ -1226,6 +1226,23 @@ export class SceneRenderer {
     return this.perfil.dados;
   }
 
+  /**
+   * A rampa ponto a ponto, calculada **uma vez** por traçado.
+   *
+   * É a mesma série que pinta a rota por inclinação (`slopeSeries`): o número
+   * que o HUD mostra numa rota sem horário tem de ser o da cor da linha embaixo
+   * do personagem. E é caro — média móvel sobre o traçado inteiro —, então não
+   * pode ser refeita a cada quadro.
+   */
+  private declives: { track: Track | null; series: number[] } = { track: null, series: [] };
+
+  private declivesDo(track: Track): number[] {
+    if (this.declives.track !== track) {
+      this.declives = { track, series: slopeSeries(track.pts, cumDoDesenho(track)) };
+    }
+    return this.declives.series;
+  }
+
   private drawMinimap(
     ctx: CanvasRenderingContext2D,
     width: number,
@@ -1943,7 +1960,16 @@ export class SceneRenderer {
 
     // --- overlays ---
     if (style.showProgress) drawProgress(ctx, width, height, input, sf);
-    if (style.showHud) drawHud(ctx, width, input, sample, sf, onDark, headerBottom);
+    if (style.showHud) {
+      /*
+       * Numa rota **sem horário** não existe velocidade nem ritmo — e o HUD
+       * ficava com um traço e a palavra "sem arquivo" durante o vídeo inteiro.
+       * Aí ele passa a falar do que a rota tem: a inclinação do trecho (a mesma
+       * da cor da linha) ou, sem elevação, o que ainda falta.
+       */
+      const declive = slopeAt(this.declivesDo(track), cumDoDesenho(track), t);
+      drawHud(ctx, width, input, sample, sf, onDark, headerBottom, declive);
+    }
     /*
      * O perfil de elevação, no rodapé, **antes** da legenda e da cartela: a
      * cartela é quem manda no fim do vídeo e, quando ela entra, a faixa sai de
@@ -3951,6 +3977,13 @@ function drawHud(
   sf: number,
   onDark: boolean,
   headerBottom: number,
+  /**
+   * Inclinação do trecho no instante atual, em % (positiva = subida).
+   *
+   * Só é usada quando **não há relógio nenhum** para mostrar — rota sem
+   * horário e sem tempo escrito na cartela. É a leitura da prévia de percurso.
+   */
+  declive: number | null = null,
 ) {
   const { track, t, style, duration, cardSeconds } = input;
   const times = horasAlinhadas(input, track);
@@ -4021,14 +4054,37 @@ function drawHud(
     ctx.shadowBlur = 0;
   }
 
+  /*
+   * Sem relógio nenhum (arquivo sem horário e cartela sem tempo), o anel deixa
+   * de mostrar um traço e a palavra "sem arquivo" — que, num vídeo de prévia de
+   * percurso, é o vídeo inteiro dizendo que falta dado.
+   *
+   * 1. Com elevação: a **inclinação do trecho**, a mesma que colore a linha;
+   * 2. sem elevação: **quanto falta**, que existe em qualquer traçado.
+   */
+  const semRelogio = relogio.fonte === null;
+  const previa = semRelogio
+    ? declive !== null
+      ? { valor: Math.abs(declive).toFixed(1).replace(".", ","), unidade: "%" as const, nota: notaDoDeclive(declive) }
+      : {
+          valor: (
+            Math.max(0, track.total - sample.distance) / 1000
+          ).toFixed(1).replace(".", ","),
+          unidade: "km" as const,
+          nota: "restantes",
+        }
+    : null;
+
   // o número do centro: velocidade (km/h) ou ritmo (min/km)
-  const txtVel = style.pace
-    ? ritmoSeg === null
-      ? "—"
-      : formatPace(ritmoSeg)
-    : velocidade === null
-      ? "—"
-      : velocidade.toFixed(velocidade < 10 ? 1 : 0);
+  const txtVel = previa
+    ? previa.valor
+    : style.pace
+      ? ritmoSeg === null
+        ? "—"
+        : formatPace(ritmoSeg)
+      : velocidade === null
+        ? "—"
+        : velocidade.toFixed(velocidade < 10 ? 1 : 0);
   // `12:30` ocupa mais que `18`: a fonte se ajusta para não bater no aro
   const fVel = `800 ${Math.round((txtVel.length > 4 ? 25 : 30) * sf)}px "Inter","Segoe UI",system-ui,sans-serif`;
   /*
@@ -4037,17 +4093,19 @@ function drawHud(
    * base, o rótulo diz por quê — e "percurso curto" é diferente de "sem
    * arquivo": um é falta de dado, o outro é dado de menos.
    */
-  const nota = style.pace
-    ? !totalPerc || totalPerc.segundos === null
-      ? "sem arquivo"
-      : ritmoSeg === null
-        ? "percurso curto"
-        : "média"
-    : media
-      ? "média"
-      : velocidade === null
+  const nota = previa
+    ? previa.nota
+    : style.pace
+      ? !totalPerc || totalPerc.segundos === null
         ? "sem arquivo"
-        : null;
+        : ritmoSeg === null
+          ? "percurso curto"
+          : "média"
+      : media
+        ? "média"
+        : velocidade === null
+          ? "sem arquivo"
+          : null;
 
   ctx.textAlign = "center";
   ctx.textBaseline = "alphabetic";
@@ -4056,7 +4114,7 @@ function drawHud(
   ctx.fillText(txtVel, cx, cy + 4 * sf);
   ctx.font = fUni;
   ctx.fillStyle = claro ? "rgba(15,23,42,0.55)" : "rgba(255,255,255,0.62)";
-  ctx.fillText(style.pace ? "min/km" : "km/h", cx, cy + 22 * sf);
+  ctx.fillText(previa ? previa.unidade : style.pace ? "min/km" : "km/h", cx, cy + 22 * sf);
   if (nota) {
     ctx.font = fNota;
     ctx.fillStyle = claro ? "rgba(15,23,42,0.45)" : "rgba(255,255,255,0.45)";
@@ -4079,6 +4137,18 @@ function drawHud(
   ctx.fillText(texto, cx, yFaixa + 16 * sf);
 
   ctx.restore();
+}
+
+/**
+ * Como se lê uma inclinação no anel do HUD: `subindo`, `descendo` ou `plano`.
+ *
+ * O número vai **sem sinal** (a palavra já diz o sentido), e o plano tem faixa
+ * própria porque 0,2% é plano na vida real e na cor da linha também (o corte
+ * neutro da escala é ±1%).
+ */
+function notaDoDeclive(pct: number): string {
+  if (Math.abs(pct) < 0.5) return "plano";
+  return pct > 0 ? "subindo" : "descendo";
 }
 
 /**

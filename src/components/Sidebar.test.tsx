@@ -442,3 +442,27 @@ describe("painel: link da tabela de preços", () => {
     expect(link!.getAttribute("rel")).toContain("noopener");
   });
 });
+
+describe("painel: prévia de percurso", () => {
+  /*
+   * Sem hora no arquivo não existe ritmo nem relógio. O HUD do vídeo passa a
+   * mostrar a inclinação do trecho (ou quanto falta) — e o painel **diz** isso,
+   * porque um número diferente no anel, sem explicação, parece defeito.
+   */
+  it("avisa que o HUD vira prévia de percurso quando o arquivo não tem hora", () => {
+    montar(<Painel cobertura={{ ele: 0, time: 0 }} />);
+    const texto = container.textContent ?? "";
+    expect(texto).toContain("prévia de percurso");
+    expect(texto).toContain("Tempo inventado não entra no vídeo");
+  });
+
+  it("num arquivo com hora não há o que avisar", () => {
+    montar(<Painel cobertura={{ ele: 1, time: 1 }} />);
+    expect(container.textContent ?? "").not.toContain("prévia de percurso");
+  });
+
+  it("com o HUD desligado o aviso também sai", () => {
+    montar(<Painel inicial={{ showHud: false }} cobertura={{ ele: 0, time: 0 }} />);
+    expect(container.textContent ?? "").not.toContain("prévia de percurso");
+  });
+});

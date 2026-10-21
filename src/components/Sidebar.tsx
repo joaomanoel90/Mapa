@@ -691,6 +691,13 @@ function Sidebar(props: Props) {
               checked={s.showHud}
               onChange={(v) => update("showHud", v)}
             />
+            {s.showHud && cobertura.time <= 0 && (
+              <p className="px-1 text-[10.5px] leading-snug text-zinc-500">
+                Sem hora no arquivo: o HUD vira <strong>prévia de percurso</strong> — mostra a
+                inclinação do trecho (ou quanto falta), sem ritmo nem relógio. Tempo inventado não
+                entra no vídeo.
+              </p>
+            )}
             <Toggle
               icon="🗺️"
               label="Mapa em miniatura"

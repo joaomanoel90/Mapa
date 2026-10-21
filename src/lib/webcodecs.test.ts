@@ -10,6 +10,8 @@ import {
   macroblocosDoQuadro,
   motivoRapidoIndisponivel,
   nivelH264Para,
+  audioConfigFor,
+  framesPorBlocoDeAudio,
   recordVideoFast,
   webmCodecFor,
 } from "./webcodecs";
@@ -34,9 +36,34 @@ const WEBM_VP9: VideoFormat = {
 
 const WEBM_VP8: VideoFormat = { ...WEBM_VP9, id: "webm-vp8", codec: "vp8" };
 
+/** Bloco de áudio falso, no formato que os muxers esperam. */
+class FakeEncodedAudioChunk {
+  type: "key" | "delta";
+  timestamp: number;
+  duration: number;
+  byteLength = 4;
+  constructor(init: { type: "key" | "delta"; timestamp: number; duration: number }) {
+    this.type = init.type;
+    this.timestamp = init.timestamp;
+    this.duration = init.duration;
+  }
+  copyTo(dest: Uint8Array) {
+    dest.set([0, 0, 0, 1]);
+  }
+}
+
+function fakeAudioChunk(timestamp: number): EncodedAudioChunk {
+  return new FakeEncodedAudioChunk({
+    type: "key",
+    timestamp,
+    duration: 21_333,
+  }) as unknown as EncodedAudioChunk;
+}
+
 beforeEach(() => {
-  // o webm-muxer faz instanceof nesta classe
+  // os dois muxers fazem instanceof nestas classes
   vi.stubGlobal("EncodedVideoChunk", FakeEncodedVideoChunk);
+  vi.stubGlobal("EncodedAudioChunk", FakeEncodedAudioChunk);
 });
 
 afterEach(() => {
@@ -604,5 +631,68 @@ describe("codecAceito", () => {
     vi.stubGlobal("VideoEncoder", undefined);
     vi.stubGlobal("VideoFrame", undefined);
     expect(await codecAceito(MP4, 720, 1280, 60)).toBeNull();
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* Áudio no arquivo                                                    */
+/* ------------------------------------------------------------------ */
+
+/**
+ * A trilha do vídeo (pops e música).
+ *
+ * O que se prova aqui é o **cabeçalho**: o arquivo tem de anunciar a faixa de
+ * áudio com o codec certo do contêiner, senão o tocador ignora os blocos — ou o
+ * arquivo inteiro quebra.
+ */
+describe("áudio no arquivo", () => {
+  /** AudioSpecificConfig mínimo: AAC-LC, 48 kHz, estéreo. */
+  const aacMeta = {
+    decoderConfig: { codec: "mp4a.40.2", description: new Uint8Array([0x11, 0x90]) },
+  } as unknown as EncodedAudioChunkMetadata;
+
+  it("MP4 declara a faixa AAC e WebM declara Opus", () => {
+    const mp4 = createMuxer(MP4, 1280, 720, 30, { numberOfChannels: 2, sampleRate: 48_000 });
+    mp4.muxer.addVideoChunk(fakeChunk(0, true), avcMeta);
+    mp4.muxer.addVideoChunk(fakeChunk(33_333, true), avcMeta);
+    mp4.muxer.addAudioChunk(fakeAudioChunk(0), aacMeta);
+    mp4.muxer.addAudioChunk(fakeAudioChunk(21_333), aacMeta);
+    mp4.muxer.finalize();
+    const bytes = new Uint8Array(mp4.buffer());
+    // a caixa do sample de áudio se chama "mp4a" no MP4
+    expect(Buffer.from(bytes).includes(Buffer.from("mp4a"))).toBe(true);
+
+    const webm = createMuxer(WEBM_VP9, 720, 1280, 30, {
+      numberOfChannels: 2,
+      sampleRate: 48_000,
+    });
+    webm.muxer.addVideoChunk(fakeChunk(0, true));
+    webm.muxer.addVideoChunk(fakeChunk(33_333, true));
+    webm.muxer.addAudioChunk(fakeAudioChunk(0));
+    webm.muxer.finalize();
+    const wbytes = new Uint8Array(webm.buffer());
+    expect(Buffer.from(wbytes).includes(Buffer.from("A_OPUS"))).toBe(true);
+  });
+
+  it("sem áudio, o arquivo continua sem faixa de som", () => {
+    const { muxer, buffer } = createMuxer(MP4, 1280, 720, 30);
+    muxer.addVideoChunk(fakeChunk(0, true), avcMeta);
+    muxer.addVideoChunk(fakeChunk(33_333, true), avcMeta);
+    muxer.finalize();
+    const bytes = new Uint8Array(buffer());
+    expect(Buffer.from(bytes).includes(Buffer.from("mp4a"))).toBe(false);
+  });
+
+  it("cada contêiner pede o seu codec", () => {
+    expect(audioConfigFor(MP4).codec).toBe("mp4a.40.2");
+    expect(audioConfigFor(WEBM_VP9).codec).toBe("opus");
+    expect(audioConfigFor(MP4, 1, 44_100).numberOfChannels).toBe(1);
+    expect(audioConfigFor(MP4).sampleRate).toBe(48_000);
+  });
+
+  it("o bloco do AAC é de 1024 amostras; o do Opus, de 960", () => {
+    // o codificador espera quadros exatos: um bloco torto no fim é recusado
+    expect(framesPorBlocoDeAudio(MP4)).toBe(1024);
+    expect(framesPorBlocoDeAudio(WEBM_VP9)).toBe(960);
   });
 });

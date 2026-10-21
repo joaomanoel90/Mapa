@@ -1,3 +1,5 @@
+import { tocarNaGravacao } from "./audio";
+
 /**
  * Como o arquivo saiu: `fast` = WebCodecs, com o tempo exato de cada quadro;
  * `realtime` = `MediaRecorder`, que captura a tela no ritmo dela.
@@ -73,6 +75,19 @@ export function availableFormats(): VideoFormat[] {
   return out;
 }
 
+/**
+ * O `mimeType` com áudio, para o `MediaRecorder` gravar a trilha junto.
+ *
+ * O formato guarda só o codec de vídeo (`video/webm;codecs=vp9`). Passar esse
+ * texto com uma faixa de áudio na stream faz o navegador **ignorar** o áudio em
+ * silêncio, então o codec de áudio precisa estar escrito aqui.
+ */
+export function mimeComAudio(format: VideoFormat): string {
+  if (format.container === "mp4") return "video/mp4;codecs=avc1.42E01E,mp4a.40.2";
+  const video = format.codec.startsWith("vp09") ? "vp9" : "vp8";
+  return `video/webm;codecs=${video},opus`;
+}
+
 export type RecordOptions = {
   canvas: HTMLCanvasElement;
   width: number;
@@ -93,6 +108,16 @@ export type RecordOptions = {
    * mesmo com a velocidade média certa. O painel do fim mostra o número.
    */
   onCadencia?: (c: Cadencia) => void;
+  /**
+   * A trilha do vídeo (música + pops), do tamanho do vídeo. Ausente = mudo.
+   *
+   * Na gravação em tempo real o som entra como faixa da `MediaStream` — o
+   * `MediaRecorder` grava o que chega nele, e um `MediaStreamAudioDestination`
+   * entrega a trilha no mesmo relógio do canvas.
+   */
+  audio?: { canais: Float32Array[]; sampleRate: number };
+  /** avisa se o arquivo saiu com som */
+  onSom?: (comSom: boolean) => void;
 };
 
 export class CancelledError extends Error {
@@ -438,11 +463,56 @@ export async function recordVideo(opts: RecordOptions): Promise<Blob> {
     for (const t of stream.getTracks()) t.stop();
     stream = canvas.captureStream(fps);
   }
+  /*
+   * O som entra depois de a stream de vídeo estar decidida: no caminho sem
+   * `requestFrame` a stream é trocada por `captureStream(fps)`, e uma faixa
+   * presa na stream antiga seria descartada.
+   */
+  const som = opts.audio ? tocarNaGravacao(opts.audio.canais, opts.audio.sampleRate) : null;
+  let mime = format.mime;
+  if (som?.track) {
+    const comAudio = mimeComAudio(format);
+    let cabe = false;
+    try {
+      cabe = MediaRecorder.isTypeSupported(comAudio);
+    } catch {
+      cabe = false;
+    }
+    if (cabe) {
+      mime = comAudio;
+      stream.addTrack(som.track);
+    } else {
+      try {
+        som.track.stop();
+      } catch {
+        /* ignore */
+      }
+    }
+  }
   const chunks: BlobPart[] = [];
-  const recorder = new MediaRecorder(stream, {
-    mimeType: format.mime,
-    videoBitsPerSecond: bitrate,
-  });
+  let comSom = stream.getAudioTracks().length > 0;
+  let recorder: MediaRecorder;
+  try {
+    recorder = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: bitrate });
+  } catch (err) {
+    /*
+     * O tipo com áudio pode ser recusado na hora de montar o gravador (o
+     * `isTypeSupported` responde pelo navegador, não pela combinação com a
+     * stream). Nesse caso o vídeo sai mudo — não deixa de sair.
+     */
+    if (mime === format.mime) throw err;
+    stream.getAudioTracks().forEach((t) => {
+      try {
+        t.stop();
+      } catch {
+        /* ignore */
+      }
+    });
+    mime = format.mime;
+    comSom = false;
+    recorder = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: bitrate });
+  }
+  opts.onSom?.(comSom);
   recorder.ondataavailable = (e) => {
     if (e.data && e.data.size > 0) chunks.push(e.data);
   };
@@ -457,6 +527,8 @@ export async function recordVideo(opts: RecordOptions): Promise<Blob> {
    */
   trilha?.requestFrame?.();
   recorder.start(200);
+  // a trilha começa junto com a gravação: é o relógio real que carimba os dois
+  if (comSom) som?.start();
   const startedAt = performance.now();
 
   /*
@@ -534,6 +606,8 @@ export async function recordVideo(opts: RecordOptions): Promise<Blob> {
       } catch {
         /* ignore */
       }
+      // sem isto, o contexto de áudio fica aberto depois de uma gravação cancelada
+      som?.stop();
       stream.getTracks().forEach((tr) => tr.stop());
       throw err;
     })
@@ -547,6 +621,7 @@ export async function recordVideo(opts: RecordOptions): Promise<Blob> {
     /* ignore */
   }
   await stopped;
+  som?.stop();
   stream.getTracks().forEach((tr) => tr.stop());
 
   opts.onCadencia?.(medirCadencia(instantes));

@@ -69,6 +69,8 @@ const SHARED_KEYS = [
   "cardTime",
   "cardNote",
   "logoChip",
+  "som",
+  "musicaVolume",
   "title",
   "subtitle",
   "aspect",

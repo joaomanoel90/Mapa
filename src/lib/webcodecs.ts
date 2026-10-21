@@ -14,6 +14,12 @@
  */
 
 import { ArrayBufferTarget as Mp4Target, Muxer as Mp4Muxer } from "mp4-muxer";
+import {
+  AUDIO_BITRATE,
+  AUDIO_SAMPLE_RATE,
+  blocosDeAudio,
+  type BlocoDeAudio,
+} from "./audio";
 import { ArrayBufferTarget as WebmTarget, Muxer as WebmMuxer } from "webm-muxer";
 import { CancelledError, type VideoFormat } from "./recorder";
 
@@ -207,8 +213,12 @@ export async function codecAceito(
 /** Interface mínima comum aos dois muxers. */
 export type MuxerLike = {
   addVideoChunk: (chunk: EncodedVideoChunk, meta?: EncodedVideoChunkMetadata) => void;
+  addAudioChunk: (chunk: EncodedAudioChunk, meta?: EncodedAudioChunkMetadata) => void;
   finalize: () => void;
 };
+
+/** A faixa de áudio que o muxer precisa declarar no cabeçalho do arquivo. */
+export type MuxerAudio = { numberOfChannels: number; sampleRate: number };
 
 export type MuxerBundle = { muxer: MuxerLike; buffer: () => ArrayBuffer };
 
@@ -222,12 +232,27 @@ export function createMuxer(
   width: number,
   height: number,
   fps: number,
+  audio?: MuxerAudio | null,
 ): MuxerBundle {
+  /*
+   * A faixa de áudio é declarada **aqui**, no cabeçalho: um arquivo com trilha
+   * anunciada e nenhum bloco dentro sai quebrado em vários tocadores. Por isso
+   * quem chama só passa `audio` depois de o áudio já estar codificado.
+   */
   if (format.container === "mp4") {
     const target = new Mp4Target();
     const muxer = new Mp4Muxer({
       target,
       video: { codec: "avc", width, height, frameRate: fps },
+      ...(audio
+        ? {
+            audio: {
+              codec: "aac" as const,
+              numberOfChannels: audio.numberOfChannels,
+              sampleRate: audio.sampleRate,
+            },
+          }
+        : {}),
       // deixa o arquivo pronto para tocar/baixar sem passar pelo fim
       fastStart: "in-memory",
     });
@@ -238,8 +263,136 @@ export function createMuxer(
   const muxer = new WebmMuxer({
     target,
     video: { codec: webmCodecFor(format), width, height, frameRate: fps },
+    ...(audio
+      ? {
+          audio: {
+            // o CodecID do Matroska é `A_OPUS` — `"opus"` gravaria um arquivo
+            // que os tocadores não reconhecem (o WebCodecs usa outro nome)
+            codec: "A_OPUS" as const,
+            numberOfChannels: audio.numberOfChannels,
+            sampleRate: audio.sampleRate,
+          },
+        }
+      : {}),
   });
   return { muxer: muxer as unknown as MuxerLike, buffer: () => target.buffer };
+}
+
+/* ------------------------------------------------------------------ */
+/* Áudio no arquivo                                                    */
+/* ------------------------------------------------------------------ */
+
+/**
+ * A configuração do codificador de áudio para este contêiner.
+ *
+ * MP4 leva **AAC-LC** (`mp4a.40.2`), que é o que toca em tudo; WebM leva
+ * **Opus**, que é o que o contêiner aceita. Os dois em 48 kHz, que é a taxa da
+ * trilha montada em `audio.ts` — pedir outra obrigaria a reamostrar de novo.
+ */
+export function audioConfigFor(
+  format: VideoFormat,
+  channels = 2,
+  sampleRate = AUDIO_SAMPLE_RATE,
+  bitrate = AUDIO_BITRATE,
+): AudioEncoderConfig {
+  return {
+    codec: format.container === "mp4" ? "mp4a.40.2" : "opus",
+    sampleRate,
+    numberOfChannels: channels,
+    bitrate,
+  };
+}
+
+/** O navegador sabe codificar áudio nesta configuração? */
+export async function audioSuportado(config: AudioEncoderConfig): Promise<boolean> {
+  if (typeof AudioEncoder === "undefined") return false;
+  try {
+    const r = await AudioEncoder.isConfigSupported(config);
+    return !!r.supported;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Quantos quadros de áudio por bloco.
+ *
+ * AAC codifica em quadros de **1024** amostras; Opus, em múltiplos de 2,5 ms
+ * (960 amostras a 48 kHz = 20 ms). Blocos tortos fazem o codificador recusar ou
+ * preencher com silêncio no meio.
+ */
+export function framesPorBlocoDeAudio(format: VideoFormat): number {
+  return format.container === "mp4" ? 1024 : 960;
+}
+
+type BlocoCodificado = {
+  chunk: EncodedAudioChunk;
+  meta?: EncodedAudioChunkMetadata;
+};
+
+/**
+ * Codifica a trilha inteira antes do primeiro quadro de vídeo.
+ *
+ * A ordem importa: o muxer precisa saber, ao ser criado, se o arquivo tem
+ * áudio. Codificando antes, um erro no áudio vira "vídeo sem som" em vez de um
+ * arquivo com a faixa anunciada e vazia.
+ */
+async function codificarAudio(
+  canais: Float32Array[],
+  sampleRate: number,
+  format: VideoFormat,
+  config: AudioEncoderConfig,
+): Promise<BlocoCodificado[] | null> {
+  const blocos: BlocoDeAudio[] = blocosDeAudio(canais, framesPorBlocoDeAudio(format));
+  if (blocos.length === 0) return null;
+
+  const saida: BlocoCodificado[] = [];
+  let erro: Error | null = null;
+  const encoder = new AudioEncoder({
+    output: (chunk, meta) => saida.push({ chunk, meta }),
+    error: (err) => {
+      erro = err instanceof Error ? err : new Error(String(err));
+    },
+  });
+
+  try {
+    encoder.configure(config);
+    const canaisReais = config.numberOfChannels ?? 2;
+    const usPorBloco = (blocos[0].frames / sampleRate) * 1_000_000;
+    for (let i = 0; i < blocos.length; i++) {
+      if (erro) throw erro;
+      const data = new AudioData({
+        format: "f32-planar",
+        sampleRate,
+        numberOfFrames: blocos[i].frames,
+        numberOfChannels: canaisReais,
+        timestamp: Math.round(i * usPorBloco),
+        data: blocos[i].data as unknown as BufferSource,
+      });
+      encoder.encode(data);
+      data.close();
+
+      /*
+       * Contrapressão, como no vídeo: um minuto de trilha são ~2.800 blocos, e
+       * sem esperar a fila cresce sem limite — o navegador recusa com "queue
+       * full" e o áudio inteiro se perde.
+       */
+      if (encoder.encodeQueueSize > 32) {
+        await new Promise((r) => setTimeout(r, 0));
+      }
+    }
+    await encoder.flush();
+    if (erro) throw erro;
+  } catch {
+    return null;
+  } finally {
+    try {
+      encoder.close();
+    } catch {
+      /* já fechado */
+    }
+  }
+  return saida.length > 0 ? saida : null;
 }
 
 export type FastEncodeOptions = {
@@ -260,6 +413,13 @@ export type FastEncodeOptions = {
   draw: (ctx: CanvasRenderingContext2D, t: number, elapsed: number) => void;
   onProgress?: (t: number) => void;
   shouldCancel?: () => boolean;
+  /**
+   * A trilha do vídeo (música + pops), já montada e do tamanho do vídeo.
+   * Ausente = vídeo mudo, como era antes.
+   */
+  audio?: { canais: Float32Array[]; sampleRate: number };
+  /** avisa se o arquivo saiu com som (o navegador pode não codificar áudio) */
+  onSom?: (comSom: boolean) => void;
 };
 
 /**
@@ -326,7 +486,72 @@ export async function recordVideoFast(opts: FastEncodeOptions): Promise<Blob> {
   if (!ctx) throw new Error("Canvas 2D indisponível neste navegador.");
 
   const plan = framePlan(fps, durationSec);
-  const { muxer, buffer } = createMuxer(format, width, height, fps);
+
+  /*
+   * O áudio é codificado **antes** do primeiro quadro de vídeo.
+   *
+   * Duas razões: o muxer precisa declarar a faixa no cabeçalho (uma faixa
+   * anunciada e vazia quebra o arquivo), e 14 s de áudio levam milissegundos —
+   * não vale a pena intercalar com o desenho. Se o navegador não souber
+   * codificar, o vídeo sai mudo e `onSom(false)` avisa a tela.
+   */
+  const canais = opts.audio?.canais?.length ? opts.audio.canais : null;
+  const numeroDeCanais = canais ? Math.min(2, canais.length) : 0;
+  const configAudio =
+    canais && numeroDeCanais > 0
+      ? audioConfigFor(format, numeroDeCanais, opts.audio!.sampleRate)
+      : null;
+  const podeAudio = configAudio ? await audioSuportado(configAudio) : false;
+  const audioCodificado =
+    podeAudio && canais && configAudio
+      ? await codificarAudio(canais, opts.audio!.sampleRate, format, configAudio)
+      : null;
+  /*
+   * Se o muxer recusar a faixa (contêiner sem suporte, configuração estranha),
+   * o vídeo sai **mudo** em vez de a exportação inteira falhar: perder o som é
+   * ruim, perder o vídeo é pior.
+   */
+  let comAudio = !!audioCodificado && !!configAudio;
+  const criar = (comFaixa: boolean) =>
+    createMuxer(
+      format,
+      width,
+      height,
+      fps,
+      comFaixa && configAudio
+        ? { numberOfChannels: numeroDeCanais, sampleRate: opts.audio!.sampleRate }
+        : null,
+    );
+
+  let bundle: MuxerBundle;
+  try {
+    bundle = criar(comAudio);
+  } catch (err) {
+    if (!comAudio) throw err;
+    comAudio = false;
+    bundle = criar(false);
+  }
+  opts.onSom?.(comAudio);
+
+  const { muxer, buffer } = bundle;
+
+  /*
+   * Os blocos de áudio entram **intercalados** com os quadros: o muxer escreve
+   * o arquivo na ordem em que recebe, e um arquivo com 14 s de áudio na frente
+   * e o vídeo inteiro depois obriga o tocador a pular o arquivo inteiro para
+   * começar a imagem.
+   */
+  let audioIdx = 0;
+  const drenarAudio = (ateUs: number) => {
+    if (!comAudio || !audioCodificado) return;
+    while (
+      audioIdx < audioCodificado.length &&
+      Number(audioCodificado[audioIdx].chunk.timestamp) <= ateUs
+    ) {
+      const { chunk, meta } = audioCodificado[audioIdx++];
+      muxer.addAudioChunk(chunk, meta);
+    }
+  };
 
   // objeto em vez de variável solta: o TS estreita `let` capturado por closure
   const state: { error: Error | null } = { error: null };
@@ -361,6 +586,8 @@ export async function recordVideoFast(opts: FastEncodeOptions): Promise<Blob> {
       encoder.encode(frame, { keyFrame: f.keyFrame });
       frame.close();
 
+      drenarAudio(f.timestampUs);
+
       opts.onProgress?.(f.t);
 
       // contrapressão: sem isso a fila do encoder cresce sem limite e a aba trava
@@ -370,6 +597,7 @@ export async function recordVideoFast(opts: FastEncodeOptions): Promise<Blob> {
     }
 
     await encoder.flush();
+    drenarAudio(Number.POSITIVE_INFINITY);
     if (state.error) throw state.error;
   } finally {
     try {

@@ -342,6 +342,17 @@ describe("sharedSettingsOverrides", () => {
     expect(r?.pois[0].t).toBeCloseTo(0.4, 3);
   });
 
+  it("som e volume da música vão no link (o arquivo de música não)", () => {
+    // o som é parte da cena: quem abre o link vê — e ouve — os pops do mesmo
+    // jeito. A música é um arquivo de quem compartilha, e fica em casa.
+    const url = buildShareUrl(
+      base({ settings: { ...DEFAULT_SETTINGS, som: false, musicaVolume: 0.3 } }),
+    );
+    const r = decodeShare(url);
+    expect(r?.settings.som).toBe(false);
+    expect(r?.settings.musicaVolume).toBeCloseTo(0.3, 5);
+  });
+
   it("o logo da marca não vai no link, mas a placa clara vai", () => {
     // o logo é a marca de quem compartilha: no link, ou pesaria dezenas de KB,
     // ou trocaria a marca de quem abre. A placa clara é só uma escolha de leitura

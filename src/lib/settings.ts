@@ -151,6 +151,19 @@ export type Settings = {
    */
   logoChip: boolean;
   /**
+   * Pops no vídeo: o "toc" da largada, um para cada parada e o acorde da
+   * chegada. São **sintetizados** no arquivo (nenhum sample, nenhuma licença),
+   * e é por isso que podem vir ligados por padrão.
+   */
+  som: boolean;
+  /**
+   * Volume da música de fundo (0..1).
+   *
+   * O arquivo de música em si **não** fica aqui: ele tem megabytes e o
+   * `localStorage` tem ~5 MB para o site inteiro. Só o volume é guardado.
+   */
+  musicaVolume: number;
+  /**
    * Avatar do personagem: uma foto (data URL) que entra **no lugar do emoji**
    * dentro do selo que anda pelo mapa.
    *
@@ -213,6 +226,8 @@ export const DEFAULT_SETTINGS: Settings = {
   cardPhoto: "",
   logo: "",
   logoChip: false,
+  som: true,
+  musicaVolume: 0.55,
   avatar: "",
   title: "Minha rota",
   subtitle: "",
@@ -273,6 +288,15 @@ export function sanitizeSettings(raw: Partial<Settings>): Partial<Settings> {
   if (out.logo !== undefined && !isPhotoDataUrl(out.logo)) delete out.logo;
   if (typeof out.logo === "string" && out.logo.length > PHOTO_MAX_CHARS) delete out.logo;
   if (typeof out.logoChip !== "boolean") delete out.logoChip;
+  if (typeof out.som !== "boolean") delete out.som;
+  if (
+    typeof out.musicaVolume !== "number" ||
+    !Number.isFinite(out.musicaVolume) ||
+    out.musicaVolume < 0 ||
+    out.musicaVolume > 1
+  ) {
+    delete out.musicaVolume;
+  }
   if (typeof out.cardPhoto === "string" && out.cardPhoto.length > PHOTO_MAX_CHARS) {
     delete out.cardPhoto;
   }

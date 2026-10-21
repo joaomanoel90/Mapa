@@ -22,6 +22,7 @@ export default function ExportModal({
   avisoMotor,
   rapidoDesligado,
   avisoRota,
+  comSom,
   onLigarRapido,
   fpsLimitadoPeloTeto,
   width,
@@ -91,6 +92,14 @@ export default function ExportModal({
    * aviso, o vídeo sairia com outro enquadramento e ninguém saberia por quê.
    */
   avisoRota?: string | null;
+  /**
+   * O arquivo saiu com faixa de áudio?
+   *
+   * `undefined` = nem se pediu som. `false` é o caso que precisa de aviso: o
+   * som foi pedido, o navegador não codificou, e o usuário baixaria um vídeo
+   * mudo sem saber.
+   */
+  comSom?: boolean;
   /** liga o ⚡ e começa outra gravação — o botão do painel do fim */
   onLigarRapido?: () => void;
   /**
@@ -217,6 +226,18 @@ export default function ExportModal({
             {avisoRota && phase !== "error" && (
               <p className="mt-1 text-[11.5px] leading-snug text-amber-300/80">
                 🗺️ {avisoRota}
+              </p>
+            )}
+            {phase === "done" && comSom === false && (
+              <p className="mt-1 text-[11.5px] leading-snug text-amber-300/80">
+                🔇 Este navegador não codificou o áudio: o vídeo saiu <strong>mudo</strong>. Os pops
+                e a música só entram em arquivos com áudio codificado (Chrome, Edge ou Safari
+                atualizados).
+              </p>
+            )}
+            {phase === "done" && comSom === true && (
+              <p className="mt-1 text-[11.5px] leading-snug text-zinc-500">
+                🔊 Este arquivo tem faixa de áudio (pops e/ou música).
               </p>
             )}
             {(avisoMotor || rapidoDesligado) && phase !== "error" && (

@@ -1,4 +1,4 @@
-import { TextInput } from "./ui";
+import { TextInput, Toggle } from "./ui";
 import PhotoField from "./PhotoField";
 import {
   cardSuggestions,
@@ -110,6 +110,38 @@ export default function EndCardPanel({
         />
       </div>
 
+      {/*
+        O logo é o mesmo tipo de imagem da foto do projeto, com duas diferenças:
+        guarda PNG (a marca costuma ter fundo transparente) e é desenhado menor.
+        Fica aqui, junto da cartela, porque é nela que ele aparece.
+      */}
+      <div className="mt-2">
+        <PhotoField
+          valor={s.logo}
+          onValor={(v) => update("logo", v)}
+          rotulo="Logo"
+          ariaLabel="Logo da marca"
+          max={480}
+          alfa
+          onde="na cartela final"
+        />
+      </div>
+
+      {s.logo && (
+        <div className="mt-1.5">
+          <Toggle
+            icon="🪧"
+            label="Placa clara atrás do logo"
+            checked={s.logoChip}
+            onChange={(v) => update("logoChip", v)}
+          />
+          <p className="mt-1 text-[10px] leading-snug text-zinc-600">
+            Ligue para logo escuro: a placa branca separa a marca do painel escuro
+            da cartela.
+          </p>
+        </div>
+      )}
+
       <div className="mt-2 flex flex-col gap-1.5">
         {campo("cardDistance", "Distância", sugestao.distance, "ex.: 49 km")}
         {campo("cardElevation", "Elevação", sugestao.elevation, "ex.: +1.676 m")}
@@ -162,9 +194,13 @@ export default function EndCardPanel({
         </div>
       )}
 
-      {s.cardPhoto && cartela && (
+      {(s.cardPhoto || s.logo) && cartela && (
         <p className="mt-2 text-[10.5px] leading-snug text-zinc-500">
-          A foto do projeto vai no alto da cartela — a prévia acima não a mostra.
+          {s.cardPhoto && s.logo
+            ? "A foto fica no alto da cartela e o logo na mesma linha, à esquerda dela — a prévia acima não os mostra."
+            : s.cardPhoto
+              ? "A foto do projeto vai no alto da cartela — a prévia acima não a mostra."
+              : "O logo fica no alto da cartela — a prévia acima não o mostra."}
         </p>
       )}
 

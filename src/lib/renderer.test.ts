@@ -41,6 +41,7 @@ import {
   pesoQueCabe,
   projetorDaVista,
   summaryBox,
+  medidaDoLogo,
   tilesDaVista,
   tilesForAnimation,
   vistaDe,
@@ -1448,6 +1449,163 @@ describe("foto do projeto na cartela", () => {
     const { ctx, imagens } = fakeCtx();
     desenhar(ctx, { ...estado(1, 14, cartela), photos: cacheComFoto });
     expect(imagens.length).toBe(0);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* Logo da marca na cartela                                            */
+/* ------------------------------------------------------------------ */
+
+/**
+ * A marca do projeto na cartela — o quadro que vira print.
+ *
+ * O que se prova aqui é o **lugar**: o logo não pode encostar no avatar (os dois
+ * dividem a mesma linha) nem nos números (que descem quando ele ocupa o alto
+ * sozinho). Sem logo escolhido, nada muda.
+ */
+describe("logo da marca na cartela", () => {
+  const LOGO = "data:image/png;base64,BBBB";
+  /** marca deitada, 3:1 — o formato mais comum de logo */
+  const MARCA = { width: 600, height: 200 } as unknown as PhotoImage;
+
+  /** o cache com a foto do projeto e/ou o logo prontos */
+  const cache = (opcoes: { foto?: boolean; logo?: boolean } = {}): PhotoLookup => ({
+    get: (src) =>
+      src === SRC && opcoes.foto
+        ? FOTO
+        : src === LOGO && opcoes.logo
+          ? MARCA
+          : null,
+  });
+
+  /**
+   * Os `drawImage` do logo: 4 argumentos (sem recorte) e pequeno — o bloco do
+   * mapa tem 256 px e o avatar é desenhado com 8 argumentos (recorte quadrado).
+   */
+  const desenhosDoLogo = (f: ReturnType<typeof fakeCtx>) =>
+    f.imagens.filter((i) => i.args.length === 4 && i.args[2] <= 200 && i.args[3] <= 90);
+
+  /** o y (absoluto) do número da cartela — o ÚLTIMO "49 km" é o dela */
+  const yDoNumero = (f: ReturnType<typeof fakeCtx>) => {
+    const iguais = f.textos.flatMap((s, i) => (s === "49 km" ? [i] : []));
+    return f.textosYAbs[iguais[iguais.length - 1]];
+  };
+
+  const desenharCom = (
+    opcoes: { logo?: boolean; foto?: boolean; chip?: boolean },
+    retrato = false,
+  ) => {
+    const f = fakeCtx();
+    desenhar(
+      f.ctx,
+      {
+        ...estado(1, 14, cartela),
+        style: { ...style, logo: opcoes.logo === false ? "" : LOGO, logoChip: !!opcoes.chip },
+        cardPhoto: opcoes.foto ? SRC : null,
+        photos: cache({ foto: opcoes.foto, logo: opcoes.logo !== false }),
+      },
+      track,
+      retrato ? 720 : 1280,
+      retrato ? 1280 : 720,
+    );
+    return f;
+  };
+
+  it("aparece na cartela quando a imagem está pronta", () => {
+    const f = desenharCom({});
+    expect(desenhosDoLogo(f).length).toBe(1);
+  });
+
+  it("sem logo escolhido, nada muda", () => {
+    const f = desenharCom({ logo: false });
+    expect(desenhosDoLogo(f).length).toBe(0);
+    expect(f.textos).toContain("49 km");
+  });
+
+  it("sem a imagem pronta, a cartela sai como sempre saiu", () => {
+    const f = fakeCtx();
+    desenhar(f.ctx, {
+      ...estado(1, 14, cartela),
+      style: { ...style, logo: LOGO },
+      photos: cacheVazio,
+    });
+    expect(desenhosDoLogo(f).length).toBe(0);
+    expect(f.textos).toContain("49 km");
+  });
+
+  it("sozinho, ocupa o alto do painel e empurra os números para baixo", () => {
+    const comLogo = desenharCom({});
+    const semLogo = desenharCom({ logo: false });
+    const [logo] = desenhosDoLogo(comLogo);
+    const topo = logo.args[1];
+    const base = topo + logo.args[3];
+    // fica acima dos números, sem encostar neles
+    expect(base).toBeLessThan(yDoNumero(comLogo));
+    // e os números desceram em relação a uma cartela sem logo
+    expect(yDoNumero(comLogo)).toBeGreaterThan(yDoNumero(semLogo));
+  });
+
+  it("com foto do projeto, divide a linha com o avatar — sem invadir", () => {
+    const f = desenharCom({ foto: true });
+    const [logo] = desenhosDoLogo(f);
+    expect(logo).toBeDefined();
+    // o avatar é o desenho recortado (8 argumentos), com 78 px de lado
+    const avatar = f.imagens.find((i) => i.args.length === 8 && i.args[6] >= 70)!;
+    const [ax, ay] = [avatar.args[4], avatar.args[5]];
+    const lado = avatar.args[6];
+    // o logo termina antes de o círculo começar
+    expect(logo.args[0] + logo.args[2]).toBeLessThanOrEqual(ax);
+    // e está na mesma altura dele
+    expect(logo.args[1]).toBeGreaterThanOrEqual(ay);
+    expect(logo.args[1] + logo.args[3]).toBeLessThanOrEqual(ay + lado);
+  });
+
+  it("com foto do projeto, o logo não empurra os números", () => {
+    const comLogo = desenharCom({ foto: true });
+    const semLogo = desenharCom({ foto: true, logo: false });
+    expect(yDoNumero(comLogo)).toBe(yDoNumero(semLogo));
+  });
+
+  it("a placa clara entra só quando é pedida", () => {
+    const semPlaca = desenharCom({});
+    const comPlaca = desenharCom({ chip: true });
+    expect(semPlaca.pinturas).not.toContain("rgba(255,255,255,0.92)");
+    expect(comPlaca.pinturas).toContain("rgba(255,255,255,0.92)");
+    // e a placa vem antes do logo (senão o desenho ficaria coberto)
+    expect(comPlaca.ordem.indexOf("imagem")).toBeGreaterThan(-1);
+  });
+
+  it("no retrato também cabe, sem invadir os números", () => {
+    const f = desenharCom({}, true);
+    const [logo] = desenhosDoLogo(f);
+    expect(logo).toBeDefined();
+    expect(logo.args[0]).toBeGreaterThanOrEqual(0);
+    expect(logo.args[1] + logo.args[3]).toBeLessThan(yDoNumero(f));
+  });
+});
+
+describe("medida do logo", () => {
+  it("mantém a proporção da imagem", () => {
+    const m = medidaDoLogo({ width: 600, height: 200 }, 54, 400);
+    expect(m.h).toBeCloseTo(54, 6);
+    expect(m.w).toBeCloseTo(162, 6);
+  });
+
+  it("quem estoura primeiro manda: largura estreita encolhe a altura", () => {
+    const m = medidaDoLogo({ width: 600, height: 200 }, 54, 60);
+    expect(m.w).toBeCloseTo(60, 6);
+    expect(m.h).toBeCloseTo(20, 6);
+  });
+
+  it("logo alto é limitado pela altura", () => {
+    const m = medidaDoLogo({ width: 200, height: 600 }, 54, 400);
+    expect(m.h).toBeCloseTo(54, 6);
+    expect(m.w).toBeCloseTo(18, 6);
+  });
+
+  it("sem espaço (ou sem imagem), não desenha nada", () => {
+    expect(medidaDoLogo({ width: 600, height: 200 }, 54, 0)).toEqual({ w: 0, h: 0 });
+    expect(medidaDoLogo({ width: 0, height: 0 }, 54, 400)).toEqual({ w: 0, h: 0 });
   });
 });
 

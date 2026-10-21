@@ -136,6 +136,21 @@ export type Settings = {
    */
   cardPhoto: string;
   /**
+   * Logo da marca (data URL), desenhado na **cartela final**.
+   *
+   * A cartela é o quadro que vira print: é ali que a marca do projeto tem de
+   * estar. Fica na mesma linha do avatar, à esquerda; sozinho, ocupa o alto do
+   * painel. Sem logo escolhido, nada muda.
+   */
+  logo: string;
+  /**
+   * Placa clara atrás do logo.
+   *
+   * Logo escuro (ou com fundo transparente escuro) some no painel escuro da
+   * cartela; a placa resolve isso sem obrigar ninguém a editar a imagem.
+   */
+  logoChip: boolean;
+  /**
    * Avatar do personagem: uma foto (data URL) que entra **no lugar do emoji**
    * dentro do selo que anda pelo mapa.
    *
@@ -196,6 +211,8 @@ export const DEFAULT_SETTINGS: Settings = {
   cardTime: "",
   cardNote: "",
   cardPhoto: "",
+  logo: "",
+  logoChip: false,
   avatar: "",
   title: "Minha rota",
   subtitle: "",
@@ -251,6 +268,11 @@ export function sanitizeSettings(raw: Partial<Settings>): Partial<Settings> {
   // a foto guardada precisa ser um data URL de imagem dentro do teto: qualquer
   // outra coisa (URL externa, texto, base64 gigante) é descartada aqui
   if (out.cardPhoto !== undefined && !isPhotoDataUrl(out.cardPhoto)) delete out.cardPhoto;
+  // o logo passa pela mesma peneira da foto da cartela: só data URL de imagem,
+  // dentro do teto que protege o `localStorage`
+  if (out.logo !== undefined && !isPhotoDataUrl(out.logo)) delete out.logo;
+  if (typeof out.logo === "string" && out.logo.length > PHOTO_MAX_CHARS) delete out.logo;
+  if (typeof out.logoChip !== "boolean") delete out.logoChip;
   if (typeof out.cardPhoto === "string" && out.cardPhoto.length > PHOTO_MAX_CHARS) {
     delete out.cardPhoto;
   }

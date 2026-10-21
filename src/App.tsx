@@ -481,12 +481,12 @@ function App() {
   useEffect(() => {
     void fotos.ready(
       photoSources(
-        [settings.cardPhoto, settings.avatar],
+        [settings.cardPhoto, settings.avatar, settings.logo],
         pois.map((p) => p.photo),
         [endpoints.a?.photo, endpoints.b?.photo],
       ),
     );
-  }, [fotos, settings.cardPhoto, settings.avatar, pois, endpoints]);
+  }, [fotos, settings.cardPhoto, settings.avatar, settings.logo, pois, endpoints]);
 
   /**
    * A câmera do vídeo, do painel e da conta de blocos — **uma fonte só**.
@@ -1175,6 +1175,9 @@ function App() {
       showProfile: settings.elevationProfile,
       showHighlights: settings.highlights,
       avatar: settings.avatar,
+      // o logo da marca entra na cartela como a foto do projeto
+      logo: settings.logo,
+      logoChip: settings.logoChip,
       // a pé o HUD mostra ritmo (min/km) em vez de velocidade
       pace: usaRitmo(settings.activity),
       title: settings.title,
@@ -1306,7 +1309,7 @@ function App() {
        */
       await fotos.ready(
         photoSources(
-          [settings.cardPhoto, settings.avatar],
+          [settings.cardPhoto, settings.avatar, settings.logo],
           stops.map((p) => p.photo),
           [endpoints.a?.photo, endpoints.b?.photo],
         ),

@@ -149,6 +149,25 @@ describe("sanitizeSettings", () => {
     expect(DEFAULT_SETTINGS.cardPhoto).toBe("");
   });
 
+  it("o logo passa pela mesma peneira da foto da cartela", () => {
+    const logo = "data:image/png;base64,AAAA";
+    expect(sanitizeSettings(raw({ logo })).logo).toBe(logo);
+    // URL externa, svg e texto não passam: o logo é desenhado no canvas
+    expect(sanitizeSettings(raw({ logo: "https://x.com/a.png" })).logo).toBeUndefined();
+    expect(sanitizeSettings(raw({ logo: "data:image/svg+xml;base64,AA" })).logo).toBeUndefined();
+    expect(sanitizeSettings(raw({ logo: 42 })).logo).toBeUndefined();
+    // e o teto do `localStorage` vale para ele também
+    const gigante = "data:image/png;base64," + "A".repeat(400_001);
+    expect(sanitizeSettings(raw({ logo: gigante })).logo).toBeUndefined();
+  });
+
+  it("a placa clara só aceita booleano, e nasce desligada", () => {
+    expect(DEFAULT_SETTINGS.logo).toBe("");
+    expect(DEFAULT_SETTINGS.logoChip).toBe(false);
+    expect(sanitizeSettings(raw({ logoChip: true })).logoChip).toBe(true);
+    expect(sanitizeSettings(raw({ logoChip: "sim" })).logoChip).toBeUndefined();
+  });
+
   it("não deixa passar lixo vindo de JSON corrompido", () => {
     const out = sanitizeSettings(
       raw({ basemap: 7, aspect: [], duration: {}, profile: [], followZoom: "x" }),

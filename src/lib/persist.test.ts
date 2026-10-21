@@ -52,6 +52,26 @@ describe("gravar preferências", () => {
     expect(saveSettings(s, comFoto)).toBe("falhou");
   });
 
+  it("o logo também sai quando é ele que estoura a cota", () => {
+    // uma imagem só, sem foto do projeto: o logo tem o mesmo tratamento
+    const comLogo: Settings = { ...DEFAULT_SETTINGS, logo: FOTO, title: "Pedal" };
+    const s = storageComLimite(1500);
+    expect(saveSettings(s, comLogo)).toBe("sem-foto");
+    const guardado = JSON.parse(s.getItem("rotacast:settings") as string) as Settings;
+    expect(guardado.logo).toBe("");
+    expect(guardado.title).toBe("Pedal");
+  });
+
+  it("com foto e logo, os dois saem antes de desistir dos ajustes", () => {
+    const s = storageComLimite(1500);
+    const ambos: Settings = { ...DEFAULT_SETTINGS, cardPhoto: FOTO, logo: FOTO, title: "Pedal" };
+    expect(saveSettings(s, ambos)).toBe("sem-foto");
+    const guardado = JSON.parse(s.getItem("rotacast:settings") as string) as Settings;
+    expect(guardado.cardPhoto).toBe("");
+    expect(guardado.logo).toBe("");
+    expect(guardado.title).toBe("Pedal");
+  });
+
   it("sem foto, um estouro de cota é falha mesmo", () => {
     const s = storageComLimite(10);
     expect(saveSettings(s, DEFAULT_SETTINGS)).toBe("falhou");

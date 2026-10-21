@@ -106,6 +106,16 @@ export type SceneStyle = {
    */
   showProfile?: boolean;
   /**
+   * Logo da marca (data URL), na **cartela final**.
+   *
+   * A cartela é o quadro que vira print: é ali que a marca do projeto tem de
+   * estar. Com o avatar no alto, o logo fica na mesma linha, à esquerda dele;
+   * sozinho, ocupa o alto do painel.
+   */
+  logo?: string;
+  /** placa clara atrás do logo (para logo escuro no painel escuro) */
+  logoChip?: boolean;
+  /**
    * Destaques do percurso: a **melhor parcial** e a **maior subida** aparecem
    * como um aviso curto quando o personagem chega nelas.
    *
@@ -3818,6 +3828,16 @@ export type SummaryLayout = {
   avatar: PhotoImage | null;
   ladoAvatar: number;
   alturaAvatar: number;
+  /** logo da marca, já medido (0×0 quando não há) */
+  logo: PhotoImage | null;
+  /** quanto o logo ocupa da altura, acima dos números */
+  alturaLogo: number;
+  logoX: number;
+  logoY: number;
+  logoW: number;
+  logoH: number;
+  /** placa clara atrás do logo */
+  logoChip: boolean;
   boxX: number;
   boxY: number;
   boxW: number;
@@ -3937,9 +3957,28 @@ export function summaryBox(
   const ladoAvatar = Math.round(78 * sf);
   const alturaAvatar = avatar ? ladoAvatar + 14 * sf : 0;
 
-  const boxW = Math.min(maxW, Math.max(totalW, notaW) + pad * 2);
+  /*
+   * Logo da marca.
+   *
+   * Medido **antes** da largura da caixa: sozinho no alto, ele é o conteúdo
+   * mais largo da cartela e a caixa precisa caber nele. Ao lado do avatar, é
+   * ele que se ajusta ao espaço que sobra (e nunca encosta no círculo).
+   */
+  const logo =
+    input.style.logo && input.photos ? input.photos.get(input.style.logo) : null;
+  const larguraMinimaLogo = logo && !avatar ? 96 * sf : 0;
+
+  const boxW = Math.min(maxW, Math.max(totalW, notaW, larguraMinimaLogo) + pad * 2);
+  const alturaLogoMax = avatar ? 40 * sf : 54 * sf;
+  const larguraLogoMax = avatar
+    ? Math.max(0, boxW / 2 - ladoAvatar / 2 - 24 * sf - pad * 0.8)
+    : boxW - pad * 2;
+  const logoTam = logo ? medidaDoLogo(logo, alturaLogoMax, larguraLogoMax) : null;
+  const alturaLogo = logoTam && !avatar ? logoTam.h + 14 * sf : 0;
+
   const altura =
     alturaAvatar +
+    alturaLogo +
     (colunas.length > 0 ? valorFs * 1.15 + labelFs * 1.35 : 0) +
     (nota ? noteFs * 1.5 : 0) +
     pad * 1.6;
@@ -3972,6 +4011,15 @@ export function summaryBox(
     }
   }
 
+  /*
+   * Onde o logo cai: na linha do avatar (centrado com ele) ou, sem avatar, no
+   * alto do painel, centralizado.
+   */
+  const logoH = logoTam?.h ?? 0;
+  const logoW = logoTam?.w ?? 0;
+  const logoX = avatar ? boxX + pad * 0.8 : boxX + (boxW - logoW) / 2;
+  const logoY = avatar ? boxY + pad * 0.55 + (ladoAvatar - logoH) / 2 : boxY + pad * 0.55;
+
   return {
     alpha,
     pad,
@@ -3985,11 +4033,44 @@ export function summaryBox(
     avatar,
     ladoAvatar,
     alturaAvatar,
+    alturaLogo,
+    logo,
+    logoX,
+    logoY,
+    logoW,
+    logoH,
+    logoChip: !!input.style.logoChip,
     boxX,
     boxY,
     boxW,
     boxH: altura,
   };
+}
+
+/**
+ * O tamanho do logo na cartela, mantendo a proporção da imagem.
+ *
+ * Cabe em `maxH` de altura e `maxW` de largura, o que estourar primeiro manda.
+ * Devolve 0×0 quando não há espaço (cartela estreita demais) — e aí o logo
+ * simplesmente não é desenhado, em vez de sair esmagado.
+ */
+export function medidaDoLogo(
+  img: { width: number; height: number },
+  maxH: number,
+  maxW: number,
+): { w: number; h: number } {
+  if (!(maxH > 0) || !(maxW > 0)) return { w: 0, h: 0 };
+  const w0 = Number(img.width) || 0;
+  const h0 = Number(img.height) || 0;
+  if (!(w0 > 0) || !(h0 > 0)) return { w: 0, h: 0 };
+  const razao = w0 / h0;
+  let h = Math.min(maxH, maxW / razao);
+  let w = h * razao;
+  if (w > maxW) {
+    w = maxW;
+    h = w / razao;
+  }
+  return { w: Math.max(0, w), h: Math.max(0, h) };
 }
 
 /** Desenha a cartela já medida por `summaryBox`. */
@@ -4014,6 +4095,13 @@ function drawSummary(
     avatar,
     ladoAvatar,
     alturaAvatar,
+    alturaLogo,
+    logo,
+    logoX,
+    logoY,
+    logoW,
+    logoH,
+    logoChip,
     boxX,
     boxY,
     boxW,
@@ -4054,9 +4142,23 @@ function drawSummary(
     );
   }
 
+  /*
+   * O logo da marca. A placa clara é opcional: logo escuro (ou de fundo
+   * transparente escuro) some no painel escuro da cartela, e a placa resolve
+   * isso sem ninguém ter de editar a imagem.
+   */
+  if (logo && logoW > 0 && logoH > 0) {
+    if (logoChip) {
+      roundRect(ctx, logoX - 8 * sf, logoY - 6 * sf, logoW + 16 * sf, logoH + 12 * sf, 8 * sf);
+      ctx.fillStyle = "rgba(255,255,255,0.92)";
+      ctx.fill();
+    }
+    ctx.drawImage(logo as CanvasImageSource, logoX, logoY, logoW, logoH);
+  }
+
   ctx.textAlign = "center";
   ctx.textBaseline = "alphabetic";
-  let base = boxY + pad * 0.8 + alturaAvatar + valorFs * 0.85;
+  let base = boxY + pad * 0.8 + alturaAvatar + alturaLogo + valorFs * 0.85;
 
   if (colunas.length > 0) {
     let x = boxX + (boxW - totalW) / 2;

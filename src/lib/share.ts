@@ -59,6 +59,7 @@ const SHARED_KEYS = [
   "showHud",
   "minimap",
   "elevationProfile",
+  "highlights",
   "activity",
   "colorBy",
   "showKmMarks",

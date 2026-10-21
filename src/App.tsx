@@ -1173,6 +1173,7 @@ function App() {
       showHud: settings.showHud,
       showMinimap: settings.minimap,
       showProfile: settings.elevationProfile,
+      showHighlights: settings.highlights,
       avatar: settings.avatar,
       // a pé o HUD mostra ritmo (min/km) em vez de velocidade
       pace: usaRitmo(settings.activity),

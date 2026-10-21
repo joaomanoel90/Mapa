@@ -84,6 +84,14 @@ export type Settings = {
    * simplesmente não aparece, em vez de sair uma linha reta inventada.
    */
   elevationProfile: boolean;
+  /**
+   * Destaques do percurso no vídeo: a **melhor parcial** e a **maior subida**.
+   *
+   * Cada um aparece uma vez, num aviso curto, quando o personagem chega nele.
+   * Sem hora no arquivo não há parcial; sem altitude não há subida — o aviso
+   * que não tem dado simplesmente não aparece.
+   */
+  highlights: boolean;
   /** pedal, corrida ou caminhada — muda a unidade do HUD (km/h ou min/km) */
   activity: ActivityId;
   /**
@@ -173,6 +181,7 @@ export const DEFAULT_SETTINGS: Settings = {
   showHud: true,
   minimap: true,
   elevationProfile: true,
+  highlights: true,
   activity: "pedal",
   colorBy: "solid",
   showKmMarks: false,
@@ -226,6 +235,7 @@ export function sanitizeSettings(raw: Partial<Settings>): Partial<Settings> {
   if (typeof out.showHud !== "boolean") delete out.showHud;
   if (typeof out.minimap !== "boolean") delete out.minimap;
   if (typeof out.elevationProfile !== "boolean") delete out.elevationProfile;
+  if (typeof out.highlights !== "boolean") delete out.highlights;
   if (!ACTIVITIES.some((a) => a.id === out.activity)) delete out.activity;
   if (out.colorBy !== "solid" && out.colorBy !== "speed" && out.colorBy !== "slope") {
     delete out.colorBy;

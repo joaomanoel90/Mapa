@@ -725,6 +725,19 @@ function Sidebar(props: Props) {
               </p>
             )}
             <Toggle
+              icon="🏅"
+              label="Destaques do percurso"
+              checked={s.highlights}
+              onChange={(v) => update("highlights", v)}
+            />
+            {s.highlights && (
+              <p className="text-[11px] leading-snug text-zinc-500">
+                A <strong>melhor parcial</strong> e a <strong>maior subida</strong> aparecem uma vez
+                cada, num aviso curto, quando o personagem chega nelas. Sem hora no arquivo não há
+                parcial; sem altitude, não há subida.
+              </p>
+            )}
+            <Toggle
               icon="🏁"
               label="Cartela final"
               checked={s.endCard}

@@ -85,6 +85,10 @@ describe("sanitizeSettings", () => {
     expect(DEFAULT_SETTINGS.elevationProfile).toBe(true);
     expect(sanitizeSettings(raw({ elevationProfile: "sim" })).elevationProfile).toBeUndefined();
     expect(sanitizeSettings(raw({ elevationProfile: false })).elevationProfile).toBe(false);
+    // os destaques do percurso também nascem ligados, e só booleano passa
+    expect(DEFAULT_SETTINGS.highlights).toBe(true);
+    expect(sanitizeSettings(raw({ highlights: "sim" })).highlights).toBeUndefined();
+    expect(sanitizeSettings(raw({ highlights: false })).highlights).toBe(false);
     // o avatar é opcional e passa pela mesma peneira da foto da cartela
     expect(DEFAULT_SETTINGS.avatar).toBe("");
     const foto = "data:image/jpeg;base64,AAAA";

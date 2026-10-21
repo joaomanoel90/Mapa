@@ -25,6 +25,7 @@ import {
 } from "./camera";
 import { routeEnd, timelineOr, type Timeline } from "./timeline";
 import { NEUTRAL_COLOR, slopeAt, slopeSeries, type ColoredRoute } from "./coloring";
+import { destaqueEmCena, destaques, type Destaque } from "./highlights";
 import type { KmMark } from "./km-marks";
 import { countPassed } from "./passages";
 import {
@@ -104,6 +105,15 @@ export type SceneStyle = {
    * quando o arquivo tem altitude (sem ela, não há o que desenhar).
    */
   showProfile?: boolean;
+  /**
+   * Destaques do percurso: a **melhor parcial** e a **maior subida** aparecem
+   * como um aviso curto quando o personagem chega nelas.
+   *
+   * É o que conta a corrida — onde o atleta foi melhor e onde foi mais duro —,
+   * e é o que sobra de assunto para quem comenta o vídeo depois. Só aparece
+   * quando o arquivo tem o dado (hora para a parcial, altitude para a subida).
+   */
+  showHighlights?: boolean;
   /**
    * Avatar do personagem (data URL da foto), no lugar do emoji.
    *
@@ -1236,6 +1246,37 @@ export class SceneRenderer {
    */
   private declives: { track: Track | null; series: number[] } = { track: null, series: [] };
 
+  /**
+   * Os destaques do percurso, calculados **uma vez** por (traçado, horas).
+   *
+   * `parciais` percorre o traçado inteiro para medir a cobertura das horas em
+   * cada trecho; isso não pode acontecer 30 vezes por segundo.
+   */
+  private destaquesCache: {
+    track: Track | null;
+    times: number[] | null;
+    pace: boolean;
+    lista: Destaque[];
+  } = { track: null, times: null, pace: false, lista: [] };
+
+  private destaquesDo(
+    track: Track,
+    times: number[] | null,
+    pace: boolean,
+    perfil: TrailProfile | null,
+  ): Destaque[] {
+    const c = this.destaquesCache;
+    if (c.track !== track || c.times !== times || c.pace !== pace) {
+      this.destaquesCache = {
+        track,
+        times,
+        pace,
+        lista: destaques({ track, times, perfil, pace }),
+      };
+    }
+    return this.destaquesCache.lista;
+  }
+
   private declivesDo(track: Track): number[] {
     if (this.declives.track !== track) {
       this.declives = { track, series: slopeSeries(track.pts, cumDoDesenho(track)) };
@@ -1796,6 +1837,28 @@ export class SceneRenderer {
       drawKmMarks(ctx, track.pts, toXY, input.marks, sf, width, height);
     }
 
+    /*
+     * --- destaques do percurso ---
+     *
+     * A melhor parcial e a maior subida entram como um aviso curto. Ele é
+     * **medido aqui** e desenhado depois das paradas: assim o bloco de uma
+     * parada (que também é medido depois) sabe onde o aviso está e sai da
+     * frente dele, em vez de os dois brigarem pelo mesmo pedaço de tela.
+     */
+    const destaquesDoQuadro = style.showHighlights
+      ? this.destaquesDo(track, horasAlinhadas(input, track), !!style.pace, this.perfilDo(track))
+      : [];
+    const emCena = destaqueEmCena(destaquesDoQuadro, t, tl.percurso);
+    const avisoNaTela = emCena
+      ? posicionarDestaque(ctx, {
+          destaque: emCena.destaque,
+          alfa: emCena.alfa,
+          sf,
+          quadro: { width, height },
+          style,
+        })
+      : null;
+
     // --- paradas do percurso ---
     if (style.showStops && input.stops.length > 0 && track.pts.length > 1) {
       /*
@@ -1813,7 +1876,11 @@ export class SceneRenderer {
       const ondeEstaOpersonagem = toXY(sample.pos);
       drawStops(ctx, input, toXY, sf, {
         quadro: { width, height },
-        proibidos: [...(cartao ? [retanguloDaCartela(cartao)] : []), ...selos],
+        proibidos: [
+          ...(cartao ? [retanguloDaCartela(cartao)] : []),
+          ...selos,
+          ...(avisoNaTela ? [{ x: avisoNaTela.x, y: avisoNaTela.y, w: avisoNaTela.w, h: avisoNaTela.h }] : []),
+        ],
         // o selo do personagem cobre o pino na passagem (ver `drawStops`)
         personagem: {
           x: ondeEstaOpersonagem.x,
@@ -1822,6 +1889,9 @@ export class SceneRenderer {
         },
       });
     }
+
+    // o aviso dos destaques, por cima de tudo o que está no mapa
+    if (avisoNaTela) pintarDestaque(ctx, avisoNaTela, { accent: style.accent, onDark, sf });
 
     /*
      * --- o horizonte ---
@@ -2558,6 +2628,127 @@ export function centroDoBloco(
 
 /** Um retângulo qualquer na tela (a cartela final, o aviso do topo). */
 type RetanguloNaTela = { x: number; y: number; w: number; h: number };
+
+/**
+ * O aviso de um destaque (melhor parcial, maior subida), já medido.
+ *
+ * Fica separado do desenho porque a medida acontece **antes** dos blocos das
+ * paradas: eles precisam saber o retângulo do aviso para não desenhar em cima.
+ */
+type DestaqueNaTela = {
+  destaque: Destaque;
+  /** 0..1: o quanto ele já entrou */
+  alfa: number;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  fontes: { titulo: string; valor: string; unidade: string; detalhe: string };
+};
+
+/**
+ * Mede o aviso e escolhe o lugar dele no quadro.
+ *
+ * O lugar é **fixo**: centralizado no alto, logo abaixo do título (e abaixo do
+ * minimapa, quando ele está ligado). A primeira versão ancorava o aviso no
+ * ponto do mapa onde o feito aconteceu — e no instante em que ele fica inteiro
+ * o personagem está exatamente ali, então o aviso caía **em cima do
+ * personagem**. Como aviso, ele é um letreiro: o lugar não muda, o que muda é
+ * quando ele entra.
+ */
+function posicionarDestaque(
+  ctx: CanvasRenderingContext2D,
+  o: {
+    destaque: Destaque;
+    alfa: number;
+    sf: number;
+    quadro: { width: number; height: number };
+    style: SceneStyle;
+  },
+): DestaqueNaTela {
+  const { sf } = o;
+  const pad = 14 * sf;
+  const fontes = {
+    titulo: `800 ${Math.round(10.5 * sf)}px "Inter","Segoe UI",system-ui,sans-serif`,
+    valor: `800 ${Math.round(27 * sf)}px "Inter","Segoe UI",system-ui,sans-serif`,
+    unidade: `700 ${Math.round(12 * sf)}px "Inter","Segoe UI",system-ui,sans-serif`,
+    detalhe: `600 ${Math.round(10.5 * sf)}px "Inter","Segoe UI",system-ui,sans-serif`,
+  };
+  const largura = (texto: string, fonte: string) => {
+    ctx.font = fonte;
+    return ctx.measureText(texto).width;
+  };
+  const estrela = largura("★", fontes.titulo) + 6 * sf;
+  const w =
+    Math.max(
+      estrela + largura(o.destaque.titulo.toUpperCase(), fontes.titulo),
+      largura(o.destaque.valor, fontes.valor) + 7 * sf + largura(o.destaque.unidade, fontes.unidade),
+      largura(o.destaque.detalhe, fontes.detalhe),
+    ) +
+    pad * 2;
+  const h = 86 * sf;
+
+  /*
+   * O alto do quadro: abaixo da caixa do título (40 + 26 + margens) e, com o
+   * minimapa ligado, abaixo dele também. À direita, o anel do HUD manda — o
+   * aviso encosta na metade esquerda do que sobra, em vez de entrar na coluna
+   * dele.
+   */
+  const topo = (o.style.showTitle ? 132 : 26) * sf + (o.style.showMinimap ? 250 * sf : 0);
+  const direita = o.quadro.width - (o.style.showHud ? 208 * sf : 0) - 12 * sf;
+  const centro = Math.max(w / 2 + 16 * sf, Math.min(direita - w / 2, o.quadro.width / 2));
+
+  return { destaque: o.destaque, alfa: o.alfa, x: centro - w / 2, y: topo, w, h, fontes };
+}
+
+/** O desenho do aviso: etiqueta, número grande e a linha de baixo. */
+function pintarDestaque(
+  ctx: CanvasRenderingContext2D,
+  t: DestaqueNaTela,
+  o: { accent: string; onDark: boolean; sf: number },
+) {
+  if (t.alfa <= 0.01) return;
+  const { sf, accent, onDark } = o;
+  const pad = 14 * sf;
+
+  ctx.save();
+  ctx.globalAlpha = Math.min(1, Math.max(0, t.alfa));
+
+  ctx.shadowColor = "rgba(0,0,0,0.45)";
+  ctx.shadowBlur = 18 * sf;
+  roundRect(ctx, t.x, t.y, t.w, t.h, 14 * sf);
+  ctx.fillStyle = onDark ? "rgba(9,12,20,0.86)" : "rgba(255,255,255,0.94)";
+  ctx.fill();
+  ctx.shadowBlur = 0;
+  // o aro na cor do app: o aviso é do vídeo, não um aviso do navegador
+  ctx.lineWidth = 1.5 * sf;
+  ctx.strokeStyle = hexA(accent, 0.55);
+  ctx.stroke();
+
+  const x = t.x + pad;
+  ctx.textAlign = "left";
+  ctx.textBaseline = "alphabetic";
+
+  ctx.font = t.fontes.titulo;
+  ctx.fillStyle = accent;
+  ctx.fillText("★", x, t.y + 21 * sf);
+  const estrela = ctx.measureText("★").width + 6 * sf;
+  ctx.fillText(t.destaque.titulo.toUpperCase(), x + estrela, t.y + 21 * sf);
+
+  ctx.font = t.fontes.valor;
+  ctx.fillStyle = onDark ? "#ffffff" : "#0f172a";
+  ctx.fillText(t.destaque.valor, x, t.y + 55 * sf);
+  const wValor = ctx.measureText(t.destaque.valor).width;
+  ctx.font = t.fontes.unidade;
+  ctx.fillStyle = onDark ? "rgba(255,255,255,0.6)" : "rgba(15,23,42,0.55)";
+  ctx.fillText(t.destaque.unidade, x + wValor + 7 * sf, t.y + 55 * sf);
+
+  ctx.font = t.fontes.detalhe;
+  ctx.fillStyle = onDark ? "rgba(255,255,255,0.68)" : "rgba(15,23,42,0.62)";
+  ctx.fillText(t.destaque.detalhe, x, t.y + 76 * sf);
+
+  ctx.restore();
+}
 
 /**
  * Onde cai o bloco de uma parada (a foto e o nome) — em pixels da tela.

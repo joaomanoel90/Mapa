@@ -591,6 +591,50 @@ O caminho contrário também vale: basta **escrever o tempo na cartela** (`3 h 1
 min`) para o vídeo voltar a ter relógio e ritmo médio — aí o número é do usuário,
 não do arquivo.
 
+### Destaques do percurso (melhor parcial e maior subida)
+
+O vídeo já mostrava o traçado, o HUD e o perfil — faltava **contar a corrida**.
+Dois avisos curtos entram na tela, uma vez cada:
+
+```
+   ┌─────────────────┐        ┌─────────────────┐
+   │ ★ MELHOR KM     │        │ ★ MAIOR SUBIDA  │
+   │ 4:12  /km       │        │ 240  m          │
+   │ km 7 de 21,1    │        │ 8,1% · km 12    │
+   └─────────────────┘        └─────────────────┘
+```
+
+**A melhor parcial** é o trecho mais rápido, medido com o **mesmo cronômetro do
+HUD** (`elapsedAt`, que interpola a hora na distância). As fronteiras são as
+**mesmas marcas de km desenhadas na linha** (`kmStep`) — cada número no mapa é
+uma fronteira de parcial, e o vídeo não tem duas réguas.
+
+**A maior subida** é a do perfil (a diferença máxima entre um vale e um cume
+posterior), com os metros ganhos e a inclinação média dela.
+
+O que impede número inventado:
+
+| situação | resultado |
+|---|---|
+| arquivo sem `<time>` | **nenhuma** parcial (o tempo do vídeo daria milhares de km/h) |
+| trecho com menos de 90% dos pontos com hora | aquela parcial não existe |
+| menos de três parciais | não existe "a melhor" — existe "a única" |
+| rota sem elevação ou desnível < 20 m | nenhuma subida em destaque |
+
+**Onde e quando.** O aviso tem lugar **fixo** — centralizado, logo abaixo do
+título (e abaixo do minimapa, quando ligado), fora da coluna do HUD. A primeira
+versão ancorava o aviso no ponto do mapa onde o feito aconteceu, e no instante em
+que ele fica inteiro o personagem está exatamente ali: o aviso caía **em cima do
+personagem**. Como aviso, ele é um letreiro.
+
+No tempo, ele entra 0,25 s antes do momento, fica 2,2 s e sai numa rampa de
+0,35 s — tudo em **segundos de vídeo**, então um clipe de 8 s e um de 40 s
+mostram o aviso pelo mesmo tanto. Dois avisos a menos de 0,9 s um do outro: só o
+primeiro aparece. Mais perto que isso, a permanência de cada um é encurtada para
+ceder a vez ao seguinte — eles nunca se sobrepõem.
+
+Desligável em "🏅 Destaques do percurso" e viaja no link.
+
 ### Rota colorida (velocidade ou inclinação)
 
 Tudo num mesmo interruptor de três posições: **Sólida** (como sempre foi),
@@ -1174,7 +1218,7 @@ ou cortados.
 
 ```bash
 npm run typecheck  # tsc --noEmit
-npm test           # Vitest (858 casos)
+npm test           # Vitest (887 casos)
 npm run check:dist # o build saiu autocontido e sem /src/?
 ```
 

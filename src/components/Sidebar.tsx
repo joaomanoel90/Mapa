@@ -587,7 +587,8 @@ function Sidebar(props: Props) {
           </div>
           <p className="rounded-xl border border-white/10 bg-black/20 p-2.5 text-[11px] leading-snug text-zinc-400">
             Personagem atual: <span className="font-semibold text-white">{character.name}</span>{" "}
-            {character.emoji} · {character.group}
+            {character.emoji}
+            {character.acessorio ?? ""} · {character.group}
           </p>
         </div>
       </Section>

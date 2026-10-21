@@ -580,6 +580,7 @@ export default function MapView(props: Props) {
       html: `<div class="char-badge${classeAndar}" style="--accent:${accent};--passo:${(1 / comoAnda.hz).toFixed(2)}s">
               <div class="char-rot"><div class="char-arrow"></div></div>
               <div class="char-emoji${rostoNoBoneco ? " char-emoji-foto" : ""}">${dentro}</div>
+              ${!rostoNoBoneco && character.acessorio ? `<span class="char-acessorio">${character.acessorio}</span>` : ""}
             </div>`,
       iconSize: [58, 58],
       iconAnchor: [29, 29],

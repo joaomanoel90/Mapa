@@ -2714,11 +2714,43 @@ function drawCharacter(
      * ficava pequena dentro de um aro grande — o conjunto parecia ícone de
      * painel, não personagem.
      */
+    ctx.save();
     ctx.rotate(rotate ? ((rumo + (character.baseAngle ?? 0)) * Math.PI) / 180 : 0);
     ctx.font = `${Math.round(badge * 0.78)}px ${EMOJI_FONT}`;
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
     ctx.fillText(character.emoji, 0, badge * 0.03);
+    ctx.restore();
+
+    /*
+     * O **acessório** dos personagens compostos (a mochila do peregrino, a cruz
+     * do padre). Entra por cima do emoji grande, no canto de baixo, com um disco
+     * escuro atrás e o aro do acento: sem o disco ele se perde no meio do
+     * desenho, e sem o canto ele tapa o rosto de quem está andando.
+     *
+     * Desenhado **fora** da rotação: o emoji do personagem gira com o rumo, o
+     * acessório não — uma mochila de ponta-cabeça não se lê.
+     */
+    if (character.acessorio) {
+      /*
+       * No canto onde ele encosta no aro: dentro do selo ele tapava o corpo do
+       * emoji, e fora dele parecia um enfeite solto no mapa.
+       */
+      const r = badge * 0.225;
+      const cx = badge * 0.4;
+      const cy = badge * 0.4;
+      ctx.beginPath();
+      ctx.arc(cx, cy, r, 0, Math.PI * 2);
+      ctx.fillStyle = "rgba(9,12,20,0.94)";
+      ctx.fill();
+      ctx.lineWidth = Math.max(1, 1.4 * sf);
+      ctx.strokeStyle = hexA(style.accent, 0.85);
+      ctx.stroke();
+      ctx.font = `${Math.round(badge * 0.29)}px ${EMOJI_FONT}`;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(character.acessorio, cx, cy + badge * 0.012);
+    }
   }
 
   ctx.restore();

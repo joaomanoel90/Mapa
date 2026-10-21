@@ -371,6 +371,15 @@ async function codificarAudio(
       });
       encoder.encode(data);
       data.close();
+
+      /*
+       * Contrapressão, como no vídeo: um minuto de trilha são ~2.800 blocos, e
+       * sem esperar a fila cresce sem limite — o navegador recusa com "queue
+       * full" e o áudio inteiro se perde.
+       */
+      if (encoder.encodeQueueSize > 32) {
+        await new Promise((r) => setTimeout(r, 0));
+      }
     }
     await encoder.flush();
     if (erro) throw erro;

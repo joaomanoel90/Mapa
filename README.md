@@ -818,6 +818,33 @@ Rota de 55 km: passo 5 → 11 marcas, de 5 a 55. Rota de 3 km: passo 1 → 3 mar
 Abaixo de 1 km não há marca nenhuma (não existe km redondo para marcar).
 Rota de 435 km: passo 50 → 9 marcas, de 50 a 450, todas numeradas.
 
+### Percurso de vários dias (travessia, trekking, bike de fim de semana)
+
+O GPX não tem "dias": tem pontos com hora. Um arquivo multi-dia é um traçado em
+que **passaram-se horas entre dois pontos** — a noite. É isso que separa os
+dias aqui (`diasDoPercurso`), e não a data do relógio: uma pedalada que
+atravessa a meia-noite continua sendo **um dia só**, que é como quem pedalou
+conta. O corte é um intervalo maior que **6 h** — sobra para um almoço longo e
+não deixa uma noite passar batido.
+
+Com mais de um dia, o vídeo muda em dois lugares:
+
+- um aviso no alto, no centro, quando o personagem **começa** o dia: `DIA 2 ·
+  41,2 km` (o dia 1 não avisa — o vídeo já começa nele). Dura 2,4 s de vídeo,
+  como o destaque da melhor parcial, e é desligável em **Animação → 🌙 Marcas
+  de dia**;
+- a cartela final ganha a quarta tira **dias**, porque 80 km num dia e 80 km em
+  três dias não são a mesma coisa.
+
+Os dias cobrem a rota inteira: cada um vai até o ponto em que o seguinte começa,
+inclusive o pedaço em que a pessoa parou e retomou — sem isso a soma das
+distâncias dos dias não fecharia com o total do percurso.
+
+Sem hora em **todos** os pontos não há dia nenhum para dividir, e nada muda: o
+vídeo sai como sempre, sem aviso e sem a tira. O interruptor "Marcas de dia" só
+aparece no painel quando o arquivo realmente tem mais de um dia — um interruptor
+que não faz nada é pior que interruptor nenhum.
+
 ### Fantasma à frente
 
 Um segundo desenho do **mesmo personagem**, translúcido (34% de opacidade), um

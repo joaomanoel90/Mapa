@@ -32,6 +32,7 @@ import { NEUTRAL_COLOR, slopeAt, slopeSeries, type ColoredRoute } from "./colori
 import { destaqueEmCena, destaques, type Destaque } from "./highlights";
 import type { KmMark } from "./km-marks";
 import { countPassed } from "./passages";
+import { diaNaTela, type Dia } from "./days";
 import {
   elevacaoEm,
   inclinacaoDaSubida,
@@ -91,6 +92,13 @@ export type SceneStyle = {
    * mesma rota. Ver `pontoFantasma`.
    */
   ghost?: boolean;
+  /**
+   * O aviso de **dia novo** no percurso de vários dias ("DIA 2 · 41,2 km").
+   *
+   * Só aparece quando o arquivo realmente tem mais de um dia (ver
+   * `diasDoPercurso`); num percurso de um dia não há o que avisar.
+   */
+  showDays?: boolean;
   /** exibe as paradas (ponte, cachoeira, igreja…) no vídeo */
   showStops: boolean;
   /** mostra o nome da parada em uma etiqueta */
@@ -169,6 +177,8 @@ export type FrameState = {
   rotate: boolean;
   camera: CameraConfig;
   style: SceneStyle;
+  /** dias do percurso (vazio ou ausente = percurso de um dia só) */
+  days?: Dia[] | null;
   /** paradas do percurso (aparecem quando o personagem passa) */
   stops: Poi[];
   /** locais marcados de partida/chegada (null = letras A/B) */
@@ -2129,6 +2139,25 @@ export class SceneRenderer {
      */
     if (style.showMinimap) this.drawMinimap(ctx, width, height, input, sample, onDark, headerBottom);
 
+    /*
+     * O aviso de **dia novo**, no alto e no centro: à esquerda ficam o título e
+     * o minimapa, à direita o HUD — o meio é o único lugar livre do cabeçalho.
+     * Ele é sobre o dia que **começa** (o dia 1 não avisa: o vídeo já começa
+     * nele), e dura poucos segundos de vídeo, como o destaque do percurso.
+     */
+    if (style.showDays !== false) {
+      const emCena = diaNaTela(input.days, t, tl.percurso);
+      if (emCena) {
+        drawDayChip(ctx, emCena.dia, emCena.alfa, {
+          width,
+          topo: headerBottom + 10 * sf,
+          sf,
+          accent: style.accent,
+          onDark,
+        });
+      }
+    }
+
     // --- overlays ---
     if (style.showProgress) drawProgress(ctx, width, height, input, sf);
     if (style.showHud) {
@@ -2870,6 +2899,59 @@ function posicionarDestaque(
 }
 
 /** O desenho do aviso: etiqueta, número grande e a linha de baixo. */
+/**
+ * O aviso de dia novo: uma pílula no alto do quadro — "DIA 2 · 41,2 km".
+ *
+ * A distância do dia entra junto porque é a pergunta que o aviso levanta: "já
+ * foram 41 km, e agora começa outro dia".
+ */
+function drawDayChip(
+  ctx: CanvasRenderingContext2D,
+  dia: Dia,
+  alfa: number,
+  o: { width: number; topo: number; sf: number; accent: string; onDark: boolean },
+) {
+  if (alfa <= 0.01) return;
+  const { width, topo, sf, accent, onDark } = o;
+  const titulo = `DIA ${dia.n}`;
+  const distancia = formatDistance(dia.metros);
+
+  const fTitulo = `800 ${Math.round(13 * sf)}px "Inter","Segoe UI",system-ui,sans-serif`;
+  const fDist = `600 ${Math.round(12.5 * sf)}px "Inter","Segoe UI",system-ui,sans-serif`;
+
+  ctx.save();
+  ctx.globalAlpha = Math.min(1, Math.max(0, alfa));
+  ctx.textBaseline = "middle";
+
+  ctx.font = fTitulo;
+  const wTitulo = ctx.measureText(titulo).width;
+  ctx.font = fDist;
+  const wDist = ctx.measureText(distancia).width;
+
+  const padX = 15 * sf;
+  const gap = 10 * sf;
+  const h = 30 * sf;
+  const w = padX * 2 + wTitulo + gap + wDist;
+  const x = (width - w) / 2;
+
+  roundRect(ctx, x, topo, w, h, h / 2);
+  ctx.fillStyle = onDark ? "rgba(9,12,20,0.86)" : "rgba(255,255,255,0.94)";
+  ctx.fill();
+  ctx.lineWidth = 1.5 * sf;
+  ctx.strokeStyle = hexA(accent, 0.6);
+  ctx.stroke();
+
+  ctx.textAlign = "left";
+  ctx.font = fTitulo;
+  ctx.fillStyle = accent;
+  ctx.fillText(titulo, x + padX, topo + h / 2 + 0.5 * sf);
+  ctx.font = fDist;
+  ctx.fillStyle = onDark ? "rgba(255,255,255,0.85)" : "rgba(15,23,42,0.8)";
+  ctx.fillText(distancia, x + padX + wTitulo + gap, topo + h / 2 + 0.5 * sf);
+
+  ctx.restore();
+}
+
 function pintarDestaque(
   ctx: CanvasRenderingContext2D,
   t: DestaqueNaTela,

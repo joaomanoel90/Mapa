@@ -354,6 +354,12 @@ describe("sharedSettingsOverrides", () => {
     expect(decodeShare(buildShareUrl(base()))?.settings.relevo).toBe(false);
   });
 
+  it("as marcas de dia viajam no link", () => {
+    const url = buildShareUrl(base({ settings: { ...DEFAULT_SETTINGS, dias: false } }));
+    expect(decodeShare(url)?.settings.dias).toBe(false);
+    expect(decodeShare(buildShareUrl(base()))?.settings.dias).toBe(true);
+  });
+
   it("o fantasma à frente viaja no link (é parte da cena)", () => {
     const url = buildShareUrl(base({ settings: { ...DEFAULT_SETTINGS, ghost: true } }));
     expect(decodeShare(url)?.settings.ghost).toBe(true);

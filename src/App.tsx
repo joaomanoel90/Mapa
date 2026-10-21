@@ -16,6 +16,7 @@ import {
 import { pinsAsDots } from "./lib/pins";
 import { endCard, rideSummary } from "./lib/stats";
 import { timesOf } from "./lib/hud";
+import { diasDoPercurso } from "./lib/days";
 import { colorizeRoute, dataCoverage } from "./lib/coloring";
 import { kmMarks } from "./lib/km-marks";
 import { parseDuration } from "./lib/duration";
@@ -485,6 +486,12 @@ function App() {
    */
   const horas = useMemo(() => timesOf(track.pts), [track]);
 
+  /*
+   * Os dias do percurso: um arquivo multi-dia tem uma noite entre os pontos.
+   * Sem hora em todos os pontos a lista é vazia, e nada muda no vídeo.
+   */
+  const dias = useMemo(() => diasDoPercurso(track), [track]);
+
   /**
    * Tempo escrito na cartela, em segundos.
    *
@@ -685,6 +692,8 @@ function App() {
         // campo em branco usa o número do arquivo: com o interruptor ligado, a
         // cartela aparece sem precisar digitar nada
         true,
+        // percurso de dois dias ou mais ganha a tira "dias"
+        dias.length,
       ),
     [
       settings.cardDistance,
@@ -692,6 +701,7 @@ function App() {
       settings.cardTime,
       settings.cardNote,
       resumo,
+      dias,
     ],
   );
 
@@ -1246,6 +1256,8 @@ function App() {
       showHighlights: settings.highlights,
       // o fantasma à frente: só desenho, não muda a câmera nem os blocos
       ghost: settings.ghost,
+      // o aviso de dia novo (só aparece em arquivo multi-dia)
+      showDays: settings.dias,
       avatar: settings.avatar,
       // o logo da marca entra na cartela como a foto do projeto
       logo: settings.logo,
@@ -1369,6 +1381,7 @@ function App() {
           timeline: linhaDoTempo,
           summary: cartela,
           times: horas,
+          days: dias,
           cardSeconds: tempoCartela,
           colored,
           marks: marcas,
@@ -1736,6 +1749,7 @@ function App() {
             passages={passagens}
             track={track}
             cobertura={cobertura}
+            variosDias={dias.length > 1}
             blocos={blocos}
             onUseZoom={(z) => update("followZoom", z)}
             progress={sidebarProgress}

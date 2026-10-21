@@ -62,6 +62,8 @@ type Props = {
   maxZoom: number;
   /** quanto do traçado tem elevação e hora (0..1) — decide as dicas da cor */
   cobertura: { ele: number; time: number };
+  /** o arquivo tem mais de um dia (uma noite no meio)? */
+  variosDias?: boolean;
   /** blocos que a câmera vai pedir em cada servidor (o teto de cada um) */
   blocos: {
     /** blocos de **mapa** — o número que o teto do servidor de mapas conta */
@@ -126,6 +128,7 @@ function Sidebar(props: Props) {
     passages,
     track,
     cobertura,
+    variosDias,
     blocos,
     onUseZoom,
     progress,
@@ -826,6 +829,24 @@ function Sidebar(props: Props) {
               checked={s.showKmMarks}
               onChange={(v) => update("showKmMarks", v)}
             />
+            {/*
+              Só aparece quando o arquivo tem uma noite no meio: um interruptor
+              de "dias" num percurso de um dia é uma opção que não faz nada.
+            */}
+            {variosDias && (
+              <>
+                <Toggle
+                  icon="🌙"
+                  label="Marcas de dia"
+                  checked={s.dias}
+                  onChange={(v) => update("dias", v)}
+                />
+                <p className="text-[10.5px] leading-snug text-zinc-500">
+                  O arquivo tem mais de um dia. No começo de cada dia entra um aviso
+                  “DIA 2 · 41,2 km” no alto do vídeo, e a cartela final ganha a tira “dias”.
+                </p>
+              </>
+            )}
             <Toggle
               icon="🎬"
               label="Câmera cinematográfica"

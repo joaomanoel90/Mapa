@@ -190,6 +190,13 @@ export function endCard(
   f: CardFields,
   file: RideSummary,
   preencherComArquivo = false,
+  /**
+   * Quantos dias o percurso durou. Zero ou um = um dia só, e a cartela é a de
+   * sempre; dois ou mais entram como uma quarta tira ("dias"), porque num
+   * percurso multi-dia essa é a informação que muda a leitura dos outros três
+   * números — 80 km num dia e 80 km em três dias não são a mesma coisa.
+   */
+  dias = 0,
 ): EndCard | null {
   const sugestao = cardSuggestions(file);
 
@@ -207,6 +214,7 @@ export function endCard(
   if (ele) tiles.push({ value: ele, label: "elevação" });
   const tempo = numero(f.cardTime, sugestao.time);
   if (tempo) tiles.push({ value: tempo, label: "tempo" });
+  if (dias > 1) tiles.push({ value: String(dias), label: "dias" });
 
   const nota = campo(f.cardNote);
   // A cartela existe porque alguém escreveu algo. A data do arquivo só

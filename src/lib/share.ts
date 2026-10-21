@@ -64,6 +64,7 @@ const SHARED_KEYS = [
   "activity",
   "colorBy",
   "showKmMarks",
+  "dias",
   "cinematic",
   "cardDistance",
   "cardElevation",

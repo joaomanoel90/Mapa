@@ -240,6 +240,19 @@ describe("endCard", () => {
     expect(card?.tiles.map((t) => t.label)).toEqual(["distância", "elevação", "tempo"]);
   });
 
+  it("um percurso de vários dias ganha a tira \"dias\" no fim da cartela", () => {
+    const card = endCard(vazio, COM_TUDO, true, 3);
+    expect(card?.tiles.map((t) => t.label)).toEqual(["distância", "elevação", "tempo", "dias"]);
+    expect(card?.tiles.at(-1)?.value).toBe("3");
+    // um dia só não vira tira: seria um "1" que não informa nada
+    expect(endCard(vazio, COM_TUDO, true, 1)?.tiles.map((t) => t.label)).toEqual([
+      "distância",
+      "elevação",
+      "tempo",
+    ]);
+    expect(endCard(vazio, COM_TUDO, true, 0)?.tiles).toHaveLength(3);
+  });
+
   it("sem hora no arquivo, a linha do tempo não é inventada", () => {
     const card = endCard(vazio, { ...COM_TUDO, time: null }, true);
     expect(card?.tiles.map((t) => t.label)).toEqual(["distância", "elevação"]);

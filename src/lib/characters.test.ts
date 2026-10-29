@@ -11,7 +11,15 @@ import { CHARACTERS, findCharacter, gaitOf } from "./characters";
  * com um acessório.
  */
 
-const GRUPOS = ["Veículos", "Pessoas", "Ofícios", "Bichos", "Voadores", "Esportes"];
+const GRUPOS = [
+  "Veículos",
+  "Pessoas",
+  "Ofícios",
+  "Bichos",
+  "Voadores",
+  "Esportes",
+  "Animados",
+];
 
 describe("a lista de personagens", () => {
   it("não tem id repetido", () => {
@@ -70,7 +78,14 @@ describe("o peregrino e o padre", () => {
   });
 
   it("nenhum outro personagem repete a mesma combinação figura + acessório", () => {
-    const chaves = CHARACTERS.map((c) => `${c.emoji}|${c.acessorio ?? ""}`);
+    /*
+     * Os **animados** ficam de fora: eles repetem o emoji de propósito (o
+     * "Caminhante animado" é o 🚶 que se mexe). O que os distingue é o vetor, e
+     * é o `id` que viaja no link.
+     */
+    const chaves = CHARACTERS.filter((c) => !c.icone).map(
+      (c) => `${c.emoji}|${c.acessorio ?? ""}`,
+    );
     expect(new Set(chaves).size).toBe(chaves.length);
   });
 });

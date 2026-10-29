@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
-import { ACCENTS, CHARACTERS, type Character } from "../lib/characters";
+import { ACCENTS, CHARACTERS, iconeDe, type Character } from "../lib/characters";
+import { svgDoIcone } from "../lib/icones";
 import { cn } from "../utils/cn";
 
 export function CharacterPicker({
@@ -53,7 +54,26 @@ export function CharacterPicker({
                       : "border-white/10 bg-black/25 hover:-translate-y-0.5 hover:border-white/30 hover:bg-white/5",
                   )}
                 >
-                  <span className="drop-shadow-[0_2px_4px_rgba(0,0,0,0.5)]">{c.emoji}</span>
+                  {/*
+                    Personagem **animado**: a miniatura é o próprio SVG, mexendo —
+                    é a diferença que ele veio oferecer, e uma bolinha parada não a
+                    mostraria. Só os nove desenhados animam aqui; o resto é emoji.
+                  */}
+                  {iconeDe(c) ? (
+                    <span
+                      className="drop-shadow-[0_2px_4px_rgba(0,0,0,0.5)]"
+                      // o SVG vem do próprio código (nomes fixos), nunca do usuário
+                      dangerouslySetInnerHTML={{
+                        __html: svgDoIcone(iconeDe(c)!, {
+                          accent: ACCENTS[0].value,
+                          lado: 34,
+                          hz: iconeDe(c)!.gaitHz,
+                        }),
+                      }}
+                    />
+                  ) : (
+                    <span className="drop-shadow-[0_2px_4px_rgba(0,0,0,0.5)]">{c.emoji}</span>
+                  )}
                   {/*
                     O acessório dos compostos (a mochila do peregrino, a cruz do
                     padre) aparece aqui como aparece no vídeo: pequeno, no canto,

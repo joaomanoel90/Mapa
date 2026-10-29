@@ -16,8 +16,9 @@ import {
   type Track,
 } from "../lib/geo";
 import { HOME_CITY } from "../lib/geocode";
-import { gaitOf, type Character } from "../lib/characters";
-import { bonecoLigado, type Boneco } from "../lib/boneco";
+import { gaitOf, iconeDe, type Character } from "../lib/characters";
+import { svgDoIcone } from "../lib/icones";
+import { bonecoLigado, viradoPara, type Boneco } from "../lib/boneco";
 import { CHASE_ALTURA, CHASE_ZOOM } from "../lib/camera";
 import { poiAnchor, poiLatLng, poiOffset, type Poi } from "../lib/pois";
 import { hasMark, type Endpoints } from "../lib/endpoints";
@@ -572,15 +573,29 @@ export default function MapView(props: Props) {
      * que o vídeo faz). O emoji fica para quem não escolheu foto.
      */
     const rostoNoBoneco = !!avatar && bonecoLigado(boneco);
+    /*
+     * O ícone animado entra na prévia como **SVG animado** — o mesmo desenho do
+     * vídeo, com as partes girando por `<animateTransform>`. É o que faz o
+     * bonequinho andar no mapa antes de gravar, e não só no arquivo final.
+     * Com a foto do boneco, ela ganha (é o rosto de quem vai aparecer).
+     */
+    const icone = rostoNoBoneco ? null : iconeDe(character);
     const dentro = rostoNoBoneco
       ? `<img class="char-face" src="${avatar}" alt="" draggable="false" />`
-      : character.emoji;
+      : icone
+        ? svgDoIcone(icone, {
+            accent,
+            lado: 40,
+            hz: icone.gaitHz,
+            classe: "char-svg",
+          })
+        : character.emoji;
     const icon = L.divIcon({
       className: "char-icon",
       html: `<div class="char-badge${classeAndar}" style="--accent:${accent};--passo:${(1 / comoAnda.hz).toFixed(2)}s">
               <div class="char-rot"><div class="char-arrow"></div></div>
               <div class="char-emoji${rostoNoBoneco ? " char-emoji-foto" : ""}">${dentro}</div>
-              ${!rostoNoBoneco && character.acessorio ? `<span class="char-acessorio">${character.acessorio}</span>` : ""}
+              ${!rostoNoBoneco && !icone && character.acessorio ? `<span class="char-acessorio">${character.acessorio}</span>` : ""}
             </div>`,
       iconSize: [58, 58],
       iconAnchor: [29, 29],
@@ -609,9 +624,17 @@ export default function MapView(props: Props) {
     if (rot) rot.style.transform = `rotate(${rumo}deg)`;
     const emoji = el?.querySelector<HTMLDivElement>(".char-emoji");
     if (emoji) {
+      /*
+       * O **ícone animado** olha para a direita: indo para a esquerda, ele é
+       * espelhado, como no vídeo. Sem isso o caminhante andaria de costas para
+       * onde vai — o emoji disfarçava (a figura é quase simétrica), o desenho
+       * não.
+       */
       emoji.style.transform = rotate
         ? `rotate(${rumo + (character.baseAngle ?? 0)}deg)`
-        : "none";
+        : iconeDe(character)
+          ? `scaleX(${viradoPara(rumo)})`
+          : "none";
     }
     if (playing && follow) {
       const maxZ = BASEMAPS[basemap].maxZoom;

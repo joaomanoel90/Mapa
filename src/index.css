@@ -256,6 +256,19 @@ body {
   pointer-events: none;
 }
 
+/*
+ * O ícone animado na prévia: o SVG ocupa o selo inteiro e é ele que carrega a
+ * animação (`<animateTransform>`), então aqui não há `animation` de CSS — o
+ * selo balança e o desenho anda, cada um no seu ritmo.
+ */
+.char-svg {
+  display: block;
+  width: 42px;
+  height: 42px;
+  pointer-events: none;
+  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.55));
+}
+
 .char-emoji {
   position: relative;
   /* maior, como no vídeo: a figura não pode ficar pequena dentro do aro */

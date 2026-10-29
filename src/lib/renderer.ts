@@ -1,4 +1,5 @@
-import { gaitOf, type Character } from "./characters";
+import { gaitOf, iconeDe, tamanhoDe, type Character } from "./characters";
+import { desenharIcone } from "./icones";
 import { focoDasParadas, poiLatLng, type Poi } from "./pois";
 import { hasMark, type Endpoints } from "./endpoints";
 import {
@@ -2466,7 +2467,7 @@ export function inclinacaoDaCurva(track: Track, i: number): number {
  * no instante da passagem — o pior momento para escondê-lo).
  */
 export function raioDoPersonagem(character: Character, sf: number): number {
-  return Math.round(Math.max(38, Math.min(86, 62 * sf)) * (character.size ?? 1));
+  return Math.round(Math.max(38, Math.min(86, 62 * sf)) * tamanhoDe(character));
 }
 
 /** Fração da altura da tela em que o fantasma anda à frente do personagem. */
@@ -2559,6 +2560,14 @@ function drawCharacter(
       ? (input.photos?.get(style.avatar) ?? null)
       : null;
   const centroY = avatarDoBoneco ? -0.78 * badge : 0;
+
+  /*
+   * O ícone animado deste personagem (se ele for um dos desenhados) e a
+   * cadência do desenho: a mesma que o selo usa para balançar, para o passo do
+   * bonequinho e o embalo do selo contarem a mesma história.
+   */
+  const icone = avatarDoBoneco ? null : iconeDe(character);
+  const gait = gaitOf(character);
 
   ctx.save();
   ctx.translate(at.x + lado * badge, at.y + sobe * badge);
@@ -2708,6 +2717,42 @@ function drawCharacter(
     ctx.strokeStyle = "rgba(255,255,255,0.75)";
     ctx.lineWidth = Math.max(1, 1.6 * sf);
     ctx.stroke();
+  } else if (icone) {
+    /*
+     * --- o ícone animado ---
+     *
+     * O desenho é vetorial e **se mexe**: as pernas andam, a roda gira, o barco
+     * balança. O emoji, parado, só podia ser sacudido pelo selo — e num selo
+     * grande isso se lê como um adesivo sendo carregado.
+     *
+     * A fase vem do mesmo relógio do `andar` (segundos de percurso), então o
+     * balanço do selo e o passo do desenho batem no mesmo compasso; e a força
+     * entra e sai nas pontas, como o balanço: ninguém começa a andar já no meio
+     * de um passo.
+     *
+     * O desenho olha para a direita. Indo para a esquerda, ele é **espelhado** —
+     * um caminhante de costas para o lado em que anda é o que denuncia o
+     * adesivo. Com `rotate` ligado, quem diz a direção é o giro, e aí não se
+     * espelha (o avião, de nariz para a esquerda, voaria de ré).
+     */
+    ctx.save();
+    if (rotate) ctx.rotate(((rumo + (character.baseAngle ?? 0)) * Math.PI) / 180);
+    const tlIcone = timelineOr(input.timeline, input.duration);
+    const segIcone = Math.max(0, Math.min(tlIcone.percurso, input.elapsed - tlIcone.voo));
+    const entra = Math.min(1, segIcone / 0.5);
+    const saiI = Math.min(1, (tlIcone.percurso - segIcone) / 0.5);
+    const ganho = Math.max(0, Math.min(entra, saiI));
+    desenharIcone(ctx, {
+      icone,
+      x: 0,
+      y: badge * 0.02,
+      lado: badge * 1.18,
+      accent: style.accent,
+      fase: gait.hz * segIcone,
+      ganho,
+      virado: rotate ? 1 : viradoPara(rumo),
+    });
+    ctx.restore();
   } else {
     /*
      * O emoji ocupa o selo de verdade: era desenhado com 0,6 do selo, e a figura

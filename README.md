@@ -1,6 +1,6 @@
 # 🧭 RotaCast
 
-Trace uma rota no mapa, escolha o personagem (são **144**) e os **103** tipos de parada e exporte tudo em vídeo — **100% no navegador**, sem servidor próprio e sem chave de API.
+Trace uma rota no mapa, escolha o personagem (são **153**, nove deles animados) e os **103** tipos de parada e exporte tudo em vídeo — **100% no navegador**, sem servidor próprio e sem chave de API.
 
 ---
 
@@ -418,15 +418,49 @@ some do vídeo.
 
 Personagem e parada são **dados**, não código: cada um é uma linha numa lista
 (`characters.ts` e `pois.ts`), e o painel, a busca, o vídeo e o link já sabem
-lidar com o que estiver lá. Foi assim que o catálogo cresceu de 61 para 144
+lidar com o que estiver lá. Foi assim que o catálogo cresceu de 61 para 153
 personagens e de 67 para 103 tipos de parada sem um `if` novo no desenho.
 
-**Personagens.** Seis grupos no seletor (Veículos, Pessoas, Ofícios, Bichos,
-Voadores, Esportes). Cada um traz o jeito de andar junto com a figura: roda para
+**Personagens.** Sete grupos no seletor (Veículos, Pessoas, Ofícios, Bichos,
+Voadores, Esportes e Animados — este último explicado logo abaixo). Cada um traz o jeito de andar junto com a figura: roda para
 o que tem rodas (carro, moto, trem, teleférico), passo para gente e bicho,
 flutuação para o que voa ou paira (avião, anjo, astronauta).
 Sem isso o carro quicaria pelo mapa como um sapo. O tamanho também é por
 personagem: a baleia é grande, o bebê é pequeno.
+
+**Os animados.** Nove personagens não são emoji: são **desenhados em vetor**
+(`icones.ts`) e se mexem de verdade — a perna passa na frente da outra, a roda
+gira, o rabo do cachorro balança, o barco aderna. O emoji é um desenho parado:
+quem "andava" era o selo em volta, e num selo grande isso se lê como um adesivo
+sendo carregado. O mesmo desenho serve aos três lugares, de um jeito só:
+
+| Onde | Como | Por quê |
+|---|---|---|
+| **No vídeo** | desenhado no canvas, quadro a quadro | 30 quadros por segundo sem carregar arquivo nenhum |
+| **Na prévia do mapa** | o mesmo desenho em **SVG animado** (`<animateTransform>`) | vetor nítido em qualquer tela, animado sem gastar CPU |
+| **No painel** | o mesmo SVG, pequeno, mexendo | é a diferença que ele oferece; parado não a mostraria |
+
+O desenho é uma lista de **partes** num quadrado de 0 a 100, e cada parte sabe o
+que faz no ciclo: `gira` (roda, pedivela), `passo` (perna, braço, pata — em torno
+do ombro ou do quadril), `sobe` (o corpo embala) ou `balanca` (casco, rabo). O
+ciclo é o mesmo relógio do selo, então o embalo do selo e o passo do desenho
+batem no compasso; e a força **entra e sai nas pontas**, como o balanço: ninguém
+começa a andar já no meio de um passo, e na cartela o desenho para.
+
+Três detalhes que fizeram a diferença entre "boneco" e "borrão":
+
+- **cada parte tem uma casca** na cor do selo. Sem ela, quatro membros claros do
+  mesmo tamanho viram uma mancha; com ela, a perna da frente cobre a de trás,
+  como num pictograma de placa;
+- **o desenho é espelhado** quando o rumo é para a esquerda. O emoji disfarçava
+  (a figura é quase simétrica); um caminhante de costas para onde anda, não;
+- **o tamanho é do desenho**: o cavalo é maior que o caminhante, e o personagem
+  pode sobrescrever.
+
+O ícone também decide **como ele se move** (roda para o ciclista, passo para o
+cavalo, flutuação para o barco) — não herda isso do personagem anterior. Quem
+escolheu "Cavalo animado" no lugar de um carro não fica com um cavalo rolando
+pelo mapa.
 
 **Os que o Unicode não tem.** Não existe emoji de peregrino nem de padre. Em vez
 de inventar um desenho novo (e um segundo jeito de desenhar personagem), o
@@ -1523,7 +1557,7 @@ ou cortados.
 
 ```bash
 npm run typecheck  # tsc --noEmit
-npm test           # Vitest (1065 casos)
+npm test           # Vitest (1098 casos)
 npm run check:dist # o build saiu autocontido e sem /src/?
 ```
 

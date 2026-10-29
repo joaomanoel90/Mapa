@@ -7,6 +7,7 @@ import SoundPanel from "./SoundPanel";
 import StopEditor from "./StopEditor";
 import type { Endpoints } from "../lib/endpoints";
 import { CharacterPicker, AccentPicker } from "./CharacterPicker";
+import { svgDoIcone } from "../lib/icones";
 import type { Place } from "../lib/geocode";
 import type { Poi } from "../lib/pois";
 import { Button, Label, Section, Segmented, Slider, TextInput, Toggle } from "./ui";
@@ -22,7 +23,7 @@ import { PROFILES, PRESETS, type Profile, type Preset } from "../lib/routing";
 import { BASEMAPS, BASEMAP_ORDER, relevoDoMapa } from "../lib/tiles";
 import { TILE_BUDGET } from "../lib/map-budget";
 import { cn } from "../utils/cn";
-import { findCharacter } from "../lib/characters";
+import { findCharacter, iconeDe } from "../lib/characters";
 import { BONECO_POSES, type Boneco } from "../lib/boneco";
 import { formatDistance, formatSpeed, type LatLng, type Track } from "../lib/geo";
 import type { VideoFormat } from "../lib/recorder";
@@ -587,8 +588,28 @@ function Sidebar(props: Props) {
           </div>
           <p className="rounded-xl border border-white/10 bg-black/20 p-2.5 text-[11px] leading-snug text-zinc-400">
             Personagem atual: <span className="font-semibold text-white">{character.name}</span>{" "}
-            {character.emoji}
-            {character.acessorio ?? ""} · {character.group}
+            {/*
+              O **animado** mostra o próprio desenho, mexendo: repetir o emoji
+              dele (🚶) aqui faria parecer que o vetor não foi escolhido.
+            */}
+            {iconeDe(character) ? (
+              <span
+                className="inline-block translate-y-0.5"
+                dangerouslySetInnerHTML={{
+                  __html: svgDoIcone(iconeDe(character)!, {
+                    accent: s.accent,
+                    lado: 15,
+                    hz: iconeDe(character)!.gaitHz,
+                  }),
+                }}
+              />
+            ) : (
+              <>
+                {character.emoji}
+                {character.acessorio ?? ""}
+              </>
+            )}{" "}
+            · {character.group}
           </p>
         </div>
       </Section>

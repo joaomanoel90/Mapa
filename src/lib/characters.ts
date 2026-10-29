@@ -1,3 +1,5 @@
+import { findIcone, type Icone } from "./icones";
+
 /** Como o personagem anda: a pé, rolando ou flutuando. */
 export type Gait = "passo" | "roda" | "flutua";
 
@@ -5,7 +7,15 @@ export type Character = {
   id: string;
   name: string;
   emoji: string;
-  group: "Veículos" | "Pessoas" | "Ofícios" | "Bichos" | "Voadores" | "Esportes";
+  group:
+    | "Veículos"
+    | "Pessoas"
+    | "Ofícios"
+    | "Bichos"
+    | "Voadores"
+    | "Esportes"
+    /** os desenhados em vetor, que se mexem de verdade (ver `icones.ts`) */
+    | "Animados";
   /** gira o emoji conforme a direção da rota */
   rotate?: boolean;
   /** compensação (graus) do desenho do emoji (0 = aponta para cima) */
@@ -34,9 +44,18 @@ export type Character = {
    * prévia e no vídeo.
    */
   acessorio?: string;
+  /**
+   * O **ícone animado** deste personagem (`ICONES`, em `icones.ts`).
+   *
+   * Emoji é desenho parado: quem se mexe é o selo em volta. Um personagem com
+   * `icone` é desenhado em vetor — as pernas andam, as rodas giram — tanto no
+   * vídeo quanto na prévia. O emoji continua no campo `emoji` como reserva (e
+   * para quem não desenhar vetor).
+   */
+  icone?: string;
 };
 
-export const CHARACTERS: Character[] = [
+const EMOJIS: Character[] = [
   { id: "car", name: "Carro", emoji: "🚗", group: "Veículos", size: 1 },
   { id: "suv", name: "SUV", emoji: "🚙", group: "Veículos", size: 1 },
   { id: "moto", name: "Moto", emoji: "🏍️", group: "Veículos", size: 1 },
@@ -246,11 +265,44 @@ const HZ_PADRAO: Record<Gait, number> = { passo: 3, roda: 4.5, flutua: 0.8 };
  * e o resto anda a pé. Assim os personagens novos já nascem andando.
  */
 export function gaitOf(c: Character): { gait: Gait; hz: number } {
+  /*
+   * O ícone animado sabe como ele mesmo se move — e isso não é negociável pelo
+   * personagem: um cavalo desenhado continua galopando mesmo que a escolha
+   * anterior fosse um carro (que rola).
+   */
+  const icone = iconeDe(c);
+  if (icone) return { gait: icone.gait, hz: icone.gaitHz };
   if (c.gait) return { gait: c.gait, hz: c.gaitHz ?? HZ_PADRAO[c.gait] };
   if (c.group === "Voadores") return { gait: "flutua", hz: 0.55 };
   if (c.group === "Veículos") return { gait: "roda", hz: HZ_PADRAO.roda };
   return { gait: "passo", hz: 2.4 };
 }
+
+/*
+ * --- os animados ---
+ *
+ * Não são emojis: são desenhos vetoriais (`icones.ts`) que se mexem de verdade —
+ * a perna passa na frente da outra, a roda gira, o barco balança. O emoji fica
+ * no campo `emoji` como reserva, e é ele que aparece no 🎭 do painel.
+ *
+ * Ficam num grupo próprio para não se misturarem com a lista de emoji: quem
+ * procura "cachorro" acha os dois, um de cada tipo, e a diferença está dita no
+ * nome.
+ */
+export const ANIMADOS: Character[] = [
+  { id: "anim-caminhante", name: "Caminhante animado", emoji: "🚶", group: "Animados", icone: "caminhante" },
+  { id: "anim-peregrino", name: "Peregrino animado", emoji: "🎒", group: "Animados", icone: "peregrino" },
+  { id: "anim-corredor", name: "Corredor animado", emoji: "🏃", group: "Animados", icone: "corredor" },
+  { id: "anim-ciclista", name: "Ciclista animado", emoji: "🚴", group: "Animados", icone: "ciclista" },
+  { id: "anim-carro", name: "Carro animado", emoji: "🚗", group: "Animados", icone: "carro", size: 1.05 },
+  { id: "anim-cavalo", name: "Cavalo animado", emoji: "🐎", group: "Animados", icone: "cavalo", size: 1.1 },
+  { id: "anim-cachorro", name: "Cachorro animado", emoji: "🐕", group: "Animados", icone: "cachorro", size: 0.95 },
+  { id: "anim-barco", name: "Barco animado", emoji: "⛵", group: "Animados", icone: "barco" },
+  { id: "anim-aviao", name: "Avião animado", emoji: "✈️", group: "Animados", icone: "aviao", rotate: true, baseAngle: -90 },
+];
+
+/** A lista que o app usa: os emojis e, no fim, os desenhados em vetor. */
+export const CHARACTERS: Character[] = [...EMOJIS, ...ANIMADOS];
 
 export const ACCENTS = [
   { id: "lime", name: "Limão", value: "#a3e635" },
@@ -265,4 +317,19 @@ export const ACCENTS = [
 
 export function findCharacter(id: string): Character {
   return CHARACTERS.find((c) => c.id === id) ?? CHARACTERS[0];
+}
+
+/** O ícone animado do personagem, ou `null` (o caso comum: emoji). */
+export function iconeDe(c: Character): Icone | null {
+  return findIcone(c.icone);
+}
+
+/**
+ * O tamanho do selo deste personagem.
+ *
+ * O `size` do personagem ganha do `size` do ícone: quem escolheu "Cavalo
+ * animado" e depois mexeu no tamanho quer o tamanho dele, não o do desenho.
+ */
+export function tamanhoDe(c: Character): number {
+  return c.size ?? iconeDe(c)?.size ?? 1;
 }

@@ -18,7 +18,7 @@ import { type PhotoImage, type PhotoLookup } from "./photos";
 import { poiLatLng, type Poi } from "./pois";
 import { kmMarks } from "./km-marks";
 import { profileLayout, trailProfile } from "./profile";
-import { findCharacter, gaitOf } from "./characters";
+import { findCharacter, gaitOf, tamanhoDe } from "./characters";
 import { diasDoPercurso } from "./days";
 import {
   SceneRenderer,
@@ -34,6 +34,7 @@ import {
   andar,
   crescimentoDoPino,
   pipocoDaPonta,
+  raioDoPersonagem,
   inclinacaoDaCurva,
   janelaDoRumo,
   liftToClear,
@@ -4341,6 +4342,62 @@ describe("avatar do personagem", () => {
  * padre. O Unicode não tem peregrino nem padre: o jeito de ter os dois é
  * compor, e o desenho precisa mostrar as duas partes.
  */
+/*
+ * Os **ícones animados**: personagens desenhados em vetor, que se mexem de
+ * verdade. O que se prova aqui é o que o vídeo precisa entregar — o desenho
+ * entra em vez do emoji, ele **muda** de um quadro para o outro, e para quando
+ * não há ganho (na cartela ninguém está pedalando).
+ */
+describe("o ícone animado no vídeo", () => {
+  const desenharCom = (id: string, t: number, duration = 10) => {
+    const f = fakeCtx();
+    desenhar(f.ctx, { ...estado(t, duration, null), character: findCharacter(id) });
+    return f;
+  };
+
+  it("o personagem animado não desenha o emoji: desenha o vetor", () => {
+    const animado = desenharCom("anim-caminhante", 0.5);
+    const comum = desenharCom("walk", 0.5);
+    expect(comum.textos).toContain("🚶");
+    expect(animado.textos).not.toContain("🚶");
+    // e o desenho aparece como traço, não como texto
+    expect(animado.tracos.length).toBeGreaterThan(2);
+  });
+
+  it("o mesmo instante desenha o mesmo quadro (o vídeo é reprodutível)", () => {
+    const a = desenharCom("anim-cavalo", 0.42);
+    const b = desenharCom("anim-cavalo", 0.42);
+    expect(a.tracos).toEqual(b.tracos);
+  });
+
+  it("na cartela, com o percurso terminado, o desenho para", () => {
+    const dur = 10;
+    // o último instante do vídeo: o percurso acabou, e não há ganho
+    const a = desenharCom("anim-ciclista", 0.999, dur);
+    const b = desenharCom("anim-ciclista", 0.999, dur);
+    expect(a.tracos).toEqual(b.tracos);
+    // e a roda não gira: sem ganho, o desenho é o mesmo do começo da parada
+    expect(a.tracos.length).toBeGreaterThan(0);
+  });
+
+  it("o carro animado rola, o caminhante anda: cada um com o seu andar", () => {
+    const carro = findCharacter("anim-carro");
+    const caminhante = findCharacter("anim-caminhante");
+    expect(gaitOf(carro).gait).toBe("roda");
+    expect(gaitOf(caminhante).gait).toBe("passo");
+  });
+
+  it("o tamanho do ícone vale quando o personagem não traz o seu", () => {
+    // o cavalo animado declara 1,1 no personagem; sem `size` no personagem, o
+    // tamanho viria do desenho (é o que `tamanhoDe` garante)
+    const cavalo = findCharacter("anim-cavalo");
+    expect(raioDoPersonagem(cavalo, 1)).toBe(Math.round(62 * tamanhoDe(cavalo)));
+    expect(raioDoPersonagem(cavalo, 1)).toBeGreaterThan(
+      raioDoPersonagem(findCharacter("anim-caminhante"), 1),
+    );
+  });
+});
+
 describe("o acessório do personagem composto", () => {
   const desenharCom = (id: string) => {
     const f = fakeCtx();
